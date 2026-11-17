@@ -4,6 +4,16 @@ import { T, SHOP_ITEMS } from '../public/js/arcade/miner.js';
 import { solve as sortSolve } from '../public/js/arcade/sort.js';
 
 export const BOTS = {
+  // Taps crabs after a human-ish reaction delay; sometimes misses or hits a jelly.
+  catch(sim, rng) {
+    if (!sim.started) { sim.start(); return; }
+    for (let i = 0; i < sim.holes.length; i++) {
+      const h = sim.holes[i];
+      if (h && sim.tick - h.born > 14 + rng.int(20) && (h.kind !== 'jelly' || rng.next() < 0.05)) { sim.tap(i); break; }
+    }
+    if (rng.next() < 0.004) sim.tap(rng.int(12));
+    sim.step();
+  },
   // Follows the ball with an error that grows over time, so it eventually misses.
   breaker(sim, rng) {
     if (sim.attached) { if (sim.tick % 30 === 0) sim.launch(); }

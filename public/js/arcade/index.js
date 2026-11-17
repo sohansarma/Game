@@ -14,8 +14,9 @@ import merge from './merge.js';
 import stack from './stack.js';
 import sort from './sort.js';
 import breaker from './breaker.js';
+import crabCatch from './catch.js';
 
-export const ARCADE = [miner, puffer, serpent, merge, stack, sort, breaker];
+export const ARCADE = [miner, puffer, serpent, merge, stack, sort, breaker, crabCatch];
 
 export const ARCADE_BY_ID = Object.fromEntries(ARCADE.map((g) => [g.id, g]));
 

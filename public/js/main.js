@@ -635,6 +635,7 @@ const VIEWS = {
   stack: () => import('./arcade/stack-view.js'),
   sort: () => import('./arcade/sort-view.js'),
   breaker: () => import('./arcade/breaker-view.js'),
+  catch: () => import('./arcade/catch-view.js'),
 };
 
 function arcadeStats(id) {
