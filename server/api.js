@@ -245,6 +245,11 @@ export function createApi(store, { now = () => new Date(), origin = process.env.
     if (typeof body.score === 'number' && body.score !== score) throw fail(422, 'score mismatch');
     // Daily Dive: only the first finished attempt of the day is ranked.
     const res = record(boardId(board, key), body.playerId, score, { keepFirst: board === 'daily' });
+    // endless arcade runs also count towards this week's tournament
+    if (BOARDS[board].arcade && !BOARDS[board].daily) {
+      const wk = record(boardId(board + 'Week', weekKey(now())), body.playerId, score);
+      res.weekRank = wk.rank;
+    }
     return { ok: true, ...res, verified: score };
   }
 

@@ -4,7 +4,7 @@ import { Game, replay, SPECIAL } from './engine.js';
 import { BlockGame, replayBlocks } from './blocks.js';
 import { getLevel, LEVEL_COUNT, MAX_LEVEL, worldOf } from './levels.js';
 import { dailyConfig, deepConfig, dayKey, weekKey, blocksSeed, ENGINE_VERSION, BOARDS } from './modes.js';
-import { ARCADE, ARCADE_BY_ID, arcadeSeed } from './arcade/index.js';
+import { ARCADE, ARCADE_BY_ID, arcadeSeed, tierOf, challengeHash, parseChallenge } from './arcade/index.js';
 import { hashString } from './rng.js';
 import { ChessVersus, LudoVersus, newCode, validCode, rebuild, describe } from './versus.js';
 import { load, update, save, totalStars, highestUnlocked, exportSave, importSave, resetSave, randomNickname, ADJECTIVES, ANIMALS } from './storage.js';
@@ -40,10 +40,12 @@ async function boot() {
   window.addEventListener('keydown', unlockAudio, { once: true });
 
   if ('serviceWorker' in navigator && location.protocol !== 'file:') {
+    // only reload when an UPDATE takes over – not when the very first install claims the page
+    const hadController = !!navigator.serviceWorker.controller;
     navigator.serviceWorker.register('sw.js').catch(() => {});
     let refreshing = false;
     navigator.serviceWorker.addEventListener('controllerchange', () => {
-      if (refreshing) return;
+      if (refreshing || !hadController) return;
       if (view) { reloadPending = true; return; }
       refreshing = true;
       location.reload();
@@ -58,8 +60,10 @@ async function boot() {
   api.checkServer().then((ok) => { if (ok) api.flushPending().catch(() => {}); });
 
   showHub();
+  const ch = parseChallenge(location.hash);
   if (!s.onboarded) await onboarding();
-  else await maybeDailyReward();
+  else if (!ch) await maybeDailyReward();
+  if (ch) acceptChallenge(ch);
 }
 
 function applySettings() {
@@ -654,7 +658,8 @@ function hubGames() {
     { id: 'reef', title: 'Reef Blocks', icon: '🧱', tagline: 'Drag blocks, clear lines, chain combos', best: fmt(s.blocks.best), played: s.blocksDaily[dayKey()] !== undefined, dailyBoard: 'blocksDaily', open: blocksMenu },
     ...ARCADE.map((g) => {
       const st = arcadeStats(g.id);
-      return { id: g.id, title: g.title, icon: g.icon, tagline: g.tagline, best: fmt(st.best), played: st.daily[dayKey()] !== undefined, dailyBoard: g.id + 'Daily', open: () => arcadeMenu(g.id) };
+      const t = tierOf(g, st.best).tier;
+      return { id: g.id, title: g.title, icon: g.icon, tagline: g.tagline, best: `${fmt(st.best)}${t ? ` · ${t.icon}` : ''}`, played: st.daily[dayKey()] !== undefined, dailyBoard: g.id + 'Daily', open: () => arcadeMenu(g.id) };
     }),
   ];
 }
@@ -730,7 +735,7 @@ function showHub() {
     </div>
     <div class="scroll">
       <div class="home-hero"><div class="logo">Tide<span>pop</span> <small class="arcade-word">Arcade</small></div></div>
-      <div class="hub-timer" role="timer">⏳ Today's challenges end in <b id="u-timer">${hms(msToReset())}</b></div>
+      <div class="hub-timer" role="timer">⏳ Today's challenges end in <b id="u-timer">${hms(msToReset())}</b><br><span class="small">🗓️ Weekly tournament ends in <b>${weekLeft()}</b> · top 10 win shells</span></div>
       <button class="hot-card" id="u-hot"><span class="hot-flame">🔥</span><span class="grow"><small>HOT TODAY · 2× SHELLS</small><b>${hot.icon} ${esc(hot.title)}</b></span><span class="btn sm">Play</span></button>
       <div class="missions">
         <div class="row"><b class="grow">🎯 Daily missions</b><span class="small muted">reward: 🐚 150 + 🎁</span></div>
@@ -767,6 +772,67 @@ function showHub() {
     if (left < 3600000) t.parentElement.classList.add('urgent');
   }, 1000);
   checkRankAlerts(games);
+  claimWeeklyPrizes();
+}
+
+function weekLeft() {
+  const now = new Date();
+  const day = now.getUTCDay() || 7; // Monday = 1
+  const end = Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate() + (8 - day));
+  const ms = end - now.getTime();
+  const d = Math.floor(ms / 86400000), h = Math.floor((ms % 86400000) / 3600000);
+  return d ? `${d}d ${h}h` : `${h}h ${Math.floor((ms % 3600000) / 60000)}m`;
+}
+
+const WEEK_PRIZES = [300, 200, 150, 75, 75, 75, 75, 75, 75, 75];
+let weeklyChecked = false;
+/** When a new week starts, award shells for last week's top-10 finishes. */
+async function claimWeeklyPrizes() {
+  if (weeklyChecked || !load().settings.leaderboard) return;
+  weeklyChecked = true;
+  const lastWeek = weekKey(new Date(Date.now() - 7 * 86400000));
+  const s = load();
+  if (s.weeklyClaimed === lastWeek) return;
+  const played = ARCADE.filter((g) => arcadeStats(g.id).week?.[lastWeek] !== undefined);
+  if (!played.length) { update((d) => { d.weeklyClaimed = lastWeek; }); return; }
+  const wins = [];
+  try {
+    for (const g of played) {
+      const data = await api.top(g.id + 'Week', lastWeek);
+      if (data.me && data.me.rank <= WEEK_PRIZES.length) wins.push({ g, rank: data.me.rank, prize: WEEK_PRIZES[data.me.rank - 1] });
+    }
+  } catch {
+    weeklyChecked = false; // offline – try again later
+    return;
+  }
+  const total = wins.reduce((a, w) => a + w.prize, 0);
+  update((d) => { d.weeklyClaimed = lastWeek; d.shells += total; });
+  if (wins.length) {
+    sfx.win();
+    await modal(`<h2>🗓️ Weekly tournament results</h2><p class="muted small">Week ${esc(lastWeek)}</p>
+      <div class="list">${wins.map((w) => `<div class="item"><span class="rank">#${w.rank}</span><span class="name">${w.g.icon} ${esc(w.g.title)}</span><span class="val">+${w.prize} 🐚</span></div>`).join('')}</div>
+      <p>A new tournament has started – defend your spot!</p>`, { buttons: [{ label: `Collect ${total} 🐚`, value: true, cls: 'green' }] });
+    if (currentScreen() === 'hub') showHub();
+  }
+}
+
+function nameParts(name) {
+  const [a, n, num] = String(name).split(' ');
+  return [Math.max(0, ADJECTIVES.indexOf(a)), Math.max(0, ANIMALS.indexOf(n)), Number(num) >= 10 && Number(num) <= 99 ? Number(num) : 10];
+}
+const nameFromParts = ([a, n, num]) => `${ADJECTIVES[a] || 'Mystery'} ${ANIMALS[n] || 'Fish'} ${num}`;
+
+async function acceptChallenge(ch) {
+  try { history.replaceState(null, '', location.pathname + location.search); } catch { /* sandboxed */ }
+  const g = ARCADE_BY_ID[ch.game];
+  const who = nameFromParts(ch.name);
+  const r = await modal(`<h2>⚔️ Challenge!</h2>
+    <p><b>${esc(who)}</b> challenges you to beat</p>
+    <div class="big-score">${fmt(ch.score)}</div>
+    <p>in ${g.icon} <b>${esc(g.title)}</b> – on the exact same run they played.</p>`, {
+    buttons: [{ label: '⚔️ Accept', value: 'go', cls: 'green' }, { label: 'Not now', value: null, cls: 'ghost' }], row: true,
+  });
+  if (r === 'go') playArcade(ch.game, { daily: false, seed: ch.seed, challenge: { score: ch.score, who } });
 }
 
 let rankCheckAt = 0;
@@ -808,6 +874,7 @@ async function arcadeMenu(id) {
     <p class="muted">${esc(g.tagline)}</p>
     ${hot ? '<div class="reward">🔥 Hot today: 2× shells</div>' : ''}
     <p class="small muted">Your best: <b>${fmt(st.best)}</b> · Today's daily: <b>${today !== undefined ? fmt(today) : 'not played'}</b></p>
+    ${(() => { const t = tierOf(g, st.best); return `<p class="small">${t.tier ? `Rank: <b>${t.tier.icon} ${t.tier.name}</b>` : 'Unranked'}${t.next ? ` · ${t.next.icon} ${t.next.name} at <b>${fmt(t.nextAt)}</b>` : ' · top tier!'}</p>`; })()}
     <div class="tip">📅 The <b>daily challenge</b> is the same for every player today. Best score of the day wins – it ends in <b>${hms(msToReset())}</b>.</div>`, {
     buttons: [
       { label: g.board ? '▶ Play the ladder' : '▶ Play', value: 'play', cls: 'green' },
@@ -1074,15 +1141,16 @@ async function endVersus(run) {
   else showHub();
 }
 
-async function playArcade(id, { daily }) {
+async function playArcade(id, { daily, seed: forcedSeed, challenge } = {}) {
   leaveGame();
   try { history.pushState({ g: 1 }, ''); } catch { /* sandboxed */ }
   const g = ARCADE_BY_ID[id];
   const mod = await VIEWS[id]();
   const key = dayKey();
-  const runSeed = randSeed();
-  const sim = g.create(arcadeSeed(id, daily, key, runSeed));
-  const run = { kind: 'arcade', id, daily, key, seed: runSeed, sim };
+  const runSeed = forcedSeed !== undefined ? forcedSeed : randSeed();
+  const playSeed = forcedSeed !== undefined ? forcedSeed : arcadeSeed(id, daily, key, runSeed);
+  const sim = g.create(playSeed);
+  const run = { kind: 'arcade', id, daily, key, seed: runSeed, playSeed, sim, challenge };
   currentRun = run;
   setBackground(g.color);
   const s = load();
@@ -1093,7 +1161,7 @@ async function playArcade(id, { daily }) {
     </div>
     <div class="board-wrap"><canvas id="ar-canvas" aria-label="${esc(g.title)} game area"></canvas></div>
     <div id="ar-controls" class="arcade-controls"></div>
-    <div class="mode-label">${daily ? `📅 Daily challenge · ends in ${hms(msToReset())}` : `${g.icon} ${esc(g.title)} · best ${fmt(arcadeStats(id).best)}`}</div>`);
+    <div class="mode-label">${challenge ? `⚔️ Beat <b>${fmt(challenge.score)}</b> by ${esc(challenge.who)}` : daily ? `📅 Daily challenge · ends in ${hms(msToReset())}` : `${g.icon} ${esc(g.title)} · best ${fmt(arcadeStats(id).best)}`}</div>`);
   const refresh = () => {
     const box = $('#ar-hud', el);
     if (box) box.innerHTML = mod.hud(sim).map((h) => `<div class="hstat ${h.warn ? 'warn' : ''} ${h.big ? 'big' : ''}"><span class="lbl">${esc(h.label)}</span><b>${h.value}</b></div>`).join('');
@@ -1138,6 +1206,11 @@ async function endArcade(run) {
     a.games++;
     a.best = Math.max(a.best, score);
     if (run.daily) a.daily = { ...a.daily, [run.key]: Math.max(a.daily[run.key] || 0, score) };
+    else {
+      const wk = weekKey();
+      a.week = { ...(a.week || {}), [wk]: Math.max(a.week?.[wk] || 0, score) };
+      for (const k of Object.keys(a.week)) if (k < weekKey(new Date(Date.now() - 35 * 86400000))) delete a.week[k];
+    }
     // keep only the last 30 days of daily scores
     for (const k of Object.keys(a.daily)) if (k < dayKey(new Date(Date.now() - 30 * 86400000))) delete a.daily[k];
     d.arcade[run.id] = a;
@@ -1150,12 +1223,16 @@ async function endArcade(run) {
     <div class="big-score">${fmt(score)}</div>
     ${isBest ? '<p>🎉 New personal best!</p>' : `<p class="muted">Best: ${fmt(prev.best)}</p>`}
     ${run.daily ? `<p class="small muted">Daily challenge · ${score > prevBest && prevBest ? 'improved your best today!' : prevBest ? `today's best ${fmt(Math.max(prevBest, score))}` : 'first try today'}</p>` : ''}
+    ${run.challenge && score === run.challenge.score ? `<div class="tip">⚔️ <b>It's a tie</b> with ${esc(run.challenge.who)} at ${fmt(score)}! Rematch to settle it.</div>` : ''}
+    ${run.challenge && score !== run.challenge.score ? (score > run.challenge.score ? `<div class="tip">⚔️ <b>You beat ${esc(run.challenge.who)}!</b> ${fmt(score)} vs ${fmt(run.challenge.score)} – send it back to them!</div>` : `<div class="tip">⚔️ ${esc(run.challenge.who)} wins this one: ${fmt(run.challenge.score)} vs ${fmt(score)}. Rematch?</div>`) : ''}
+    ${(() => { const before = tierOf(g, prev.best).tier, after = tierOf(g, Math.max(prev.best, score)).tier; return after && after !== before ? `<div class="reward">🎖️ Ranked up: ${after.icon} ${after.name}!</div>` : ''; })()}
     <div class="reward">+${shells} 🐚${hot ? ' (🔥 2×)' : ''}</div>
     <p class="muted small" id="r-rank">Checking leaderboard…</p>`, {
     dismissable: false,
     buttons: [
-      { label: '↻ Play again', value: 'again', cls: 'green' },
-      ...(run.daily ? [{ label: '📤 Share', value: 'share', cls: 'blue' }] : []),
+      { label: run.challenge && score <= run.challenge.score ? '⚔️ Rematch (same run)' : '↻ Play again', value: run.challenge && score <= run.challenge.score ? 'rematch' : 'again', cls: 'green' },
+      { label: '⚔️ Challenge a friend', value: 'challenge', cls: 'blue' },
+      ...(run.daily ? [{ label: '📤 Share', value: 'share', cls: 'ghost' }] : []),
       { label: '🏆 Leaderboard', value: 'lb', cls: 'ghost' },
       { label: '🕹️ Arcade', value: 'hub', cls: 'ghost' },
     ],
@@ -1168,11 +1245,17 @@ async function endArcade(run) {
     if (!el) return;
     if (res?.queued) el.textContent = "Offline – we'll submit your score later.";
     else if (res?.skipped) el.textContent = 'Leaderboard is turned off in settings.';
-    else if (res?.rank) el.innerHTML = `${run.daily ? "Today's" : 'All-time'} rank: <b>#${res.rank}</b>${res.rank > 1 ? ' – one more try?' : ' 👑'}`;
+    else if (res?.rank) el.innerHTML = `${run.daily ? "Today's" : 'All-time'} rank: <b>#${res.rank}</b>${res.weekRank ? ` · this week: <b>#${res.weekRank}</b>` : ''}${res.rank > 1 ? ' – one more try?' : ' 👑'}`;
     else el.textContent = res?.error || '';
   });
   const r = await p;
   if (r === 'again') playArcade(run.id, { daily: run.daily });
+  else if (r === 'rematch') playArcade(run.id, { daily: false, seed: run.playSeed, challenge: run.challenge });
+  else if (r === 'challenge') {
+    const link = `${location.origin}${location.pathname}#${challengeHash(run.id, run.playSeed, score, nameParts(load().name))}`;
+    await shareText(`${g.icon} I scored ${fmt(score)} in ${g.title} on Tidepop. Same run, can you beat me? ${link}`);
+    showHub();
+  }
   else if (r === 'share') { await shareText(`${g.icon} Tidepop ${g.title} daily ${run.key}\nScore: ${fmt(score)}${rank ? ` · Rank #${rank}` : ''}\nBeat me: ${location.origin}${location.pathname}`); showHub(); }
   else if (r === 'lb') showLeaderboard(board);
   else showHub();
@@ -1308,7 +1391,7 @@ async function endBlocks(run) {
 const LB_GAMES = () => [
   { id: 'tidepop', label: '🐚 Tidepop', boards: [['daily', '📅 Daily Dive'], ['deep', '🐋 Deep Dive'], ['stars', '⭐ Adventure']] },
   { id: 'reef', label: '🧱 Reef Blocks', boards: [['blocksDaily', '📅 Today'], ['blocks', '🏆 All-time']] },
-  ...ARCADE.map((g) => ({ id: g.id, label: `${g.icon} ${g.title}`, boards: [[g.id + 'Daily', '📅 Today'], [g.id, '🏆 All-time']] })),
+  ...ARCADE.map((g) => ({ id: g.id, label: `${g.icon} ${g.title}`, boards: [[g.id + 'Daily', '📅 Today'], [g.id + 'Week', '🗓️ This week'], [g.id, '🏆 All-time']] })),
 ];
 const boardKey = (board) => (BOARDS[board].period === 'day' ? dayKey() : BOARDS[board].period === 'week' ? weekKey() : 'all');
 
@@ -1317,7 +1400,7 @@ function localBest(board) {
   const def = BOARDS[board];
   if (def?.arcade) {
     const st = arcadeStats(def.arcade);
-    return def.daily ? st.daily[dayKey()] : st.best || undefined;
+    return def.daily ? st.daily[dayKey()] : def.weekly ? st.week?.[weekKey()] : st.best || undefined;
   }
   switch (board) {
     case 'daily': return s.dailyDive[dayKey()]?.best;

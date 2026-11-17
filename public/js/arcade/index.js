@@ -28,12 +28,13 @@ export function arcadeBoards() {
   for (const g of ARCADE) {
     out[g.id] = { title: g.title, game: g.id, period: 'all', arcade: g.id, daily: false };
     out[g.id + 'Daily'] = { title: `${g.title} Daily`, game: g.id, period: 'day', arcade: g.id, daily: true };
+    out[g.id + 'Week'] = { title: `${g.title} Weekly`, game: g.id, period: 'week', arcade: g.id, weekly: true };
   }
   return out;
 }
 
 export function gameForBoard(board) {
-  return ARCADE_BY_ID[board.endsWith('Daily') ? board.slice(0, -5) : board] || null;
+  return ARCADE_BY_ID[board.replace(/(Daily|Week)$/, '')] || null;
 }
 
 export function arcadeSeed(gameId, daily, key, runSeed) {
@@ -56,4 +57,33 @@ export function verifyArcade(board, key, seed, log) {
   if (!r.ok) return { ok: false, reason: r.reason || 'invalid run' };
   if (!r.sim.over) return { ok: false, reason: 'game not finished' };
   return { ok: true, score: r.sim.score };
+}
+
+// Per-game rank tiers from your best score, relative to the game's milestone.
+export const TIERS = [
+  { name: 'Bronze', icon: '🥉', at: 0.1 },
+  { name: 'Silver', icon: '🥈', at: 0.3 },
+  { name: 'Gold', icon: '🥇', at: 0.6 },
+  { name: 'Platinum', icon: '💠', at: 1 },
+  { name: 'Diamond', icon: '💎', at: 2 },
+  { name: 'Legend', icon: '👑', at: 4 },
+];
+export function tierOf(game, best) {
+  let tier = null, next = TIERS[0];
+  for (const t of TIERS) {
+    if (best >= Math.round(game.milestone * t.at)) { tier = t; next = TIERS[TIERS.indexOf(t) + 1] || null; }
+  }
+  return { tier, next, nextAt: next ? Math.round(game.milestone * next.at) : null };
+}
+
+// Challenge links: #ch-<game>-<seed36>-<score36>-<adjIdx>-<animalIdx>-<num>
+export function challengeHash(gameId, seed, score, nameParts) {
+  return `ch-${gameId}-${(seed >>> 0).toString(36)}-${Math.max(0, score).toString(36)}-${nameParts.join('-')}`;
+}
+export function parseChallenge(hash) {
+  const m = /^#?ch-([a-z]+)-([0-9a-z]{1,7})-([0-9a-z]{1,9})-(\d{1,2})-(\d{1,2})-(\d{2})$/.exec(hash || '');
+  if (!m || !ARCADE_BY_ID[m[1]]) return null;
+  const seed = parseInt(m[2], 36), score = parseInt(m[3], 36);
+  if (!(seed >= 0 && seed <= 0xffffffff) || !(score >= 0)) return null;
+  return { game: m[1], seed, score, name: [Number(m[4]), Number(m[5]), Number(m[6])] };
 }

@@ -7,7 +7,7 @@ import { replay } from './engine.js';
 import { replayBlocks } from './blocks.js';
 import { getLevel } from './levels.js';
 import { verifyArcade } from './arcade/index.js';
-import { BOARDS, acceptableKeys, dailyConfig, deepConfig, blocksSeed, dayKey } from './modes.js';
+import { BOARDS, acceptableKeys, dailyConfig, deepConfig, blocksSeed, dayKey, weekKey } from './modes.js';
 
 const BASE = (typeof window !== 'undefined' && window.TIDEPOP_API !== undefined ? window.TIDEPOP_API : '') + '/api';
 let online = null; // null = unknown
@@ -96,6 +96,9 @@ async function sharedSubmit(sh, entry) {
   if (!prev || (!keepFirst && score > prev.s)) {
     doc.scores[id] = { s: score, t: now, ...(entry.board === 'daily' || entry.board === 'deep' ? { log: entry.log } : {}) };
   }
+  let weekRank;
+  const weekId = BOARDS[entry.board]?.arcade && !BOARDS[entry.board].daily ? `${entry.board}Week:${weekKey()}` : null;
+  if (weekId && (!doc.scores[weekId] || score > doc.scores[weekId].s)) doc.scores[weekId] = { s: score, t: now };
   // drop boards older than 30 days to keep the document small
   const cutoff = dayKey(new Date(now - 30 * 86400000));
   for (const k of Object.keys(doc.scores)) {
@@ -107,7 +110,8 @@ async function sharedSubmit(sh, entry) {
   doc.updatedAt = now;
   await ref.set(doc);
   const board = await sharedTop(sh, entry.board, entry.board === 'stars' ? 'all' : entry.key);
-  return { ok: true, rank: board.me?.rank, best: doc.scores[id].s, verified: score };
+  if (weekId) weekRank = (await sharedTop(sh, entry.board + 'Week', weekKey())).me?.rank;
+  return { ok: true, rank: board.me?.rank, weekRank, best: doc.scores[id].s, verified: score };
 }
 
 async function sharedTop(sh, board, key) {
