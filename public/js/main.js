@@ -885,6 +885,7 @@ async function arcadeMenu(id) {
     <div class="tip">📅 The <b>daily challenge</b> is the same for every player today. Best score of the day wins – it ends in <b>${hms(msToReset())}</b>.</div>`, {
     buttons: [
       { label: g.board ? '▶ Play the ladder' : '▶ Play', value: 'play', cls: 'green' },
+      ...(id === 'ludo' ? [{ label: '🤖 Quick game vs computer', value: 'cpu', cls: 'blue' }] : []),
       ...(g.board ? [{ label: '👥 Play a friend', value: 'friend', cls: 'blue' }] : []),
       { label: `📅 Daily challenge${today === undefined ? ' (new!)' : ''}`, value: 'daily', cls: 'blue' },
       { label: '🏆 Leaderboard', value: 'lb', cls: 'ghost' },
@@ -896,6 +897,7 @@ async function arcadeMenu(id) {
   else if (r === 'lb') showLeaderboard(id + 'Daily');
   else if (r === 'how') { await arcadeHow(id); arcadeMenu(id); }
   else if (r === 'friend') versusMenu(id);
+  else if (r === 'cpu') ludoVsComputer();
 }
 
 // ------------------------------------------------------------------ play a friend (chess / ludo)
@@ -926,9 +928,46 @@ async function versusMenu(id) {
   if (r === 'join') return joinOnline();
 }
 
+const LUDO_COLOURS = [['red', '#e53935', '🔴'], ['green', '#43a047', '🟢'], ['yellow', '#fdd835', '🟡'], ['blue', '#1e88e5', '🔵']];
+
+/** Real-table colour picker. Resolves to a seat 0-3 or null. */
+function pickLudoColour(title = 'Pick your colour') {
+  const last = load().ludoColour ?? 0;
+  return new Promise((resolve) => {
+    modal(`<h2>🎲 ${esc(title)}</h2><p class="muted small">Your colour always sits at the bottom-left of the board.</p>
+      <div class="colour-pick">${LUDO_COLOURS.map(([n, hex, dot], i) => `<button class="colour-btn ${i === last ? 'on' : ''}" data-c="${i}" style="--c:${hex}" aria-label="${n}"><span>${dot}</span>${n[0].toUpperCase() + n.slice(1)}</button>`).join('')}</div>`, {
+      buttons: [{ label: 'Cancel', value: null, cls: 'ghost' }],
+      onOpen: (sheet) => {
+        for (const b of $$('[data-c]', sheet)) b.onclick = () => {
+          const c = Number(b.dataset.c);
+          update((d) => { d.ludoColour = c; });
+          sfx.tap();
+          closeModal('c' + c);
+        };
+      },
+    }).then((r) => resolve(r && r.startsWith('c') ? Number(r.slice(1)) : null));
+  });
+}
+
+/** Seats for "you + N opponents": 1 opponent sits opposite, like a real table. */
+function ludoSeats(me, opponents, kind) {
+  const order = opponents === 1 ? [(me + 2) % 4] : opponents === 2 ? [(me + 1) % 4, (me + 3) % 4] : [(me + 1) % 4, (me + 2) % 4, (me + 3) % 4];
+  return [0, 1, 2, 3].map((i) => (i === me ? 'human' : order.includes(i) ? kind : null));
+}
+
+async function ludoVsComputer() {
+  const me = await pickLudoColour();
+  if (me === null) return arcadeMenu('ludo');
+  const n = await modal('<h2>🤖 How many computer players?</h2>', {
+    buttons: [{ label: '1 bot (head to head)', value: '1' }, { label: '2 bots', value: '2', cls: 'blue' }, { label: '3 bots (full table)', value: '3', cls: 'blue' }],
+  });
+  if (!n) return arcadeMenu('ludo');
+  return playVersus('ludo', new LudoVersus({ seed: randSeed(), seats: ludoSeats(me, Number(n), 'ai'), mine: [me], first: me }), null);
+}
+
 async function localVersus(id) {
   if (id === 'chess') return playVersus(id, new ChessVersus({}), null);
-  const n = await modal('<h2>🎲 How many players?</h2><p class="muted small">Pass the phone around. Empty seats can be filled with bots.</p>', {
+  const n = await modal('<h2>🎲 Pass & play</h2><p class="muted small">Everyone plays on this phone and taps their own dice. Empty seats can be bots.</p>', {
     buttons: [
       { label: '2 players', value: '2' },
       { label: '2 players + 2 bots', value: '2b', cls: 'blue' },
@@ -937,8 +976,10 @@ async function localVersus(id) {
     ],
   });
   if (!n) return versusMenu(id);
-  const seats = { 2: ['human', null, 'human', null], '2b': ['human', 'ai', 'human', 'ai'], 3: ['human', 'human', 'human', null], 4: ['human', 'human', 'human', 'human'] }[n];
-  return playVersus(id, new LudoVersus({ seed: randSeed(), seats }), null);
+  const me = await pickLudoColour('Player 1, pick your colour');
+  if (me === null) return versusMenu(id);
+  const seats = n === '2b' ? ludoSeats(me, 3, 'ai').map((x, i) => (i === (me + 2) % 4 ? 'human' : x)) : ludoSeats(me, Number(n) - 1, 'human');
+  return playVersus(id, new LudoVersus({ seed: randSeed(), seats, first: me }), null);
 }
 
 async function createOnline(id) {
@@ -948,9 +989,11 @@ async function createOnline(id) {
     if (!side) return versusMenu(id);
     opts = { hostSide: side === 'r' ? (Math.random() < 0.5 ? 'w' : 'b') : side };
   } else {
-    const b = await modal('<h2>🎲 Online Ludo</h2><p>You are red, your friend is yellow.</p>', { buttons: [{ label: 'Just the two of us', value: 'n' }, { label: 'Add 2 bots (green & blue)', value: 'y', cls: 'blue' }] });
+    const me = await pickLudoColour();
+    if (me === null) return versusMenu(id);
+    const b = await modal(`<h2>🎲 Online Ludo</h2><p>You are <b>${LUDO_COLOURS[me][2]} ${LUDO_COLOURS[me][0]}</b>, your friend sits opposite as <b>${LUDO_COLOURS[(me + 2) % 4][2]} ${LUDO_COLOURS[(me + 2) % 4][0]}</b>. Each of you rolls on your own phone.</p>`, { buttons: [{ label: 'Just the two of us', value: 'n' }, { label: 'Add 2 bots to fill the table', value: 'y', cls: 'blue' }] });
     if (!b) return versusMenu(id);
-    opts = { bots: b === 'y' };
+    opts = { bots: b === 'y', hostColour: me };
   }
   const code = newCode();
   try {
@@ -996,8 +1039,9 @@ function myMovesOf(sim, id, role, match) {
     const side = role === 'host' ? match.opts.hostSide : match.opts.hostSide === 'w' ? 'b' : 'w';
     return sim.moves.filter((_, i) => (i % 2 === 0 ? 'w' : 'b') === side);
   }
-  const seat = role === 'host' ? 0 : 2;
-  return sim.moves.filter(([s]) => s === seat).map(([, t]) => t);
+  const hs = Number.isInteger(match.opts.hostColour) ? match.opts.hostColour : 0;
+  const seat = role === 'host' ? hs : (hs + 2) % 4;
+  return sim.moves.filter(([x]) => x === seat).map(([, t]) => t);
 }
 
 async function playVersus(id, sim, online) {
@@ -1030,7 +1074,7 @@ async function playVersus(id, sim, online) {
     } else {
       stats = [
         { label: 'Mode', value: online ? `🌐 ${online.code}` : '📱 Pass & play', big: true },
-        ...sim.seats.map((s, i) => (s ? { label: sim.label(i), value: `🏠 ${sim.game.tokens[i].filter((p) => p === 56).length}/4` } : null)).filter(Boolean).slice(0, 3),
+        { label: 'Turn', value: `${LUDO_COLOURS[sim.game.turn][2]} ${esc(sim.labelOf(sim.game.turn))}` },
       ];
     }
     box.innerHTML = stats.map((h) => `<div class="hstat ${h.big ? 'big' : ''}"><span class="lbl">${esc(String(h.label))}</span><b>${h.value}</b></div>`).join('');
@@ -1079,7 +1123,10 @@ async function playVersus(id, sim, online) {
       if (id === 'chess') {
         const hs = m.opts.hostSide, gs = hs === 'w' ? 'b' : 'w';
         sim.names = { [hs]: m.hostName || 'Host', [gs]: m.guestName || 'Guest' };
-      } else sim.names = { 0: m.hostName || 'Host', 2: m.guestName || 'Guest' };
+      } else {
+        const hs = Number.isInteger(m.opts.hostColour) ? m.opts.hostColour : 0;
+        sim.names = { [hs]: online.role === 'host' ? 'You' : m.hostName || 'Host', [(hs + 2) % 4]: online.role === 'guest' ? 'You' : m.guestName || 'Guest' };
+      }
       const opp = online.role === 'host' ? m.guestMoves : m.hostMoves;
       while (applied < opp.length && !sim.over) {
         const mv = opp[applied];
@@ -1089,7 +1136,8 @@ async function playVersus(id, sim, online) {
           res = sim.apply(mv);
           if (res.ok) view.remoteMoved(res.human);
         } else {
-          const seat = online.role === 'host' ? 2 : 0;
+          const hs = Number.isInteger(m.opts.hostColour) ? m.opts.hostColour : 0;
+          const seat = online.role === 'host' ? (hs + 2) % 4 : hs;
           if (sim.game.turn !== seat) break;
           res = sim.apply(seat, mv);
           if (res.ok) view.remoteEvents(res.events);
@@ -1154,9 +1202,15 @@ async function playArcade(id, { daily, seed: forcedSeed, challenge } = {}) {
   const g = ARCADE_BY_ID[id];
   const mod = await VIEWS[id]();
   const key = dayKey();
+  let colour = null;
+  if (id === 'ludo') {
+    colour = await pickLudoColour(daily ? "Today's league – pick your colour" : 'League – pick your colour');
+    if (colour === null) return arcadeMenu(id);
+  }
   const runSeed = forcedSeed !== undefined ? forcedSeed : randSeed();
   const playSeed = forcedSeed !== undefined ? forcedSeed : arcadeSeed(id, daily, key, runSeed);
   const sim = g.create(playSeed);
+  if (colour !== null && sim.setColour) sim.setColour(colour);
   const run = { kind: 'arcade', id, daily, key, seed: runSeed, playSeed, sim, challenge };
   currentRun = run;
   setBackground(g.color);
@@ -1183,7 +1237,7 @@ async function playArcade(id, { daily, seed: forcedSeed, challenge } = {}) {
       onOver: () => endArcade(run),
       onRound: (end) => {
         if (end.winner && end.winner === (sim.mySide || 'w')) toast(`🏆 ${end.reason}! +${fmt(end.gained)} · next: ${sim.opponent}`);
-        else if (end.place) toast(end.place <= 2 ? `🎲 ${end.reason}! +${fmt(end.gained)} · next match vs smarter bots` : `🎲 ${end.reason} · +${fmt(end.gained)}`);
+        else if (end.place) toast(end.place <= 2 ? `🎲 ${end.reason}! +${fmt(end.gained)} · next table: smarter bots` : `🎲 ${end.reason} · +${fmt(end.gained)}`);
         else if (!end.winner) toast(`🤝 ${end.reason} · +${fmt(end.gained)} · rematch!`);
       },
       onQuit: async () => {

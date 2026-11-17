@@ -51,54 +51,58 @@ export class ChessVersus {
 
 // ---------------------------------------------------------------- ludo
 export class LudoVersus {
-  /** seats: array of 4 'human' | 'ai' | null; mine: seat indexes controlled here (null = all humans local) */
-  constructor({ seed, seats, mine = null, names = {} }) {
+  /** seats: 4 x 'human' | 'ai' | null; mine: seats controlled here (null = every human seat is local) */
+  constructor({ seed, seats, mine = null, names = {}, first = null }) {
     this.rng = new Rng(seed);
     this.seats = seats;
     this.mine = mine;
     this.names = names;
-    this.game = new LudoGame(this.rng, seats.map((s) => (s === 'ai' ? 'ai' : s ? 'human' : null)));
+    this.mySide = mine && mine.length === 1 ? mine[0] : undefined;
+    this.game = new LudoGame(this.rng, seats.map((s) => (s === 'ai' ? 'ai' : s ? 'human' : null)), first ?? seats.findIndex((s) => s === 'human'));
     this.over = false;
-    this.moves = []; // [seat, token] in order
-    this.pending = [];
+    this.moves = []; // [seat, 'r' | token] in order
     this.runBots();
   }
-  label(seat) {
-    return this.names[seat] || COLORS[seat][0].toUpperCase() + COLORS[seat].slice(1);
+  labelOf(seat) {
+    if (this.names[seat]) return this.names[seat];
+    const c = COLORS[seat][0].toUpperCase() + COLORS[seat].slice(1);
+    return this.seats[seat] === 'ai' ? `${c} bot` : this.mine?.includes(seat) && this.mine.length === 1 ? 'You' : c;
   }
-  canMove() {
-    if (this.over || this.game.over) return false;
-    const t = this.game.turn;
-    if (this.seats[t] === 'ai') return false;
-    return this.mine === null || this.mine.includes(t);
+  isLocal(seat) {
+    return this.seats[seat] === 'human' && (this.mine === null || this.mine.includes(seat));
   }
-  turnLabel() {
-    return this.mine && this.mine.length === 1 ? 'Your turn' : `${this.label(this.game.turn)}'s turn`;
+  myTurn() {
+    return !this.over && !this.game.over && this.isLocal(this.game.turn);
   }
-  waitLabel() {
-    return this.over ? 'Game over' : `Waiting for ${this.label(this.game.turn)}…`;
-  }
+  canRoll() { return this.myTurn() && this.game.phase === 'roll'; }
+  canMove() { return this.myTurn() && this.game.phase === 'move'; }
   runBots() {
     let guard = 0;
-    while (!this.game.over && this.seats[this.game.turn] === 'ai' && guard++ < 2000) this.game.move(aiChoose(this.game, 0.6, this.rng));
+    while (!this.game.over && this.seats[this.game.turn] === 'ai' && guard++ < 20000) this.game.aiStep(0.6, this.rng);
     if (this.game.over) this.over = true;
+  }
+  roll() {
+    if (!this.canRoll()) return { ok: false };
+    return this.apply(this.game.turn, 'r');
   }
   move(t) {
     if (!this.canMove()) return { ok: false };
     return this.apply(this.game.turn, t);
   }
-  apply(seat, t) {
-    if (this.game.turn !== seat) return { ok: false };
-    this.game.events = [];
-    if (!this.game.move(t)) return { ok: false };
-    this.moves.push([seat, t]);
+  apply(seat, a) {
+    const g = this.game;
+    if (g.over || g.turn !== seat) return { ok: false };
+    g.events = [];
+    if (a === 'r') { if (g.phase !== 'roll' || g.doRoll() === null) return { ok: false }; }
+    else if (g.phase !== 'move' || !g.move(a)) return { ok: false };
+    this.moves.push([seat, a]);
     this.runBots();
-    const out = { ok: true, events: this.game.events };
-    if (this.game.over) { this.over = true; out.end = { places: this.places() }; }
+    const out = { ok: true, events: g.events };
+    if (g.over) { this.over = true; out.end = { places: this.places() }; }
     return out;
   }
   places() {
-    return this.seats.map((s, i) => (s ? { seat: i, name: this.label(i), place: this.game.placeOf(i) } : null)).filter(Boolean).sort((a, b) => a.place - b.place);
+    return this.seats.map((s, i) => (s ? { seat: i, name: this.labelOf(i), place: this.game.placeOf(i) } : null)).filter(Boolean).sort((a, b) => a.place - b.place);
   }
   resign() {
     this.over = true;
@@ -133,12 +137,14 @@ export function rebuild(match, me) {
     if (!v.over && match.resigned) v.resign(match.resigned === 'host' ? match.opts.hostSide : match.opts.hostSide === 'w' ? 'b' : 'w');
     return v;
   }
-  // ludo: host = red (0), guest = yellow (2); bots optional on green/blue
-  const seats = ['human', match.opts.bots ? 'ai' : null, 'human', match.opts.bots ? 'ai' : null];
-  const names = { 0: match.hostName || 'Host', 2: match.guestName || 'Guest' };
-  const v = new LudoVersus({ seed: match.seed, seats, mine: [me === 'host' ? 0 : 2], names });
-  const lists = { 0: [...(match.hostMoves || [])], 2: [...(match.guestMoves || [])] };
-  for (let guard = 0; guard < 3000 && !v.over; guard++) {
+  // ludo: host picks a colour, guest sits opposite; bots optionally fill the other seats
+  const hs = Number.isInteger(match.opts.hostColour) ? match.opts.hostColour : 0;
+  const gs = (hs + 2) % 4;
+  const seats = [0, 1, 2, 3].map((i) => (i === hs || i === gs ? 'human' : match.opts.bots ? 'ai' : null));
+  const names = { [hs]: match.hostName || 'Host', [gs]: match.guestName || 'Guest' };
+  const v = new LudoVersus({ seed: match.seed, seats, mine: [me === 'host' ? hs : gs], names, first: hs });
+  const lists = { [hs]: [...(match.hostMoves || [])], [gs]: [...(match.guestMoves || [])] };
+  for (let guard = 0; guard < 6000 && !v.over; guard++) {
     const seat = v.game.turn;
     const next = lists[seat]?.shift();
     if (next === undefined) break;

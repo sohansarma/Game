@@ -9,8 +9,10 @@ import { aiChoose as ludoAI } from '../public/js/arcade/ludo.js';
 
 export const BOTS = {
   ludo(sim, rng) {
-    if (!sim.canMove()) { sim.resign(); return; }
-    sim.move(ludoAI(sim.game, 0.7, rng));
+    if (!sim.log.length) sim.setColour(rng.int(4));
+    if (sim.canRoll()) sim.roll();
+    else if (sim.canMove()) sim.move(ludoAI(sim.game, 0.7, rng));
+    else sim.resign();
   },
   // Random legal moves (it will lose to the ladder, which is the point).
   chess(sim, rng) {

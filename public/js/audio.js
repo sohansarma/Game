@@ -213,6 +213,15 @@ export const sfx = {
     for (let i = 0; i < 10; i++) bell(pent(523.25, i), 0.8, { vol: 0.11, when: i * 0.035, pan: -0.8 + i * 0.16 });
     noise(0.8, { vol: 0.05, type: 'highpass', from: 5000, to: 10000, verb: 0.6 });
   },
+  dice() { // a few clacks as the die tumbles, then it settles
+    if (!ok()) return;
+    for (let i = 0; i < 5; i++) {
+      const w = i * 0.07 + Math.random() * 0.02;
+      tone(300 + Math.random() * 500, 0.05, { type: 'triangle', vol: 0.18 - i * 0.02, when: w, verb: 0.05, attack: 0.001 });
+      noise(0.03, { vol: 0.12, type: 'highpass', from: 2000, to: 3000, when: w, verb: 0 });
+    }
+    tone(180, 0.12, { vol: 0.25, when: 0.42, to: 120, verb: 0.1, attack: 0.001 });
+  },
   place() { // Reef Blocks: soft wooden "thock"
     if (!ok()) return;
     tone(190, 0.12, { vol: 0.32, to: 120, verb: 0.08, attack: 0.001 });

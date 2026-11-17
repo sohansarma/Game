@@ -193,7 +193,7 @@ export function createApi(store, { now = () => new Date(), origin = process.env.
 
   // ---- online matches (chess / ludo): each player only writes their own moves
   const MATCH_CODE = /^[A-HJ-NP-Z2-9]{5}$/;
-  const MATCH_GAMES = { chess: 400, ludo: 3000 };
+  const MATCH_GAMES = { chess: 400, ludo: 6000 };
   function matchView(m, playerId) {
     return {
       code: m.code, game: m.game, seed: m.seed, opts: m.opts,
@@ -217,7 +217,8 @@ export function createApi(store, { now = () => new Date(), origin = process.env.
         if (!MATCH_GAMES[body.game]) throw fail(400, 'unknown game');
         const seed = Number(body.seed);
         if (!Number.isInteger(seed) || seed < 0 || seed > 0xffffffff) throw fail(400, 'bad seed');
-        const opts = body.game === 'chess' ? { hostSide: body.opts?.hostSide === 'b' ? 'b' : 'w' } : { bots: !!body.opts?.bots };
+        const hc = Number(body.opts?.hostColour);
+        const opts = body.game === 'chess' ? { hostSide: body.opts?.hostSide === 'b' ? 'b' : 'w' } : { bots: !!body.opts?.bots, hostColour: Number.isInteger(hc) && hc >= 0 && hc < 4 ? hc : 0 };
         if (Object.keys(db.matches).length > 5000) throw fail(503, 'too many open matches');
         db.matches[code] = { code, game: body.game, seed, opts, host: { pid: body.playerId, moves: [] }, guest: null, at: now };
         store.dirty();
@@ -235,7 +236,7 @@ export function createApi(store, { now = () => new Date(), origin = process.env.
         const side = m.host.pid === body.playerId ? m.host : m.guest?.pid === body.playerId ? m.guest : null;
         if (!side) throw fail(403, 'not in this match');
         const mv = body.moves;
-        const okMove = m.game === 'chess' ? (x) => typeof x === 'string' && /^[a-h][1-8][a-h][1-8][qrbn]?$/.test(x) : (x) => Number.isInteger(x) && x >= 0 && x < 4;
+        const okMove = m.game === 'chess' ? (x) => typeof x === 'string' && /^[a-h][1-8][a-h][1-8][qrbn]?$/.test(x) : (x) => x === 'r' || (Number.isInteger(x) && x >= 0 && x < 4);
         if (!Array.isArray(mv) || mv.length > MATCH_GAMES[m.game] || !mv.every(okMove)) throw fail(400, 'bad moves');
         // moves are append-only: the new list must extend the stored one
         if (mv.length < side.moves.length || side.moves.some((x, i) => x !== mv[i])) throw fail(409, 'moves out of sync');
