@@ -150,6 +150,29 @@ export function pieceSprite(type, white, size) {
   ctx.lineWidth = 2.6;
   ctx.lineJoin = 'round';
   SHAPES[type](ctx, !white);
+  // turned-wood lighting: light from the left, darker rim on the right, a specular streak
+  ctx.save();
+  ctx.globalCompositeOperation = 'source-atop';
+  const lg = ctx.createLinearGradient(15, 0, 85, 0);
+  lg.addColorStop(0, white ? 'rgba(255,255,255,0.55)' : 'rgba(255,255,255,0.22)');
+  lg.addColorStop(0.32, 'rgba(255,255,255,0)');
+  lg.addColorStop(0.7, 'rgba(0,0,0,0)');
+  lg.addColorStop(1, white ? 'rgba(80,50,20,0.35)' : 'rgba(0,0,0,0.55)');
+  ctx.fillStyle = lg;
+  ctx.fillRect(0, 0, 100, 100);
+  const sp = ctx.createLinearGradient(34, 0, 44, 0);
+  sp.addColorStop(0, 'rgba(255,255,255,0)');
+  sp.addColorStop(0.5, white ? 'rgba(255,255,255,0.75)' : 'rgba(255,255,255,0.35)');
+  sp.addColorStop(1, 'rgba(255,255,255,0)');
+  ctx.fillStyle = sp;
+  ctx.fillRect(34, 10, 10, 66);
+  // felt-darkened base edge
+  const bg = ctx.createLinearGradient(0, 80, 0, 92);
+  bg.addColorStop(0, 'rgba(0,0,0,0)');
+  bg.addColorStop(1, 'rgba(0,0,0,0.35)');
+  ctx.fillStyle = bg;
+  ctx.fillRect(0, 80, 100, 12);
+  ctx.restore();
   if (cache.size > 200) cache.clear();
   cache.set(k, c);
   return c;

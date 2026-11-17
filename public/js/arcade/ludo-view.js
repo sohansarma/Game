@@ -5,10 +5,11 @@
 //                  move(t) -> {ok, events, end?}, labelOf?(seat), isLocal?(seat) }
 import { COLORS, START, SAFE, HOME, abs } from './ludo.js';
 import { sfx, haptic } from '../audio.js';
+import { woodTexture, softShadow, drawDie as drawDie3D, throwPose } from './table.js';
 
-const FILL = { red: '#e53935', green: '#43a047', yellow: '#fdd835', blue: '#1e88e5' };
-const DARK = { red: '#b71c1c', green: '#1b5e20', yellow: '#c79a00', blue: '#0d47a1' };
-const LIGHT = { red: '#ffcdd2', green: '#c8e6c9', yellow: '#fff9c4', blue: '#bbdefb' };
+const FILL = { red: '#d62f2f', green: '#2e8b3e', yellow: '#f5b800', blue: '#1b62c4' };
+const DARK = { red: '#8e1414', green: '#17521f', yellow: '#a87a00', blue: '#0c3678' };
+const LIGHT = { red: '#f7c5c0', green: '#c4e3c4', yellow: '#fbe7a6', blue: '#bfd3f2' };
 
 const TRACK = [
   [6, 1], [6, 2], [6, 3], [6, 4], [6, 5], [5, 6], [4, 6], [3, 6], [2, 6], [1, 6], [0, 6], [0, 7],
@@ -91,12 +92,14 @@ export default class LudoView {
     this.canvas.height = Math.max(1, Math.round(rect.height * dpr));
     this.W = rect.width;
     this.H = rect.height;
-    this.panelH = Math.min(64, Math.max(48, rect.height * 0.1));
-    const size = Math.min(rect.width - 4, rect.height - this.panelH * 2 - 12);
+    this.panelH = 54;
+    const avail = Math.min(rect.width - 10, rect.height - this.panelH * 2 - 20);
+    this.frame = Math.max(8, Math.round(avail * 0.028));
+    const size = avail - this.frame * 2;
     this.cell = size / 15;
     this.size = size;
     this.ox = (rect.width - size) / 2;
-    this.oy = this.panelH + 6 + (rect.height - this.panelH * 2 - 12 - size) / 2;
+    this.oy = this.panelH + 10 + this.frame + (rect.height - this.panelH * 2 - 20 - avail) / 2;
   }
 
   /** Display corner (0 TL, 1 TR, 2 BR, 3 BL) of a seat after rotation. */
@@ -104,18 +107,21 @@ export default class LudoView {
     return (seat + this.rot) % 4;
   }
 
+  /** The name tag in front of each seat, on the table above/below the board. */
   panelRect(seat) {
     const corner = this.cornerOf(seat);
-    const w = Math.min(this.W / 2 - 8, 190), h = this.panelH;
-    const x = corner === 0 || corner === 3 ? 4 : this.W - w - 4;
-    const y = corner < 2 ? this.oy - h - 6 : this.oy + this.size + 6;
+    const gap = 92; // open table between the two tags, where the dice land
+    const w = Math.min((this.W - gap) / 2 - 8, 180), h = this.panelH;
+    const x = corner === 0 || corner === 3 ? this.W / 2 - gap / 2 - w : this.W / 2 + gap / 2;
+    const y = corner < 2 ? this.oy - this.frame - h - 8 : this.oy + this.size + this.frame + 8;
     return { x, y, w, h, right: corner === 1 || corner === 2 };
   }
 
+  /** Where that seat's die rests: on the table just inside its name tag. */
   diceRect(seat) {
     const p = this.panelRect(seat);
-    const d = p.h - 12;
-    return { x: p.right ? p.x + 6 : p.x + p.w - d - 6, y: p.y + 6, s: d };
+    const d = 34;
+    return { x: p.right ? p.x - d - 6 : p.x + p.w + 6, y: p.y + (p.h - d) / 2, s: d };
   }
 
   /** Rotate board-space [row, col] (0..15) into screen pixels. */
@@ -135,8 +141,9 @@ export default class LudoView {
       const seat = this.game.turn;
       const d = this.diceRect(seat);
       const pr = this.panelRect(seat);
-      if (this.sim.canRoll() && x >= pr.x && x <= pr.x + pr.w && y >= pr.y && y <= pr.y + pr.h) return this.doRoll();
-      void d;
+      const onTag = x >= pr.x && x <= pr.x + pr.w && y >= pr.y && y <= pr.y + pr.h;
+      const onDie = Math.hypot(x - (d.x + d.s / 2), y - (d.y + d.s / 2)) < d.s * 1.1;
+      if (this.sim.canRoll() && (onTag || onDie)) return this.doRoll();
       if (!this.sim.canMove()) {
         if (this.sim.canRoll()) this.flashNote('Tap your dice to roll 🎲');
         return;
@@ -209,13 +216,16 @@ export default class LudoView {
     const e = this.queue.shift();
     const slow = this.reduced ? 0.3 : 1;
     switch (e.kind) {
-      case 'roll':
+      case 'roll': {
         this.activeSeat = e.player;
-        this.dice[e.player] = { value: e.value, rollT0: now };
+        const d = this.diceRect(e.player);
+        const top = this.cornerOf(e.player) < 2;
+        this.dice[e.player] = { value: e.value, rollT0: now, from: [d.x + d.s / 2 + (d.x < this.W / 2 ? 60 : -60), top ? -30 : this.H + 30], yaw: (now % 1000) / 1000 - 0.5 };
         sfx.dice ? sfx.dice() : sfx.tap();
-        this.wait = now + 650 * slow;
+        this.wait = now + (this.reduced ? 250 : 950);
         if (e.value === 6 && this.isLocal(e.player)) haptic(25);
         break;
+      }
       case 'move': {
         const path = [];
         if (e.from < 0) path.push(0);
@@ -259,7 +269,7 @@ export default class LudoView {
     if (now >= this.wait) {
       if (this.anim) {
         const a = this.anim;
-        const stepMs = this.reduced ? 25 : 150;
+        const stepMs = this.reduced ? 25 : 170;
         if (now - a.t0 >= stepMs) {
           this.shown[a.player][a.token] = a.path[a.step];
           a.step++;
@@ -308,7 +318,7 @@ export default class LudoView {
     const fresh = this.note && performance.now() - this.noteT < 4000;
     let status;
     if (s.over || g.over) status = 'Game over';
-    else if (this.busy()) status = `${esc(this.label(this.activeSeat))} ${this.activeSeat === s.mySide ? 'are' : 'is'} playing…`;
+    else if (this.busy()) status = this.isLocal(this.activeSeat) ? '🎲 Rolling…' : `${esc(this.label(this.activeSeat))} is playing…`;
     else if (s.canRoll()) status = `<b>${this.isLocal(g.turn) && s.mySide === undefined ? `${this.label(g.turn)}'s turn – ` : 'Your turn – '}tap your dice 🎲</b>`;
     else if (s.canMove()) status = `<b>Rolled ${g.roll} – tap a glowing token</b>`;
     else status = `${this.label(g.turn)} is playing…`;
@@ -320,35 +330,34 @@ export default class LudoView {
   }
 
   // ---------------- drawing
-  drawDie(x, y, s, value, color, glow, now, t0) {
+  drawSeatDie(seat, now, canTap) {
     const ctx = this.ctx;
-    const rolling = !this.reduced && now - t0 < 600;
-    const face = rolling ? 1 + Math.floor(((now - t0) / 70 + value) % 6) : value;
-    ctx.save();
-    ctx.translate(x + s / 2, y + s / 2);
-    if (rolling) {
-      const k = (now - t0) / 600;
-      ctx.rotate(Math.sin(k * 14) * 0.5 * (1 - k));
-      ctx.translate(0, -Math.abs(Math.sin(k * 9)) * s * 0.25 * (1 - k));
-    } else if (glow && !this.reduced) {
-      const b = Math.abs(Math.sin(now / 260));
-      ctx.scale(1 + b * 0.06, 1 + b * 0.06);
+    const d = this.diceRect(seat);
+    const st = this.dice[seat];
+    const rx = d.x + d.s / 2, ry = d.y + d.s / 2;
+    const dur = this.reduced ? 1 : 900;
+    const t = (now - (st.rollT0 || 0)) / dur;
+    if (st.rollT0 && t < 1 && st.from) {
+      const pose = throwPose(t, st.from[0], st.from[1], rx, ry);
+      ctx.save();
+      // lifted dice look bigger and their shadow drifts away
+      drawDie3D(ctx, pose.x, pose.y - pose.z * d.s * 0.9, d.s * (1 + pose.z * 0.25), st.value, pose.spin, st.yaw || 0);
+      ctx.restore();
+      return;
     }
-    if (glow) { ctx.shadowColor = '#fff'; ctx.shadowBlur = 14; }
-    ctx.fillStyle = '#fff';
-    roundedRect(ctx, -s / 2, -s / 2, s, s, s * 0.2);
-    ctx.fill();
-    ctx.shadowBlur = 0;
-    ctx.lineWidth = 3;
-    ctx.strokeStyle = color;
-    ctx.stroke();
-    ctx.fillStyle = '#1b1b2f';
-    for (const [px, py] of PIPS[face]) {
+    if (canTap) {
+      const k = this.reduced ? 0.5 : 0.5 + 0.5 * Math.sin(now / 220);
+      ctx.save();
+      ctx.shadowColor = 'rgba(255,214,94,0.95)';
+      ctx.shadowBlur = 14 + k * 14;
+      ctx.strokeStyle = `rgba(255,214,94,${0.5 + k * 0.5})`;
+      ctx.lineWidth = 3;
       ctx.beginPath();
-      ctx.arc(-s / 2 + px * s, -s / 2 + py * s, s * 0.085, 0, Math.PI * 2);
-      ctx.fill();
+      ctx.arc(rx, ry + 2, d.s * 0.78, 0, Math.PI * 2);
+      ctx.stroke();
+      ctx.restore();
     }
-    ctx.restore();
+    drawDie3D(this.ctx, rx, ry - (canTap && !this.reduced ? Math.abs(Math.sin(now / 300)) * 3 : 0), d.s, st.value, 0, st.yaw || 0);
   }
 
   drawPanels(now) {
@@ -358,45 +367,37 @@ export default class LudoView {
       const p = this.panelRect(seat);
       const col = COLORS[seat];
       const active = seat === this.activeSeat && !g.over;
+      const place = g.finished.indexOf(seat);
+      // a felt name tag lying on the table
       ctx.save();
-      ctx.fillStyle = active ? FILL[col] : 'rgba(10,30,70,0.55)';
-      ctx.strokeStyle = FILL[col];
-      ctx.lineWidth = active ? 3 : 2;
+      softShadow(ctx, p.x + p.w / 2, p.y + p.h - 2, p.w * 0.55, 10, 0.45);
+      const grd = ctx.createLinearGradient(0, p.y, 0, p.y + p.h);
+      grd.addColorStop(0, active ? 'rgba(40,30,22,0.92)' : 'rgba(25,18,12,0.78)');
+      grd.addColorStop(1, active ? 'rgba(20,14,10,0.92)' : 'rgba(12,8,5,0.78)');
+      ctx.fillStyle = grd;
       roundedRect(ctx, p.x, p.y, p.w, p.h, 14);
       ctx.fill();
+      ctx.lineWidth = active ? 3 : 1.5;
+      ctx.strokeStyle = active ? '#ffd45e' : 'rgba(255,255,255,0.18)';
       ctx.stroke();
-      // avatar
-      const ax = p.right ? p.x + p.w - p.h / 2 - 4 : p.x + p.h / 2 + 4;
-      ctx.fillStyle = active ? '#fff' : FILL[col];
-      ctx.beginPath(); ctx.arc(ax, p.y + p.h / 2, p.h * 0.3, 0, Math.PI * 2); ctx.fill();
-      ctx.fillStyle = active ? FILL[col] : '#fff';
-      ctx.font = `${p.h * 0.32}px system-ui, "Apple Color Emoji", sans-serif`;
-      ctx.textAlign = 'center';
-      ctx.textBaseline = 'middle';
-      ctx.fillText(this.isLocal(seat) ? '🙂' : pl === 'ai' ? '🤖' : '👤', ax, p.y + p.h / 2 + 1);
-      // name + status
-      const home = g.tokens[seat].filter((x) => x === HOME).length;
-      const place = g.finished.indexOf(seat);
-      ctx.fillStyle = active && col === 'yellow' ? '#3b2a00' : '#fff';
+      // colour stripe + avatar token
+      const ax = p.right ? p.x + p.w - 30 : p.x + 30;
+      this.drawToken(ax, p.y + p.h / 2 + 6, 13, col, false, 0);
+      const tx = p.right ? ax - 24 : ax + 24;
       ctx.textAlign = p.right ? 'right' : 'left';
-      const tx = p.right ? ax - p.h * 0.42 : ax + p.h * 0.42;
-      ctx.font = `800 ${Math.min(14, p.h * 0.26)}px ui-rounded, system-ui, sans-serif`;
-      ctx.fillText(this.label(seat), tx, p.y + p.h * 0.36);
-      ctx.font = `600 ${Math.min(12, p.h * 0.22)}px system-ui, sans-serif`;
-      ctx.fillText(place >= 0 ? `🏆 ${['1st', '2nd', '3rd', '4th'][place]}` : `🏠 ${home}/4`, tx, p.y + p.h * 0.68);
+      ctx.textBaseline = 'middle';
+      ctx.fillStyle = '#fff';
+      ctx.font = '800 14px ui-rounded, system-ui, sans-serif';
+      const nm = this.label(seat);
+      ctx.fillText(nm.length > 14 ? nm.slice(0, 13) + '…' : nm, tx, p.y + p.h * 0.36);
+      ctx.font = '600 12px system-ui, sans-serif';
+      ctx.fillStyle = active ? '#ffd45e' : 'rgba(255,255,255,0.7)';
+      const home = g.tokens[seat].filter((x) => x === HOME).length;
+      ctx.fillText(place >= 0 ? `🏆 ${['1st', '2nd', '3rd', '4th'][place]} place` : active ? (this.isLocal(seat) && this.sim.canRoll() && !this.busy() ? 'Your roll!' : 'playing…') : `home ${home}/4`, tx, p.y + p.h * 0.7);
       ctx.restore();
-      // dice
       if (place < 0) {
-        const d = this.diceRect(seat);
         const canTap = active && this.sim.canRoll() && this.isLocal(seat) && !this.busy();
-        this.drawDie(d.x, d.y, d.s, this.dice[seat].value, DARK[col], canTap, now, this.dice[seat].rollT0);
-        if (canTap) {
-          ctx.fillStyle = '#fff';
-          ctx.font = '800 11px system-ui, sans-serif';
-          ctx.textAlign = 'center';
-          const below = this.cornerOf(seat) >= 2;
-          ctx.fillText('TAP!', d.x + d.s / 2, below ? d.y - 6 : d.y + d.s + 12);
-        }
+        this.drawSeatDie(seat, now, canTap);
       }
     });
   }
@@ -405,62 +406,132 @@ export default class LudoView {
     const ctx = this.ctx, C = this.cell, g = this.game;
     ctx.setTransform(this.dpr, 0, 0, this.dpr, 0, 0);
     ctx.clearRect(0, 0, this.canvas.width, this.canvas.height);
+    const F = this.frame;
+    const bx = this.ox - F, by = this.oy - F, bs = this.size + F * 2;
+    // board shadow on the table, then the wooden frame
+    ctx.save();
+    ctx.shadowColor = 'rgba(0,0,0,0.6)';
+    ctx.shadowBlur = 26;
+    ctx.shadowOffsetY = 12;
+    ctx.fillStyle = '#3a200e';
+    roundedRect(ctx, bx, by, bs, bs, 12);
+    ctx.fill();
+    ctx.restore();
+    ctx.save();
+    roundedRect(ctx, bx, by, bs, bs, 12);
+    ctx.clip();
+    ctx.drawImage(woodTexture('frame', 256, 256), bx, by, bs, bs);
+    const bev = ctx.createLinearGradient(bx, by, bx + bs, by + bs);
+    bev.addColorStop(0, 'rgba(255,255,255,0.25)');
+    bev.addColorStop(0.5, 'rgba(255,255,255,0)');
+    bev.addColorStop(1, 'rgba(0,0,0,0.35)');
+    ctx.fillStyle = bev;
+    ctx.fillRect(bx, by, bs, bs);
+    ctx.restore();
+    this.drawBoard(now);
     this.drawPanels(now);
-    // board, drawn unrotated then rotated about its centre
+    this.drawTokens(now);
+    // centre-board banner
+    if (this.note && performance.now() - this.noteT < 1600) {
+      const t = (performance.now() - this.noteT) / 1600;
+      ctx.globalAlpha = t > 0.75 ? (1 - t) / 0.25 : 1;
+      ctx.fillStyle = 'rgba(20,12,6,0.85)';
+      const w = Math.min(this.W - 20, 300);
+      roundedRect(ctx, this.W / 2 - w / 2, this.oy + this.size / 2 - 20, w, 40, 20);
+      ctx.fill();
+      ctx.fillStyle = '#fff';
+      ctx.font = '800 14px ui-rounded, system-ui, sans-serif';
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+      ctx.fillText(this.note, this.W / 2, this.oy + this.size / 2, w - 16);
+      ctx.globalAlpha = 1;
+    }
+  }
+
+  /** The printed, laminated board – drawn unrotated, then turned to your seat. */
+  drawBoard() {
+    const ctx = this.ctx, C = this.cell, g = this.game;
     ctx.save();
     ctx.translate(this.ox + this.size / 2, this.oy + this.size / 2);
     ctx.rotate((this.rot * Math.PI) / 2);
     ctx.translate(-this.size / 2, -this.size / 2);
-    ctx.fillStyle = '#fffdf6';
-    roundedRect(ctx, -3, -3, 15 * C + 6, 15 * C + 6, 10);
-    ctx.fill();
+    ctx.fillStyle = '#fbf6ea';
+    ctx.fillRect(0, 0, 15 * C, 15 * C);
+    // bases
     BASE_ORIGIN.forEach(([r, c], i) => {
       const col = COLORS[i];
-      ctx.fillStyle = FILL[col];
-      ctx.fillRect(c * C, r * C, 6 * C, 6 * C);
-      ctx.fillStyle = '#fff';
-      roundedRect(ctx, (c + 0.8) * C, (r + 0.8) * C, 4.4 * C, 4.4 * C, C * 0.6);
+      const x = c * C, y = r * C;
+      const bg = ctx.createLinearGradient(x, y, x + 6 * C, y + 6 * C);
+      bg.addColorStop(0, FILL[col]);
+      bg.addColorStop(1, DARK[col]);
+      ctx.fillStyle = bg;
+      ctx.fillRect(x, y, 6 * C, 6 * C);
+      ctx.fillStyle = '#fbf6ea';
+      roundedRect(ctx, x + 0.75 * C, y + 0.75 * C, 4.5 * C, 4.5 * C, C * 0.7);
       ctx.fill();
+      ctx.strokeStyle = 'rgba(0,0,0,0.25)';
+      ctx.lineWidth = 1;
+      ctx.stroke();
+      // four recessed wells
       for (const [sr, sc] of SLOTS) {
-        ctx.fillStyle = LIGHT[col];
-        ctx.beginPath(); ctx.arc((c + sc) * C, (r + sr) * C, C * 0.62, 0, Math.PI * 2); ctx.fill();
-        ctx.strokeStyle = FILL[col];
+        const wx = x + sc * C, wy = y + sr * C;
+        const wg = ctx.createRadialGradient(wx, wy - C * 0.15, C * 0.1, wx, wy, C * 0.7);
+        wg.addColorStop(0, DARK[col]);
+        wg.addColorStop(1, FILL[col]);
+        ctx.fillStyle = wg;
+        ctx.beginPath(); ctx.arc(wx, wy, C * 0.66, 0, Math.PI * 2); ctx.fill();
+        ctx.strokeStyle = 'rgba(255,255,255,0.65)';
         ctx.lineWidth = 1.5;
         ctx.stroke();
       }
-      if (!g.players[i]) { ctx.fillStyle = 'rgba(255,255,255,0.55)'; ctx.fillRect(c * C, r * C, 6 * C, 6 * C); }
+      if (!g.players[i]) { ctx.fillStyle = 'rgba(251,246,234,0.6)'; ctx.fillRect(x, y, 6 * C, 6 * C); }
     });
+    // track squares with printed lines
     TRACK.forEach(([r, c], i) => {
       const startOf = START.indexOf(i);
-      ctx.fillStyle = startOf >= 0 ? FILL[COLORS[startOf]] : '#fff';
+      ctx.fillStyle = startOf >= 0 ? FILL[COLORS[startOf]] : '#fbf6ea';
       ctx.fillRect(c * C, r * C, C, C);
-      ctx.strokeStyle = '#cfc8b6';
-      ctx.lineWidth = 1;
-      ctx.strokeRect(c * C, r * C, C, C);
       if (SAFE.has(i)) {
-        ctx.fillStyle = startOf >= 0 ? 'rgba(255,255,255,0.85)' : '#b0a58d';
-        ctx.font = `${C * 0.62}px system-ui`;
-        ctx.textAlign = 'center';
-        ctx.textBaseline = 'middle';
-        ctx.fillText('★', (c + 0.5) * C, (r + 0.55) * C);
+        ctx.fillStyle = startOf >= 0 ? 'rgba(255,255,255,0.9)' : '#a99a7c';
+        star(ctx, (c + 0.5) * C, (r + 0.5) * C, C * 0.32, C * 0.14);
       }
     });
     HOMECOL.forEach((cells, i) => {
-      for (const [r, c] of cells) {
-        ctx.fillStyle = FILL[COLORS[i]];
-        ctx.fillRect(c * C, r * C, C, C);
-        ctx.strokeStyle = 'rgba(0,0,0,0.15)';
-        ctx.strokeRect(c * C, r * C, C, C);
-      }
+      for (const [r, c] of cells) { ctx.fillStyle = FILL[COLORS[i]]; ctx.fillRect(c * C, r * C, C, C); }
     });
-    const tri = (pts, col) => { ctx.fillStyle = col; ctx.beginPath(); ctx.moveTo(pts[0][0] * C, pts[0][1] * C); for (const q of pts.slice(1)) ctx.lineTo(q[0] * C, q[1] * C); ctx.fill(); };
+    ctx.strokeStyle = 'rgba(60,40,20,0.45)';
+    ctx.lineWidth = 1;
+    for (const [r, c] of [...TRACK, ...HOMECOL.flat()]) ctx.strokeRect(c * C + 0.5, r * C + 0.5, C - 1, C - 1);
+    // entry arrows (just before each home column)
+    [[7, 0, 0], [0, 7, 1], [7, 14, 2], [14, 7, 3]].forEach(([r, c, i]) => {
+      ctx.save();
+      ctx.translate((c + 0.5) * C, (r + 0.5) * C);
+      ctx.rotate([0, Math.PI / 2, Math.PI, -Math.PI / 2][i]);
+      ctx.fillStyle = FILL[COLORS[i]];
+      ctx.beginPath(); ctx.moveTo(C * 0.35, 0); ctx.lineTo(-C * 0.15, -C * 0.3); ctx.lineTo(-C * 0.15, C * 0.3); ctx.closePath(); ctx.fill();
+      ctx.restore();
+    });
+    // home: four triangles meeting at a gold centre
+    const tri = (pts, col) => { ctx.fillStyle = col; ctx.beginPath(); ctx.moveTo(pts[0][0] * C, pts[0][1] * C); for (const q of pts.slice(1)) ctx.lineTo(q[0] * C, q[1] * C); ctx.closePath(); ctx.fill(); ctx.strokeStyle = 'rgba(0,0,0,0.2)'; ctx.stroke(); };
     tri([[6, 6], [7.5, 7.5], [6, 9]], FILL.red);
     tri([[6, 6], [7.5, 7.5], [9, 6]], FILL.green);
     tri([[9, 6], [7.5, 7.5], [9, 9]], FILL.yellow);
     tri([[6, 9], [7.5, 7.5], [9, 9]], FILL.blue);
+    ctx.fillStyle = '#e8c35a';
+    ctx.beginPath(); ctx.arc(7.5 * C, 7.5 * C, C * 0.35, 0, Math.PI * 2); ctx.fill();
+    // laminated gloss
+    const gl = ctx.createLinearGradient(0, 0, 15 * C, 15 * C);
+    gl.addColorStop(0, 'rgba(255,255,255,0.22)');
+    gl.addColorStop(0.35, 'rgba(255,255,255,0.04)');
+    gl.addColorStop(0.36, 'rgba(255,255,255,0)');
+    gl.addColorStop(1, 'rgba(0,0,0,0.08)');
+    ctx.fillStyle = gl;
+    ctx.fillRect(0, 0, 15 * C, 15 * C);
     ctx.restore();
+  }
 
-    // tokens (drawn in screen space so they stay upright)
+  drawTokens(now) {
+    const C = this.cell, g = this.game;
     const legal = this.sim.canMove() && !this.busy() ? g.legal() : [];
     const groups = new Map();
     const placed = [];
@@ -474,63 +545,80 @@ export default class LudoView {
         placed.push({ pl, t, r, c, n, k });
       });
     });
-    placed.sort((a, b) => (a.pl === g.turn) - (b.pl === g.turn));
-    for (const tok of placed) {
+    // the hopping token
+    let hop = 0;
+    if (this.anim) {
+      const a = this.anim;
+      hop = Math.sin(Math.min(1, (now - a.t0) / (this.reduced ? 25 : 170)) * Math.PI);
+    }
+    const items = placed.map((tok) => {
       const stack = groups.get(tok.k);
       let [x, y] = this.toScreen(tok.r, tok.c);
-      if (stack > 1) { x += (tok.n - (stack - 1) / 2) * C * 0.26; y -= tok.n * C * 0.06; }
-      const isLegal = tok.pl === g.turn && legal.includes(tok.t);
-      const bounce = isLegal && !this.reduced ? Math.abs(Math.sin(now / 180)) * C * 0.18 : 0;
-      this.drawToken(x, y - bounce, C * 0.38, COLORS[tok.pl], isLegal);
-    }
-
-    // centre-board banner
-    if (this.note && performance.now() - this.noteT < 1600) {
-      const t = (performance.now() - this.noteT) / 1600;
-      ctx.globalAlpha = t > 0.75 ? (1 - t) / 0.25 : 1;
-      ctx.fillStyle = 'rgba(10,20,50,0.82)';
-      const w = Math.min(this.W - 20, 300);
-      roundedRect(ctx, this.W / 2 - w / 2, this.oy + this.size / 2 - 20, w, 40, 20);
-      ctx.fill();
-      ctx.fillStyle = '#fff';
-      ctx.font = '800 14px ui-rounded, system-ui, sans-serif';
-      ctx.textAlign = 'center';
-      ctx.textBaseline = 'middle';
-      ctx.fillText(this.note, this.W / 2, this.oy + this.size / 2, w - 16);
-      ctx.globalAlpha = 1;
+      if (stack > 1) { x += (tok.n - (stack - 1) / 2) * C * 0.3; y += tok.n * C * 0.04; }
+      const lifting = this.anim && this.anim.player === tok.pl && this.anim.token === tok.t ? hop : 0;
+      return { ...tok, x, y, lifting };
+    }).sort((a, b) => a.y - b.y || a.lifting - b.lifting);
+    for (const it of items) {
+      const isLegal = it.pl === g.turn && legal.includes(it.t);
+      const bounce = isLegal && !this.reduced ? Math.abs(Math.sin(now / 200)) * C * 0.15 : 0;
+      this.drawToken(it.x, it.y, C * 0.42, COLORS[it.pl], isLegal, it.lifting * C * 0.55 + bounce);
     }
   }
 
-  drawToken(x, y, R, col, glow) {
+  /** A plastic Ludo pawn standing on (x, y). lift = height above the board. */
+  drawToken(x, y, R, col, glow, lift = 0) {
     const ctx = this.ctx;
+    // contact shadow shrinks as the pawn rises
+    softShadow(ctx, x + R * 0.15, y + R * 0.35, R * (0.95 - Math.min(0.4, lift / (R * 3))), R * 0.38, 0.5 - Math.min(0.3, lift / (R * 4)));
+    const yb = y - lift;
     if (glow) {
-      ctx.fillStyle = 'rgba(255,255,255,0.95)';
-      ctx.beginPath(); ctx.arc(x, y, R * 1.32, 0, Math.PI * 2); ctx.fill();
+      ctx.save();
+      ctx.strokeStyle = '#fff';
+      ctx.shadowColor = '#fff';
+      ctx.shadowBlur = 12;
+      ctx.lineWidth = 2.5;
+      ctx.beginPath(); ctx.ellipse(x, y + R * 0.3, R * 1.05, R * 0.42, 0, 0, Math.PI * 2); ctx.stroke();
+      ctx.restore();
     }
-    ctx.fillStyle = 'rgba(0,0,0,0.28)';
-    ctx.beginPath(); ctx.ellipse(x, y + R * 0.75, R * 0.85, R * 0.32, 0, 0, Math.PI * 2); ctx.fill();
-    // pawn: base + head
-    const g = ctx.createRadialGradient(x - R * 0.3, y - R * 0.5, R * 0.1, x, y, R * 1.2);
-    g.addColorStop(0, '#fff');
-    g.addColorStop(0.35, FILL[col]);
-    g.addColorStop(1, DARK[col]);
-    ctx.fillStyle = g;
+    const base = FILL[col], dark = DARK[col];
+    // base disc
+    const bg = ctx.createLinearGradient(x - R, 0, x + R, 0);
+    bg.addColorStop(0, dark); bg.addColorStop(0.35, base); bg.addColorStop(1, dark);
+    ctx.fillStyle = bg;
+    ctx.beginPath(); ctx.ellipse(x, yb + R * 0.28, R * 0.92, R * 0.36, 0, 0, Math.PI * 2); ctx.fill();
+    ctx.fillStyle = base;
+    ctx.beginPath(); ctx.ellipse(x, yb + R * 0.16, R * 0.86, R * 0.32, 0, 0, Math.PI * 2); ctx.fill();
+    // cone body
+    const cg = ctx.createLinearGradient(x - R * 0.6, 0, x + R * 0.6, 0);
+    cg.addColorStop(0, dark); cg.addColorStop(0.3, '#ffffff'); cg.addColorStop(0.42, base); cg.addColorStop(1, dark);
+    ctx.fillStyle = cg;
     ctx.beginPath();
-    ctx.ellipse(x, y + R * 0.45, R * 0.85, R * 0.4, 0, 0, Math.PI * 2);
+    ctx.moveTo(x - R * 0.62, yb + R * 0.16);
+    ctx.quadraticCurveTo(x - R * 0.32, yb - R * 0.35, x - R * 0.2, yb - R * 0.75);
+    ctx.lineTo(x + R * 0.2, yb - R * 0.75);
+    ctx.quadraticCurveTo(x + R * 0.32, yb - R * 0.35, x + R * 0.62, yb + R * 0.16);
+    ctx.closePath();
     ctx.fill();
-    ctx.beginPath();
-    ctx.moveTo(x - R * 0.55, y + R * 0.45);
-    ctx.quadraticCurveTo(x - R * 0.3, y - R * 0.2, x - R * 0.22, y - R * 0.35);
-    ctx.lineTo(x + R * 0.22, y - R * 0.35);
-    ctx.quadraticCurveTo(x + R * 0.3, y - R * 0.2, x + R * 0.55, y + R * 0.45);
-    ctx.fill();
-    ctx.beginPath();
-    ctx.arc(x, y - R * 0.55, R * 0.42, 0, Math.PI * 2);
-    ctx.fill();
-    ctx.strokeStyle = '#fff';
-    ctx.lineWidth = Math.max(1.5, R * 0.12);
+    // ball head
+    const hg = ctx.createRadialGradient(x - R * 0.15, yb - R * 1.12, R * 0.05, x, yb - R * 0.95, R * 0.45);
+    hg.addColorStop(0, '#ffffff'); hg.addColorStop(0.3, base); hg.addColorStop(1, dark);
+    ctx.fillStyle = hg;
+    ctx.beginPath(); ctx.arc(x, yb - R * 0.98, R * 0.4, 0, Math.PI * 2); ctx.fill();
+    ctx.strokeStyle = 'rgba(0,0,0,0.25)';
+    ctx.lineWidth = 0.8;
     ctx.stroke();
   }
+}
+
+function star(ctx, x, y, R, r) {
+  ctx.beginPath();
+  for (let i = 0; i < 10; i++) {
+    const a = -Math.PI / 2 + (i * Math.PI) / 5;
+    const rr = i % 2 ? r : R;
+    if (i) ctx.lineTo(x + Math.cos(a) * rr, y + Math.sin(a) * rr); else ctx.moveTo(x + Math.cos(a) * rr, y + Math.sin(a) * rr);
+  }
+  ctx.closePath();
+  ctx.fill();
 }
 
 function roundedRect(ctx, x, y, w, h, r) {

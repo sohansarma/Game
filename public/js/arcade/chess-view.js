@@ -9,6 +9,7 @@
 import { name, LEVELS } from './chess.js';
 import { pieceSprite } from './chess-pieces.js';
 import { sfx, haptic } from '../audio.js';
+import { woodTexture, softShadow } from './table.js';
 
 const LIGHT = '#f0d9b5', DARK = '#b58863';
 const START_COUNT = { p: 8, n: 2, b: 2, r: 2, q: 1 };
@@ -68,12 +69,14 @@ export default class ChessView {
     this.canvas.height = Math.max(1, Math.round(rect.height * dpr));
     this.W = rect.width;
     this.H = rect.height;
-    this.barH = 44;
-    const size = Math.floor(Math.min(rect.width - 4, rect.height - this.barH * 2 - 8) / 8) * 8;
+    this.barH = 56;
+    const avail = Math.min(rect.width - 8, rect.height - this.barH * 2 - 16);
+    this.frame = Math.max(14, Math.round(avail * 0.05));
+    const size = Math.floor((avail - this.frame * 2) / 8) * 8;
     this.cell = size / 8;
     this.size = size;
     this.ox = Math.floor((rect.width - size) / 2);
-    this.oy = Math.floor(this.barH + 4 + (rect.height - this.barH * 2 - 8 - size) / 2);
+    this.oy = Math.floor(this.barH + 8 + this.frame + (rect.height - this.barH * 2 - 16 - (size + this.frame * 2)) / 2);
   }
 
   xy(i) {
@@ -246,7 +249,7 @@ export default class ChessView {
       done();
       return;
     }
-    this.anim = { piece, from: mv.from, to: mv.to, board: toBoard, t0: performance.now(), dur: 190, done };
+    this.anim = { piece, from: mv.from, to: mv.to, board: toBoard, t0: performance.now(), dur: 260, done };
   }
 
   afterHalfMove(res, preview, final) {
@@ -331,46 +334,77 @@ export default class ChessView {
     this.raf = requestAnimationFrame(this.loop);
   }
 
+  /** Square texture: maple for light squares, walnut for dark, cut from one plank each. */
+  squareTile(light, i) {
+    const tex = woodTexture(light ? 'maple' : 'walnut', 256, 256);
+    const sx = ((i * 37) % 7) * 28, sy = ((i * 53) % 5) * 40;
+    return [tex, sx, sy];
+  }
+
   draw(now) {
     const ctx = this.ctx, C = this.cell, g = this.game;
     ctx.setTransform(this.dpr, 0, 0, this.dpr, 0, 0);
     ctx.clearRect(0, 0, this.canvas.width, this.canvas.height);
     const board = this.anim ? this.anim.board : this.shown;
-    // frame
-    ctx.fillStyle = '#5d3a1a';
-    ctx.fillRect(this.ox - 4, this.oy - 4, this.size + 8, this.size + 8);
+    const F = this.frame;
+    const bx = this.ox - F, by = this.oy - F, bs = this.size + F * 2;
+    // the board sits on the table: shadow, thick walnut frame with bevel
+    ctx.save();
+    ctx.shadowColor = 'rgba(0,0,0,0.65)';
+    ctx.shadowBlur = 28;
+    ctx.shadowOffsetY = 14;
+    ctx.fillStyle = '#2a160a';
+    ctx.fillRect(bx, by, bs, bs);
+    ctx.restore();
+    ctx.drawImage(woodTexture('frame', 256, 256), bx, by, bs, bs);
+    const bev = ctx.createLinearGradient(bx, by, bx + bs, by + bs);
+    bev.addColorStop(0, 'rgba(255,235,200,0.28)');
+    bev.addColorStop(0.5, 'rgba(255,255,255,0)');
+    bev.addColorStop(1, 'rgba(0,0,0,0.4)');
+    ctx.fillStyle = bev;
+    ctx.fillRect(bx, by, bs, bs);
+    ctx.strokeStyle = 'rgba(0,0,0,0.6)';
+    ctx.lineWidth = 2;
+    ctx.strokeRect(this.ox - 1, this.oy - 1, this.size + 2, this.size + 2);
+    // inlaid squares
     const checkSq = !this.anim && g.inCheck() && !this.sim.over ? g.kingSq(g.turn) : -1;
     for (let i = 0; i < 64; i++) {
       const [x, y] = this.xy(i);
       const light = (Math.floor(i / 8) + (i % 8)) % 2 === 0;
-      ctx.fillStyle = light ? LIGHT : DARK;
-      ctx.fillRect(x, y, C, C);
-      if (this.lastMove && this.lastMove.includes(i)) { ctx.fillStyle = 'rgba(205,210,60,0.55)'; ctx.fillRect(x, y, C, C); }
-      if (i === this.sel) { ctx.fillStyle = 'rgba(20,85,30,0.45)'; ctx.fillRect(x, y, C, C); }
+      const [tex, sx, sy] = this.squareTile(light, i);
+      ctx.drawImage(tex, sx, sy, 56, 56, x, y, C, C);
+      if (this.lastMove && this.lastMove.includes(i)) { ctx.fillStyle = 'rgba(214,190,60,0.45)'; ctx.fillRect(x, y, C, C); }
+      if (i === this.sel) { ctx.fillStyle = 'rgba(40,120,60,0.45)'; ctx.fillRect(x, y, C, C); }
       if (i === checkSq) {
         const gr = ctx.createRadialGradient(x + C / 2, y + C / 2, C * 0.1, x + C / 2, y + C / 2, C * 0.7);
-        gr.addColorStop(0, 'rgba(255,0,0,0.95)');
-        gr.addColorStop(1, 'rgba(255,0,0,0)');
+        gr.addColorStop(0, 'rgba(230,0,0,0.9)');
+        gr.addColorStop(1, 'rgba(230,0,0,0)');
         ctx.fillStyle = gr;
         ctx.fillRect(x, y, C, C);
       }
     }
-    // coordinates inside the edge squares, like a real board
-    ctx.font = `700 ${Math.max(9, C * 0.2)}px system-ui, sans-serif`;
+    // lacquer sheen over the whole playing surface
+    const sh = ctx.createLinearGradient(this.ox, this.oy, this.ox + this.size * 0.7, this.oy + this.size);
+    sh.addColorStop(0, 'rgba(255,255,255,0.16)');
+    sh.addColorStop(0.4, 'rgba(255,255,255,0.03)');
+    sh.addColorStop(0.41, 'rgba(255,255,255,0)');
+    sh.addColorStop(1, 'rgba(0,0,0,0.1)');
+    ctx.fillStyle = sh;
+    ctx.fillRect(this.ox, this.oy, this.size, this.size);
+    // gold coordinates engraved in the frame
+    ctx.fillStyle = '#e2c27a';
+    ctx.font = `700 ${Math.max(9, F * 0.55)}px Georgia, "Times New Roman", serif`;
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
     for (let k = 0; k < 8; k++) {
-      const fileSq = this.flip ? 7 - k : k;
-      const rankNum = this.flip ? k + 1 : 8 - k;
-      ctx.fillStyle = k % 2 === (this.flip ? 0 : 1) ? LIGHT : DARK;
-      ctx.textAlign = 'right';
-      ctx.textBaseline = 'bottom';
-      ctx.fillStyle = (7 + k) % 2 === 0 ? DARK : LIGHT;
-      ctx.fillText('abcdefgh'[fileSq], this.ox + (k + 1) * C - 2, this.oy + this.size - 1);
-      ctx.textAlign = 'left';
-      ctx.textBaseline = 'top';
-      ctx.fillStyle = k % 2 === 0 ? DARK : LIGHT;
-      ctx.fillText(String(rankNum), this.ox + 2, this.oy + k * C + 2);
+      const file = 'abcdefgh'[this.flip ? 7 - k : k];
+      const rank = String(this.flip ? k + 1 : 8 - k);
+      ctx.fillText(file, this.ox + (k + 0.5) * C, this.oy + this.size + F / 2);
+      ctx.fillText(file, this.ox + (k + 0.5) * C, this.oy - F / 2);
+      ctx.fillText(rank, this.ox - F / 2, this.oy + (k + 0.5) * C);
+      ctx.fillText(rank, this.ox + this.size + F / 2, this.oy + (k + 0.5) * C);
     }
-    // pieces
+    // pieces with contact shadows
     const S = Math.round(C * this.dpr);
     for (let i = 0; i < 64; i++) {
       const p = board[i];
@@ -378,16 +412,17 @@ export default class ChessView {
       if (this.anim && i === this.anim.to) continue;
       if (this.drag && this.drag.moved && i === this.drag.from) continue;
       const [x, y] = this.xy(i);
+      softShadow(ctx, x + C * 0.54, y + C * 0.86, C * 0.36, C * 0.12, 0.45);
       ctx.drawImage(pieceSprite(p.toLowerCase(), p === p.toUpperCase(), S), x, y, C, C);
     }
     // legal-move markers
     for (const t of this.targets) {
       const [x, y] = this.xy(t);
-      ctx.fillStyle = 'rgba(20,85,30,0.5)';
+      ctx.fillStyle = 'rgba(20,60,25,0.42)';
       if (board[t]) {
         ctx.beginPath();
-        ctx.arc(x + C / 2, y + C / 2, C * 0.47, 0, Math.PI * 2);
-        ctx.arc(x + C / 2, y + C / 2, C * 0.38, 0, Math.PI * 2, true);
+        ctx.arc(x + C / 2, y + C / 2, C * 0.48, 0, Math.PI * 2);
+        ctx.arc(x + C / 2, y + C / 2, C * 0.39, 0, Math.PI * 2, true);
         ctx.fill();
       } else {
         ctx.beginPath();
@@ -395,48 +430,52 @@ export default class ChessView {
         ctx.fill();
       }
     }
-    // hint arrow
     if (this.hint) this.arrow(this.hint[0], this.hint[1], 'rgba(255,170,0,0.8)');
-    // animating piece
+    // a moving piece is lifted: bigger, with its shadow left on the board
     if (this.anim) {
       const a = this.anim;
       const t = Math.min(1, (now - a.t0) / a.dur);
-      const k = 1 - Math.pow(1 - t, 3);
+      const k = t < 0.5 ? 2 * t * t : 1 - Math.pow(-2 * t + 2, 2) / 2;
+      const lift = Math.sin(t * Math.PI);
       const [x0, y0] = this.xy(a.from), [x1, y1] = this.xy(a.to);
+      const x = x0 + (x1 - x0) * k, y = y0 + (y1 - y0) * k;
       const p = a.board[a.to] || a.piece;
-      ctx.drawImage(pieceSprite(p.toLowerCase(), p === p.toUpperCase(), S), x0 + (x1 - x0) * k, y0 + (y1 - y0) * k, C, C);
+      softShadow(ctx, x + C * 0.54 + lift * C * 0.12, y + C * 0.86 + lift * C * 0.1, C * 0.36 * (1 + lift * 0.2), C * 0.12 * (1 + lift * 0.4), 0.45 - lift * 0.2);
+      const big = C * (1 + lift * 0.14);
+      ctx.drawImage(pieceSprite(p.toLowerCase(), p === p.toUpperCase(), Math.round(big * this.dpr)), x - (big - C) / 2, y - (big - C) / 2 - lift * C * 0.28, big, big);
     }
-    // dragged piece follows the finger, a little bigger
+    // dragged piece follows the finger, held up in the air
     if (this.drag && this.drag.moved) {
       const p = board[this.drag.from];
       if (p) {
         const big = C * 1.3;
         const sq = this.squareAt(this.drag.x, this.drag.y);
-        if (sq >= 0) { const [hx, hy] = this.xy(sq); ctx.strokeStyle = 'rgba(255,255,255,0.8)'; ctx.lineWidth = 3; ctx.strokeRect(hx + 1.5, hy + 1.5, C - 3, C - 3); }
-        ctx.drawImage(pieceSprite(p.toLowerCase(), p === p.toUpperCase(), Math.round(big * this.dpr)), this.drag.x - big / 2, this.drag.y - big * 0.75, big, big);
+        if (sq >= 0) { const [hx, hy] = this.xy(sq); ctx.strokeStyle = 'rgba(255,255,255,0.85)'; ctx.lineWidth = 3; ctx.strokeRect(hx + 1.5, hy + 1.5, C - 3, C - 3); }
+        softShadow(ctx, this.drag.x + C * 0.2, this.drag.y + C * 0.35, C * 0.45, C * 0.16, 0.35);
+        ctx.drawImage(pieceSprite(p.toLowerCase(), p === p.toUpperCase(), Math.round(big * this.dpr)), this.drag.x - big / 2, this.drag.y - big * 0.8, big, big);
       }
     }
     // promotion picker
     if (this.promo) {
-      ctx.fillStyle = 'rgba(0,0,0,0.45)';
+      ctx.fillStyle = 'rgba(0,0,0,0.5)';
       ctx.fillRect(this.ox, this.oy, this.size, this.size);
       const [cx, cy0] = this.xy(this.promo.to);
       const down = cy0 < this.oy + this.size / 2;
       'qnrb'.split('').forEach((t, k) => {
         const cy = down ? cy0 + k * C : cy0 - k * C;
-        ctx.fillStyle = '#fff';
+        ctx.fillStyle = '#f6efe0';
         ctx.beginPath(); ctx.arc(cx + C / 2, cy + C / 2, C * 0.48, 0, Math.PI * 2); ctx.fill();
+        ctx.strokeStyle = '#e2c27a'; ctx.lineWidth = 2; ctx.stroke();
         ctx.drawImage(pieceSprite(t, this.promo.color === 'w', S), cx, cy, C, C);
       });
     }
     this.drawBars(now);
     if (this.thinking) {
-      ctx.fillStyle = 'rgba(255,255,255,0.9)';
-      ctx.font = '700 12px system-ui, sans-serif';
+      ctx.fillStyle = 'rgba(255,240,215,0.85)';
+      ctx.font = '600 12px system-ui, sans-serif';
       ctx.textAlign = 'center';
       ctx.textBaseline = 'middle';
-      const topY = this.oy - this.barH / 2 - 2;
-      ctx.fillText(`thinking${'.'.repeat(1 + Math.floor(now / 300) % 3)}`, this.W / 2, topY);
+      ctx.fillText(`thinking${'.'.repeat(1 + (Math.floor(now / 300) % 3))}`, this.W / 2, by - 6);
     }
   }
 
@@ -462,72 +501,91 @@ export default class ChessView {
   drawBars(now) {
     const g = this.game;
     const counts = { w: {}, b: {} };
-    for (const p of g.board) if (p) { const s = colorOf(p); counts[s][p.toLowerCase()] = (counts[s][p.toLowerCase()] || 0) + 1; }
-    const capturedBy = (side) => { // pieces of the other colour that are gone
+    for (const p of g.board) if (p) { const sd = colorOf(p); counts[sd][p.toLowerCase()] = (counts[sd][p.toLowerCase()] || 0) + 1; }
+    const capturedBy = (side) => {
       const other = side === 'w' ? 'b' : 'w';
       const out = [];
       for (const t of 'qrbnp') for (let k = 0; k < Math.max(0, START_COUNT[t] - (counts[other][t] || 0)); k++) out.push(t);
       return out;
     };
-    const material = (side) => Object.entries(counts[side]).reduce((s, [t, n]) => s + (VAL[t] || 0) * n, 0);
+    const material = (side) => Object.entries(counts[side]).reduce((sum, [t, n]) => sum + (VAL[t] || 0) * n, 0);
     const diff = material('w') - material('b');
     for (const [side, top] of [[this.bottomSide === 'w' ? 'b' : 'w', true], [this.bottomSide, false]]) {
-      const y = top ? this.oy - this.barH - 4 : this.oy + this.size + 4;
+      const y = top ? this.oy - this.frame - this.barH - 8 : this.oy + this.size + this.frame + 8;
       this.drawBar(side, y, capturedBy(side), side === 'w' ? diff : -diff, now);
     }
   }
 
+  /** A seat at the table: felt name tag, captured pieces lying on the wood, chess clock. */
   drawBar(side, y, captured, edge, now) {
     const ctx = this.ctx;
-    const x = this.ox, w = this.size, h = this.barH;
+    const x = 6, w = this.W - 12, h = this.barH;
     const toMove = this.game.turn === side && !this.sim.over;
-    ctx.fillStyle = toMove ? 'rgba(255,255,255,0.18)' : 'rgba(0,0,0,0.25)';
-    roundRect(ctx, x, y, w, h, 10);
-    ctx.fill();
     const names = this.sim.names || { [this.sim.mySide || 'w']: 'You', [this.sim.mySide === 'b' ? 'w' : 'b']: this.sim.opponent ? `${this.sim.opponent}` : 'Bot' };
-    // avatar disc in the piece colour
-    ctx.fillStyle = side === 'w' ? '#f5efe2' : '#26232b';
-    ctx.strokeStyle = toMove ? '#ffd45e' : 'rgba(255,255,255,0.4)';
-    ctx.lineWidth = 2.5;
-    ctx.beginPath(); ctx.arc(x + h / 2, y + h / 2, h * 0.32, 0, Math.PI * 2); ctx.fill(); ctx.stroke();
-    ctx.fillStyle = '#fff';
-    ctx.font = '800 13px ui-rounded, system-ui, sans-serif';
-    ctx.textAlign = 'left';
-    ctx.textBaseline = 'top';
+    const clock = this.sim.clock;
+    const clockW = clock ? 96 : 0;
+    const tagW = Math.min(170, w - clockW - 10);
+    // name tag
+    softShadow(ctx, x + tagW / 2, y + h - 2, tagW * 0.55, 9, 0.45);
+    ctx.fillStyle = toMove ? 'rgba(30,20,12,0.92)' : 'rgba(18,12,7,0.78)';
+    roundRect(ctx, x, y, tagW, h, 12);
+    ctx.fill();
+    ctx.lineWidth = toMove ? 2.5 : 1.2;
+    ctx.strokeStyle = toMove ? '#e2c27a' : 'rgba(255,255,255,0.15)';
+    ctx.stroke();
+    const kingSize = h * 0.78;
+    ctx.drawImage(pieceSprite('k', side === 'w', Math.round(kingSize * this.dpr)), x + 4, y + (h - kingSize) / 2, kingSize, kingSize);
     const nm = names[side] || (side === 'w' ? 'White' : 'Black');
-    ctx.fillText(nm.length > 22 ? nm.slice(0, 21) + '…' : nm, x + h, y + 5);
-    // captured pieces + material edge
-    const S = Math.round(16 * this.dpr);
-    let cx = x + h;
+    ctx.fillStyle = '#fff';
+    ctx.font = '800 14px ui-rounded, system-ui, sans-serif';
+    ctx.textAlign = 'left';
+    ctx.textBaseline = 'middle';
+    ctx.fillText(nm.length > 15 ? nm.slice(0, 14) + '…' : nm, x + kingSize + 8, y + h * 0.36);
+    ctx.font = '600 11px system-ui, sans-serif';
+    ctx.fillStyle = toMove ? '#e2c27a' : 'rgba(255,255,255,0.6)';
+    const colourName = side === 'w' ? 'White' : 'Black';
+    ctx.fillText(toMove ? (this.game.inCheck() ? 'in check!' : 'to move') : nm === colourName ? 'waiting' : colourName, x + kingSize + 8, y + h * 0.7);
+    // captured pieces lying on the table, overlapping like real pieces set aside
+    const pc = Math.min(30, h * 0.6);
+    let cx = x + tagW + 8;
+    const maxX = x + w - clockW - 36 - pc; // leave room for the +N label
+    const step = captured.length > 1 ? Math.min(pc * 0.62, (maxX - cx) / (captured.length - 1)) : 0;
     for (const t of captured) {
-      ctx.drawImage(pieceSprite(t, side !== 'w', S), cx, y + 22, 16, 16);
-      cx += 10;
+      softShadow(ctx, cx + pc * 0.55, y + h * 0.5 + pc * 0.38, pc * 0.32, pc * 0.1, 0.4);
+      ctx.drawImage(pieceSprite(t, side !== 'w', Math.round(pc * this.dpr)), cx, y + h * 0.5 - pc / 2, pc, pc);
+      cx += step;
     }
     if (edge > 0) {
-      ctx.font = '700 11px system-ui, sans-serif';
-      ctx.fillStyle = 'rgba(255,255,255,0.85)';
-      ctx.fillText(`+${edge}`, cx + 8, y + 26);
+      ctx.font = '700 12px system-ui, sans-serif';
+      ctx.fillStyle = '#ffe3a3';
+      ctx.textAlign = 'left';
+      ctx.fillText(`+${edge}`, Math.min(cx + pc * 0.75, maxX + pc + 4), y + h / 2);
     }
-    // clock
-    const clock = this.sim.clock;
+    // the chess clock: a wooden box, LCD face, and a button that is pressed down when it's not your turn
     if (clock) {
       const ms = clock.get(side);
+      const running = clock.running === side;
       const low = ms < 20000;
-      const cw = 74;
-      ctx.fillStyle = clock.running === side ? (low ? '#ff5252' : '#fff') : 'rgba(0,0,0,0.35)';
-      roundRect(ctx, x + w - cw - 6, y + 6, cw, h - 12, 8);
+      const bxx = x + w - clockW, byy = y + 4, bw = clockW, bh = h - 4;
+      softShadow(ctx, bxx + bw / 2, byy + bh, bw * 0.55, 8, 0.5);
+      ctx.drawImage(woodTexture('frame', 128, 128), bxx, byy, bw, bh);
+      ctx.strokeStyle = 'rgba(0,0,0,0.5)';
+      ctx.lineWidth = 1.5;
+      ctx.strokeRect(bxx, byy, bw, bh);
+      // button on top
+      const btnH = running ? 7 : 3;
+      ctx.fillStyle = running ? '#d4a64a' : '#8a6a2a';
+      roundRect(ctx, bxx + bw * 0.3, byy - btnH, bw * 0.4, btnH + 2, 3);
       ctx.fill();
-      ctx.fillStyle = clock.running === side ? (low ? '#fff' : '#111') : '#fff';
-      ctx.font = '800 17px ui-monospace, "SF Mono", Menlo, monospace';
+      // LCD
+      ctx.fillStyle = running ? (low ? '#ffb3a8' : '#cfe8c4') : '#8fa088';
+      roundRect(ctx, bxx + 7, byy + 9, bw - 14, bh - 17, 5);
+      ctx.fill();
+      ctx.fillStyle = running && low ? '#8a0000' : '#1d2a1a';
+      ctx.font = '700 19px ui-monospace, "SF Mono", Menlo, monospace';
       ctx.textAlign = 'center';
       ctx.textBaseline = 'middle';
-      ctx.fillText(fmtClock(ms), x + w - cw / 2 - 6, y + h / 2 + 1);
-    } else if (toMove) {
-      ctx.fillStyle = '#ffd45e';
-      ctx.font = '700 11px system-ui, sans-serif';
-      ctx.textAlign = 'right';
-      ctx.textBaseline = 'middle';
-      ctx.fillText(this.game.inCheck() ? 'CHECK!' : 'to move', x + w - 10, y + h / 2);
+      ctx.fillText(fmtClock(ms), bxx + bw / 2, byy + bh / 2 + 1);
     }
     void now;
   }

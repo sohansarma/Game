@@ -8,6 +8,7 @@ import { ARCADE, ARCADE_BY_ID, arcadeSeed, tierOf, challengeHash, parseChallenge
 import { hashString } from './rng.js';
 import { ChessVersus, ChessCasual, LudoVersus, TIME_CONTROLS, newCode, validCode, rebuild, describe } from './versus.js';
 import { CASUAL_LEVELS } from './arcade/chess.js';
+import { tableBackgroundCSS } from './arcade/table.js';
 import { TEMPLATES, RULE_INFO, EMOJI, PALETTES, sanitize as ugcSanitize, starterSpec, createSim as ugcCreate } from './maker/engine.js';
 import { load, update, save, totalStars, highestUnlocked, exportSave, importSave, resetSave, randomNickname, ADJECTIVES, ANIMALS } from './storage.js';
 import { MatchView } from './matchview.js';
@@ -902,6 +903,13 @@ async function arcadeMenu(id) {
   else if (r === 'cpu') (id === 'chess' ? chessSetup() : ludoVsComputer());
 }
 
+/** Chess & Ludo are played on a real-looking wooden table instead of the arcade frame. */
+function applyTable(el, id) {
+  const on = id === 'chess' || id === 'ludo';
+  el.classList.toggle('table-mode', on);
+  el.style.backgroundImage = on ? tableBackgroundCSS() : '';
+}
+
 // ------------------------------------------------------------------ play a friend (chess / ludo)
 async function versusMenu(id) {
   const g = ARCADE_BY_ID[id];
@@ -1128,6 +1136,7 @@ async function playVersus(id, sim, online, extra = {}) {
     <div class="board-wrap"><canvas id="ar-canvas" aria-label="${esc(g.title)} board"></canvas></div>
     <div id="ar-controls" class="arcade-controls"></div>
     <div class="mode-label" id="ar-label"></div>`);
+  applyTable(el, id);
   const refresh = () => {
     const box = $('#ar-hud', el);
     if (!box) return;
@@ -1337,7 +1346,8 @@ async function playArcade(id, { daily, seed: forcedSeed, challenge } = {}) {
     </div>
     <div class="board-wrap"><canvas id="ar-canvas" aria-label="${esc(g.title)} game area"></canvas></div>
     <div id="ar-controls" class="arcade-controls"></div>
-    <div class="mode-label">${challenge ? `⚔️ Beat <b>${fmt(challenge.score)}</b> by ${esc(challenge.who)}` : daily ? `📅 Daily challenge · ends in ${hms(msToReset())}` : `${g.icon} ${esc(g.title)} · best ${fmt(arcadeStats(id).best)}`}</div>`);
+    <div class="mode-label" id="ar-label">${challenge ? `⚔️ Beat <b>${fmt(challenge.score)}</b> by ${esc(challenge.who)}` : daily ? `📅 Daily challenge · ends in ${hms(msToReset())}` : `${g.icon} ${esc(g.title)} · best ${fmt(arcadeStats(id).best)}`}</div>`);
+  applyTable(el, id);
   const refresh = () => {
     const box = $('#ar-hud', el);
     if (box) box.innerHTML = mod.hud(sim).map((h) => `<div class="hstat ${h.warn ? 'warn' : ''} ${h.big ? 'big' : ''}"><span class="lbl">${esc(h.label)}</span><b>${h.value}</b></div>`).join('');
@@ -1533,6 +1543,7 @@ async function playUgc(g, { test = false } = {}) {
     <div class="board-wrap"><canvas id="ar-canvas" aria-label="${esc(spec.title)}"></canvas></div>
     <div id="ar-controls" class="arcade-controls"></div>
     <div class="mode-label">${test ? '🧪 Test play – not ranked' : `${spec.hero} ${esc(spec.title)} · by ${esc(g.owner)}`}</div>`);
+  applyTable(el, 'ugc');
   const refresh = () => { const box = $('#ar-hud', el); if (box) box.innerHTML = mod.hud(sim).map((h) => `<div class="hstat ${h.warn ? 'warn' : ''} ${h.big ? 'big' : ''}"><span class="lbl">${esc(h.label)}</span><b>${h.value}</b></div>`).join(''); };
   view = new mod.default({
     canvas: $('#ar-canvas', el), controls: $('#ar-controls', el), sim, reducedMotion: load().settings.reducedMotion,
