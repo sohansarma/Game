@@ -768,7 +768,7 @@ async function showLeaderboard(board = 'daily') {
     <div class="topbar"><button class="icon-btn" id="l-back" aria-label="Back">←</button><h2 class="grow">Leaderboards</h2>
       <button class="icon-btn" id="l-refresh" aria-label="Refresh">⟳</button></div>
     <div class="tabs" role="tablist">${LB_TABS.map((t) => `<button role="tab" class="tab ${t.board === tab.board ? 'on' : ''}" data-b="${t.board}" aria-selected="${t.board === tab.board}">${t.label}</button>`).join('')}</div>
-    <p class="small muted" id="l-sub">${BOARDS[tab.board].period === 'day' ? `Today (${tab.key()} UTC)` : BOARDS[tab.board].period === 'week' ? `This week (${tab.key()})` : 'All time'} · every score is verified by replaying the game on the server</p>
+    <p class="small muted" id="l-sub">${BOARDS[tab.board].period === 'day' ? `Today (${tab.key()} UTC)` : BOARDS[tab.board].period === 'week' ? `This week (${tab.key()})` : 'All time'} · every score is verified by replaying the game${api.backendKind() === 'shared' ? '' : ' on the server'}</p>
     <div class="scroll"><div class="list" id="l-list"><p class="center muted">Loading…</p></div></div>
     <p class="center small muted">You are <b>${esc(s.name)}</b> · <button class="btn sm ghost" id="l-name">Change name</button></p>`);
   $('#l-back', el).onclick = () => { sfx.tap(); goHome(); };
@@ -786,6 +786,7 @@ async function showLeaderboard(board = 'daily') {
     await api.flushPending().catch(() => {});
     const data = await api.top(tab.board, tab.key());
     if (currentScreen() !== 'leaderboard') return;
+    $('#l-sub', el)?.insertAdjacentHTML('beforeend', api.backendKind() === 'shared' ? ' · shared with everyone who plays this page' : '');
     if (!data.entries.length) {
       list.innerHTML = `<p class="center muted">No scores yet – be the first! 🐚</p>`;
       return;
@@ -793,9 +794,10 @@ async function showLeaderboard(board = 'daily') {
     list.innerHTML = data.entries.map((e) => `<div class="item ${e.me ? 'me' : ''}"><span class="rank ${e.rank <= 3 ? 'medal-' + e.rank : ''}">${e.rank <= 3 ? ['🥇', '🥈', '🥉'][e.rank - 1] : '#' + e.rank}</span><span class="name">${esc(e.name)}${e.me ? ' (you)' : ''}</span><span class="val">${fmt(e.score)} ${unit}</span></div>`).join('')
       + (data.me && !data.entries.some((e) => e.me) ? `<div class="item me"><span class="rank">#${data.me.rank}</span><span class="name">${esc(s.name)} (you)</span><span class="val">${fmt(data.me.score)} ${unit}</span></div>` : '')
       + `<p class="center small muted">${data.total} player${data.total === 1 ? '' : 's'}</p>`;
-  } catch {
+  } catch (e) {
     if (currentScreen() !== 'leaderboard') return;
     const lb = localBest(tab.board);
+    if (e?.status === 403) { list.innerHTML = `<div class="tip">${esc(e.message)} Your best here: <b>${lb !== undefined ? fmt(lb) : '–'}</b></div>`; return; }
     list.innerHTML = `<div class="tip">📡 Can't reach the leaderboard server right now (offline, or no server is set up for this copy of the game).<br><br>Your best here: <b>${lb !== undefined ? fmt(lb) + ' ' + unit : '–'}</b>${s.pending.length ? `<br>${s.pending.length} score(s) waiting to be sent.` : ''}</div>`;
   }
 }
@@ -925,7 +927,7 @@ function showSettings() {
     update((d) => { d.name = name; });
     sfx.coin();
     toast(`You are now ${name}`);
-    if (load().token) api.rename(name).catch(() => toast('Name saved – it will sync to the leaderboard later'));
+    if (load().token || api.backendKind() === 'shared') api.rename(name).catch(() => toast('Name saved – it will sync to the leaderboard later'));
   };
   $('#s-forget', el).onclick = async () => {
     const ok = await modal('<h2>Delete online scores?</h2><p>This removes your name and all your scores from the online leaderboards. Your progress on this device stays.</p>',

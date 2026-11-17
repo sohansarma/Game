@@ -75,6 +75,17 @@ npm run balance      # re-tune all 60 levels with the bot (~30 s)
 
 On your phone, open the URL and choose **Add to Home Screen** to install it.
 
+## Play it now (hosted, free)
+
+**Live game with a shared leaderboard:** https://claude.ai/artifact/EH7sjmjLGQTBD4fSKyeJFM
+
+This is a claude.ai Artifact, so hosting costs nothing. Its leaderboard lives in the artifact's built-in shared database:
+- every player owns one record (`players/<their id>`), and every signed-in viewer can read all records;
+- players can't change anyone else's record; only the owner can moderate;
+- each run is replayed before it's written, and the move logs of ranked dives are stored for auditing.
+
+The page is private until you share it from its Share menu. Players need Contributor access or above to post scores; view-only players can still play, and their scores stay on their own device. `public/js/api.js` picks this backend automatically when it runs inside claude.ai, and uses the Node server everywhere else.
+
 ## Deploy for free
 
 | Option | What you get | How |
