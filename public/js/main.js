@@ -318,7 +318,7 @@ async function startDeep() {
 
 function playMatch(run) {
   leaveGame();
-  history.pushState({ g: 1 }, '');
+  try { history.pushState({ g: 1 }, ''); } catch { /* sandboxed */ }
   let game;
   if (run.resumeLog) {
     const r = replay(run.cfg, run.resumeLog, { maxBoosters: 0 });
@@ -636,7 +636,7 @@ async function blocksMenu() {
 
 function playBlocks(opts) {
   leaveGame();
-  history.pushState({ g: 1 }, '');
+  try { history.pushState({ g: 1 }, ''); } catch { /* sandboxed */ }
   setBackground(['#4be3c0', '#0b6e8a']);
   const s = load();
   const key = dayKey();
