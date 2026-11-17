@@ -10,8 +10,9 @@ import { hashString } from '../rng.js';
 import miner from './miner.js';
 import puffer from './puffer.js';
 import serpent from './serpent.js';
+import merge from './merge.js';
 
-export const ARCADE = [miner, puffer, serpent];
+export const ARCADE = [miner, puffer, serpent, merge];
 
 export const ARCADE_BY_ID = Object.fromEntries(ARCADE.map((g) => [g.id, g]));
 

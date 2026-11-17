@@ -631,6 +631,7 @@ const VIEWS = {
   miner: () => import('./arcade/miner-view.js'),
   puffer: () => import('./arcade/puffer-view.js'),
   serpent: () => import('./arcade/serpent-view.js'),
+  merge: () => import('./arcade/merge-view.js'),
 };
 
 function arcadeStats(id) {

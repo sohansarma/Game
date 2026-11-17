@@ -3,6 +3,12 @@
 import { T, SHOP_ITEMS } from '../public/js/arcade/miner.js';
 
 export const BOTS = {
+  // Corner strategy with a little randomness.
+  merge(sim, rng) {
+    const order = rng.next() < 0.85 ? ['d', 'l', 'r', 'u'] : rng.shuffle(['d', 'l', 'r', 'u']);
+    for (const d of order) if (sim.move(d).ok) return;
+    sim.quit();
+  },
   // Heads for food, avoiding walls/rocks/body; sometimes picks randomly.
   serpent(sim, rng) {
     if (!sim.started) sim.start();
