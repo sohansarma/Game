@@ -636,6 +636,7 @@ const VIEWS = {
   sort: () => import('./arcade/sort-view.js'),
   breaker: () => import('./arcade/breaker-view.js'),
   catch: () => import('./arcade/catch-view.js'),
+  chess: () => import('./arcade/chess-view.js'),
 };
 
 function arcadeStats(id) {
@@ -850,6 +851,10 @@ async function playArcade(id, { daily }) {
     hooks: {
       onChange: refresh,
       onOver: () => endArcade(run),
+      onRound: (end) => {
+        if (end.winner && end.winner === (sim.mySide || 'w')) toast(`🏆 ${end.reason}! +${fmt(end.gained)} · next: ${sim.opponent}`);
+        else if (!end.winner) toast(`🤝 ${end.reason} · +${fmt(end.gained)} · rematch!`);
+      },
       onQuit: async () => {
         const ok = await modal('<h2>End this run?</h2><p>Your score so far will be saved and submitted.</p>', { buttons: [{ label: 'End run', value: true, cls: 'green' }, { label: 'Keep playing', value: false, cls: 'ghost' }], row: true });
         if (ok && !sim.over) { sim.quit(); endArcade(run); }

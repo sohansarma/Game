@@ -3,7 +3,16 @@
 import { T, SHOP_ITEMS } from '../public/js/arcade/miner.js';
 import { solve as sortSolve } from '../public/js/arcade/sort.js';
 
+import { name as chessSq } from '../public/js/arcade/chess.js';
+
 export const BOTS = {
+  // Random legal moves (it will lose to the ladder, which is the point).
+  chess(sim, rng) {
+    const ms = sim.game.moves();
+    const m = rng.pick(ms);
+    if (!m || sim.game.ply > 200) { sim.resign(); return; }
+    sim.move(chessSq(m.from) + chessSq(m.to) + (m.promo || ''));
+  },
   // Taps crabs after a human-ish reaction delay; sometimes misses or hits a jelly.
   catch(sim, rng) {
     if (!sim.started) { sim.start(); return; }
