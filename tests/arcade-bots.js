@@ -3,6 +3,15 @@
 import { T, SHOP_ITEMS } from '../public/js/arcade/miner.js';
 
 export const BOTS = {
+  // Drops when roughly lined up; gets sloppier over time so runs end.
+  stack(sim, rng) {
+    if (!sim.started) { sim.drop(); return; }
+    const top = sim.tower[sim.tower.length - 1];
+    const err = Math.abs(sim.cur.x - top.x);
+    if (err < 1 + sim.floors * 0.15 + rng.next() * 3 || sim.tick > 50000) sim.drop();
+    else sim.step();
+    if (sim.tick > 60000) sim.quit();
+  },
   // Corner strategy with a little randomness.
   merge(sim, rng) {
     const order = rng.next() < 0.85 ? ['d', 'l', 'r', 'u'] : rng.shuffle(['d', 'l', 'r', 'u']);

@@ -632,6 +632,7 @@ const VIEWS = {
   puffer: () => import('./arcade/puffer-view.js'),
   serpent: () => import('./arcade/serpent-view.js'),
   merge: () => import('./arcade/merge-view.js'),
+  stack: () => import('./arcade/stack-view.js'),
 };
 
 function arcadeStats(id) {

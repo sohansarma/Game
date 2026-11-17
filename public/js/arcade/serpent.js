@@ -148,8 +148,9 @@ function replay(seed, log) {
   for (const a of log) {
     if (!Array.isArray(a) || !Number.isInteger(a[1]) || a[1] < last) return { ok: false, reason: 'bad action', sim };
     last = a[1];
-    while (sim.tick < a[1] && !sim.over) sim.step();
-    if (sim.over) return { ok: false, reason: 'input after game over', sim };
+    if (a[1] > 216000) return { ok: false, reason: 'run too long', sim }; // 1 hour of play
+    while (sim.tick < a[1] && !sim.over && sim.started) sim.step();
+    if (sim.over || sim.tick !== a[1]) return { ok: false, reason: 'input out of sync', sim };
     if (a[0] === 't') { if (!sim.turn(a[2])) return { ok: false, reason: 'invalid turn', sim }; }
     else if (a[0] === 's') sim.start();
     else if (a[0] === 'q') sim.quit();

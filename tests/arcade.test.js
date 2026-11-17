@@ -45,6 +45,13 @@ for (const g of ARCADE) {
     assert.equal(verifyArcade(g.id, 'all', 1, [['zz']]).ok, false);
     assert.equal(verifyArcade(g.id, 'all', 1, 'nope').ok, false);
     assert.equal(verifyArcade(g.id, 'all', -5, []).ok, false);
+    // a forged log with a far-future tick before the game started must fail fast, not hang
+    const t0 = Date.now();
+    for (const a of ['f', 'd', 't', 'm', 's']) {
+      verifyArcade(g.id, 'all', 1, [[a, 999999999, 'r']]);
+      verifyArcade(g.id, 'all', 1, [['s', 0], [a, 999999999, 'r']]);
+    }
+    assert.ok(Date.now() - t0 < 3000, 'replay of a forged log returns quickly');
     // daily seed ignores the client seed
     assert.equal(arcadeSeed(g.id, true, '2026-11-17', 1), arcadeSeed(g.id, true, '2026-11-17', 999));
   });
