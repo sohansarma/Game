@@ -2,7 +2,7 @@
 
 import { Game, replay, SPECIAL } from './engine.js';
 import { BlockGame, replayBlocks } from './blocks.js';
-import { getLevel, LEVEL_COUNT, WORLDS, levelRecipe } from './levels.js';
+import { getLevel, LEVEL_COUNT, MAX_LEVEL, worldOf } from './levels.js';
 import { dailyConfig, deepConfig, dayKey, weekKey, blocksSeed, ENGINE_VERSION, BOARDS } from './modes.js';
 import { load, update, save, totalStars, highestUnlocked, exportSave, importSave, resetSave, randomNickname, ADJECTIVES, ANIMALS } from './storage.js';
 import { MatchView } from './matchview.js';
@@ -153,7 +153,7 @@ function goHome() {
   leaveGame();
   setBackground(['#4fc3f7', '#1e88e5']);
   const s = load();
-  const next = Math.min(highestUnlocked(s), LEVEL_COUNT);
+  const next = Math.min(highestUnlocked(s), MAX_LEVEL);
   const dKey = dayKey();
   const dd = s.dailyDive[dKey];
   const dailyTag = dd?.best !== undefined ? `<span class="tag done">✓ ${fmt(dd.best)}</span>` : dd?.log ? '<span class="tag">Resume</span>' : '<span class="tag">New!</span>';
@@ -175,9 +175,9 @@ function goHome() {
         <div class="logo">Tide<span>pop</span></div>
         <div class="creatures">${creatures}</div>
       </div>
-      <button class="btn wide play-big" id="h-play">▶ Play Level ${next}${next >= LEVEL_COUNT && s.levels[LEVEL_COUNT]?.stars ? ' (replay)' : ''}</button>
+      <button class="btn wide play-big" id="h-play">▶ Play Level ${next}</button>
       <div class="mode-grid">
-        <button class="card" id="h-map"><span class="emoji">🗺️</span><b>Adventure</b><span class="sub">60 levels · 6 worlds</span></button>
+        <button class="card" id="h-map"><span class="emoji">🗺️</span><b>Adventure</b><span class="sub">Endless levels · new worlds every 10</span></button>
         <button class="card" id="h-daily">${dailyTag}<span class="emoji">📅</span><b>Daily Dive</b><span class="sub">Same board for everyone today</span></button>
         <button class="card" id="h-deep">${deepBest ? `<span class="tag done">${fmt(deepBest)}</span>` : ''}<span class="emoji">🐋</span><b>Deep Dive</b><span class="sub">Endless weekly challenge</span></button>
         <button class="card" id="h-blocks">${bd !== undefined ? `<span class="tag done">${fmt(bd)}</span>` : ''}<span class="emoji">🧱</span><b>Reef Blocks</b><span class="sub">Block puzzle · best ${fmt(s.blocks.best)}</span></button>
@@ -208,10 +208,13 @@ function showMap(scrollTo) {
   const s = load();
   const unlocked = highestUnlocked(s);
   let html = '';
-  for (let w = 0; w < WORLDS.length; w++) {
+  // show every world up to the one after the player's current world
+  const worldsShown = Math.min(Math.ceil(MAX_LEVEL / 10), Math.max(LEVEL_COUNT / 10, Math.floor((unlocked - 1) / 10) + 2));
+  for (let w = 0; w < worldsShown; w++) {
     let stars = 0;
     for (let n = w * 10 + 1; n <= w * 10 + 10; n++) stars += s.levels[n]?.stars || 0;
-    html += `<div class="world-banner" style="background:linear-gradient(90deg,${WORLDS[w].bg[1]}cc,${WORLDS[w].bg[0]}66)"><b>${w + 1}. ${WORLDS[w].name}</b><span>⭐ ${stars}/30</span></div>`;
+    const info = worldOf(w * 10 + 1);
+    html += `<div class="world-banner" style="background:linear-gradient(90deg,${info.bg[1]}cc,${info.bg[0]}66)"><b>${w + 1}. ${esc(info.name)}</b><span>⭐ ${stars}/30</span></div>`;
     for (let n = w * 10 + 1; n <= w * 10 + 10; n++) {
       const off = Math.round(Math.sin(n * 0.9) * 90);
       const lv = s.levels[n];
@@ -225,9 +228,9 @@ function showMap(scrollTo) {
     <div class="topbar">
       <button class="icon-btn" id="m-back" aria-label="Back">←</button>
       <h2 class="grow">Adventure</h2>
-      <span class="pill">⭐ ${totalStars(s)}/${LEVEL_COUNT * 3}</span>
+      <span class="pill">⭐ ${totalStars(s)}</span>
     </div>
-    <div class="scroll"><div class="map">${html}<p class="center muted small">More worlds coming in future updates!</p></div></div>`);
+    <div class="scroll"><div class="map">${html}<p class="center muted small">🌊 The reef goes on forever – a new world opens every 10 levels!</p></div></div>`);
   $('#m-back', el).onclick = () => { sfx.tap(); goHome(); };
   for (const b of $$('.level-node', el)) {
     b.onclick = () => {
@@ -237,7 +240,7 @@ function showMap(scrollTo) {
       startLevel(n);
     };
   }
-  const target = $(`.level-node[data-n="${Math.min(scrollTo || unlocked, LEVEL_COUNT)}"]`, el);
+  const target = $(`.level-node[data-n="${scrollTo || unlocked}"]`, el);
   target?.scrollIntoView({ block: 'center' });
 }
 
@@ -271,13 +274,13 @@ function levelTips(n) {
 async function startLevel(n) {
   leaveGame();
   const cfg = getLevel(n, randSeed());
-  const recipe = levelRecipe(n);
-  setBackground(WORLDS[recipe.world].bg);
+  const world = worldOf(n);
+  setBackground(world.bg);
   const best = load().levels[n];
   const goals = new Game({ ...cfg }).objectiveProgress();
   const res = await modal(`
-    <h2>${recipe.boss ? '👑 ' : ''}Level ${n}</h2>
-    <p class="muted small">${WORLDS[recipe.world].name}${best?.stars ? ` · best ${starsHtml(best.stars)}` : ''}</p>
+    <h2>${world.boss ? '👑 ' : ''}Level ${n}</h2>
+    <p class="muted small">${esc(world.name)}${n % 10 === 1 && n > 1 && !best ? ' · <b>new world!</b>' : ''}${best?.stars ? ` · best ${starsHtml(best.stars)}` : ''}</p>
     <div class="goal-list">${goals.map((g) => goalHtml(g, true)).join('')}</div>
     <p><b>${cfg.moves}</b> moves</p>
     ${levelTips(n)}`, { buttons: [{ label: '▶ Play', value: 'play', cls: 'green' }, { label: 'Back', value: 'back', cls: 'ghost' }], row: true });
@@ -590,17 +593,17 @@ async function endLevel(run) {
   haptic(50);
   announceAchievements();
   submitRun({ board: 'stars', level: n, seed: run.cfg.seed, log: game.log });
-  const next = Math.min(n + 1, LEVEL_COUNT);
+  const next = Math.min(n + 1, MAX_LEVEL);
   const worldEnd = n % 10 === 0;
   const p = modal(`<h2>${worldEnd ? '👑 World complete!' : 'Level complete!'}</h2>
     <div class="big-stars">${[0, 1, 2].map((i) => `<span class="${i < stars ? 'star-on' : 'star-off'}">★</span>`).join('')}</div>
     <div class="big-score">${fmt(game.score)}</div>
     ${prev?.best && game.score > prev.best ? '<p>🎉 New best!</p>' : ''}
     ${shells ? `<div class="reward">+${shells} 🐚</div>` : ''}${gift ? `<div class="reward">🎁 ${BOOSTER_ICON[gift]} +1</div>` : ''}
-    ${n === LEVEL_COUNT ? '<p>🏆 You finished every level! Go for 3 stars everywhere, and try the Daily Dive.</p>' : ''}`, {
+    ${worldEnd ? `<p>Next stop: <b>${esc(worldOf(next).name)}</b></p>` : ''}`, {
     dismissable: false,
     buttons: [
-      ...(n < LEVEL_COUNT ? [{ label: `▶ Level ${next}`, value: 'next', cls: 'green' }] : []),
+      ...(n < MAX_LEVEL ? [{ label: `▶ Level ${next}`, value: 'next', cls: 'green' }] : []),
       { label: '↻ Replay', value: 'retry', cls: 'blue' },
       { label: '🗺️ Map', value: 'map', cls: 'ghost' },
     ],

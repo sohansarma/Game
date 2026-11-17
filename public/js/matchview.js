@@ -176,13 +176,15 @@ export class MatchView {
   async playClear(step) {
     const { cleared, upgraded, effects, hits, points, cascade } = step;
     // effects
-    let boom = false, zap = false;
+    let boom = false, zap = false, pearl = false;
     for (const e of effects) {
       this.effects.push({ ...e, t0: performance.now(), dur: 420 });
-      if (e.kind === 'bomb' || e.kind === 'nova') boom = true;
+      if (e.kind === 'bomb') boom = true;
+      else if (e.kind === 'rainbow' || e.kind === 'nova') pearl = true;
       else zap = true;
     }
     if (boom) { sfx.boom(); haptic(40); if (!this.reduced) this.shake = 1; }
+    if (pearl) { sfx.rainbow(); haptic(30); }
     if (zap) sfx.zap();
     if (cleared.length) sfx.match(cascade);
     if (upgraded.length) sfx.special();

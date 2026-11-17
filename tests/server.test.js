@@ -135,6 +135,15 @@ test('adventure stars: verified level wins add up', async () => {
   assert.equal(r.body.score, g.stars());
   const bad = await post('/api/scores', { board: 'stars', level: 4, seed: 777, log: g.log, v: ENGINE_VERSION, playerId: me.playerId, token: me.token });
   assert.equal(bad.status, 422, 'log for a different level fails');
+  const cfg150 = getLevel(150, 31);
+  const g150 = new Game(cfg150);
+  while (g150.state === 'playing') { const m = g150.smartMove(); g150.swap(m[0], m[1]); }
+  if (g150.state === 'won') {
+    const r150 = await post('/api/scores', { board: 'stars', level: 150, seed: 31, log: g150.log, v: ENGINE_VERSION, playerId: me.playerId, token: me.token });
+    assert.equal(r150.status, 200, 'endless level accepted');
+  }
+  const tooFar = await post('/api/scores', { board: 'stars', level: 100000, seed: 1, log: [], v: ENGINE_VERSION, playerId: me.playerId, token: me.token });
+  assert.equal(tooFar.status, 400);
 });
 
 test('rename, forget and persistence', async () => {

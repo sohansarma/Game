@@ -5,7 +5,7 @@
 import { createHash, randomBytes, randomUUID } from 'node:crypto';
 import { replay } from '../public/js/engine.js';
 import { replayBlocks } from '../public/js/blocks.js';
-import { getLevel, LEVEL_COUNT } from '../public/js/levels.js';
+import { getLevel, MAX_LEVEL } from '../public/js/levels.js';
 import { BOARDS, acceptableKeys, dayKey, weekKey, dailyConfig, deepConfig, blocksSeed, ENGINE_VERSION } from '../public/js/modes.js';
 import { ADJECTIVES, ANIMALS } from '../public/js/storage.js';
 
@@ -133,7 +133,7 @@ export function createApi(store, { now = () => new Date(), origin = process.env.
 
     if (board === 'stars') {
       const level = Number(body.level);
-      if (!Number.isInteger(level) || level < 1 || level > LEVEL_COUNT) throw fail(400, 'bad level');
+      if (!Number.isInteger(level) || level < 1 || level > MAX_LEVEL) throw fail(400, 'bad level');
       const seed = Number(body.seed);
       if (!Number.isInteger(seed) || seed < 0 || seed > 0xffffffff) throw fail(400, 'bad seed');
       const r = replay(getLevel(level, seed), log, { maxBoosters: 8 });

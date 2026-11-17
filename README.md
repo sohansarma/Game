@@ -1,6 +1,6 @@
 # 🐚 Tidepop
 
-**A free, ad-free puzzle game for all ages.** Swap cute sea creatures in a 60-level **match-3 adventure**, take on a **Daily Dive** where everyone gets the same board, chase a **weekly endless Deep Dive**, or relax with **Reef Blocks**, a block puzzle. Each mode has a **fair leaderboard**: the server replays every submitted game, so scores can't be faked.
+**A free, ad-free puzzle game for all ages.** Swap cute sea creatures in an **endless match-3 adventure**, take on a **Daily Dive** where everyone gets the same board, chase a **weekly endless Deep Dive**, or relax with **Reef Blocks**, a block puzzle. Each mode has a **fair leaderboard**: the server replays every submitted game, so scores can't be faked.
 
 - 💸 Free forever: no ads, no real-money purchases, no lives or timers. Boosters are bought with shells you earn by playing.
 - 📱 Installable PWA: add it to the home screen on iOS or Android and play offline.
@@ -16,7 +16,7 @@ Two research agents worked on this. One did market research ([`docs/research/mar
 | Finding | Data (2025–26) | What we built |
 |---|---|---|
 | **Block puzzles have the most users and grow fastest** | Block Blast: #1 downloaded game in 2024 and 2025 (~368M downloads, +66% YoY), ~70M DAU / ~300M MAU (company figures). AppMagic named it the fastest-growing sub-genre. | **Reef Blocks** mode, plus a daily version |
-| **Match-3 earns the most and keeps players for years** | Royal Match ~$1.37B, Candy Crush ~$1.0B (2025). Puzzle is ~44% of casual revenue. | **Adventure**: a 60-level match-3 saga |
+| **Match-3 earns the most and keeps players for years** | Royal Match ~$1.37B, Candy Crush ~$1.0B (2025). Puzzle is ~44% of casual revenue. | **Adventure**: an endless match-3 saga |
 | **Daily rituals build habits** | NYT Games: 11.2B puzzle plays in 2025, Wordle alone 4.2B | **Daily Dive** (one ranked attempt, a shareable result) and a 7-day reward calendar |
 | **Puzzle suits every age** | Average player is ~41. No reading or reflexes needed. | Original sea-creature theme, no timers, no punishing lives |
 | **Players dislike ads and pay-to-win** | Top block-puzzle apps rely heavily on ads | Nothing is for sale. Every reward is earned through play. |
@@ -28,7 +28,7 @@ The design agent scored four concepts (match-3 saga, endless block puzzle, merge
 ## Features
 
 **Game modes**
-- **Adventure**: 60 levels across 6 worlds (Sunny Shallows → Abyss Trench), with a boss level ending each world. Goals: reach a score, collect creatures, clean algae 🌿, break barnacle crates 📦, or a mix.
+- **Adventure**: unlimited levels. Levels 1–60 are hand-shaped and individually bot-tuned across 6 worlds (Sunny Shallows → Abyss Trench). From level 61 the reef never ends: new worlds ("Coral Gardens II", "…III") open every 10 levels, each a remix of a bot-tuned late-game layout (mirrored, re-coloured goals, a slightly tighter move limit on later laps). Every 10th level is a boss. Goals: reach a score, collect creatures, clean algae 🌿, break barnacle crates 📦, or a mix.
 - **Daily Dive**: one board per day (UTC) for everyone in the world, 25 moves. Your first finished dive is ranked. If you leave mid-dive, you pick up where you left off.
 - **Deep Dive**: a new endless board each week. You start with 20 moves and earn more by making specials and cascades. Your best score of the week counts.
 - **Reef Blocks**: 8×8 block puzzle. Clear rows and columns, build combos, and get a bonus for a perfect clear. One undo per run, and an unfinished run is saved. Comes in Endless and Daily versions.
@@ -44,7 +44,7 @@ The design agent scored four concepts (match-3 saga, endless block puzzle, merge
 - 1–3 stars per level, chosen by score thresholds that a bot tuned (see [balancing](#difficulty-balancing)).
 - 🐚 Shells are earned from levels, dives, achievements and daily treasure, and spent in the Shell Shop on 🔨 Hammer, 🔀 Shuffle and ➕ +5 Moves.
 - A 7-day daily treasure calendar builds a login streak 🔥. Missing a day just restarts the streak; you never lose anything.
-- 22 achievements, a booster gift for each first clear of every 5th level, and a new-best celebration.
+- 24 achievements (including reaching level 100 and 250), a booster gift for each first clear of every 5th level, and a new-best celebration.
 - If you run out of moves, you can buy +5 moves with a booster or with shells. Retries are free and unlimited.
 
 **Accessibility and quality**
@@ -52,7 +52,7 @@ The design agent scored four concepts (match-3 saga, endless block puzzle, merge
 - Settings for reduced motion (also follows the OS setting), sound effects, music and vibration.
 - Play by touch-swipe, tap-tap, mouse or keyboard (arrows plus Enter; 1/2/3 to pick a block).
 - Works in portrait and landscape, from 320 px wide, and respects the iPhone notch and safe areas.
-- All sound is synthesised with WebAudio and all art is drawn in code. There are no image or audio assets: the whole game is about 240 KB of code, plus icons.
+- All sound is synthesised live with WebAudio: bubble pops, rushing-water Waves, deep Bubble Bomb booms, sparkling Pearl glissandos, combo chimes that climb the scale with each cascade, bell-like stars, a win fanfare and a gentle marimba soundtrack with a soft room reverb. All art is drawn in code. There are no image or audio assets: the whole game is about 240 KB of code, plus icons.
 - Works offline (service worker) and syncs when you're back online. Progress can be exported and imported as a save code. Reset needs a two-step confirmation.
 
 **Privacy**
@@ -69,8 +69,8 @@ Requires Node 18+ and **no npm dependencies**.
 
 ```bash
 npm start            # game + leaderboard at http://localhost:8080
-npm test             # 30 tests: engines, levels, server API, anti-cheat
-npm run balance      # re-tune all 60 levels with the bot (~30 s)
+npm test             # 32 tests: engines, levels (incl. endless), server API, anti-cheat
+npm run balance      # re-tune levels 1–60 with the bot (~30 s)
 ```
 
 On your phone, open the URL and choose **Add to Home Screen** to install it.
@@ -105,7 +105,7 @@ Server environment variables: `PORT` (default 8080), `DATA_DIR` (default `./data
 public/                      ← the whole client (static, no build step)
   js/engine.js               match-3 simulation: pure, deterministic, seeded RNG
   js/blocks.js               block-puzzle simulation (deterministic)
-  js/levels.js               60 level recipes (layouts + goals)
+  js/levels.js               level recipes (1–60) + endless remix generator (61+)
   js/level-tuning.js         GENERATED by scripts/balance.js (moves, goals, stars)
   js/modes.js                Daily / Deep / Blocks board definitions, date keys
   js/matchview.js            canvas renderer + input that animates engine "steps"
@@ -138,7 +138,7 @@ Players are identified by a random ID plus a secret token (stored hashed), so no
 ---
 
 ## Roadmap ideas
-- More worlds and blockers (frost, nets, kelp), which only need new level recipes.
+- More blockers (frost, nets, kelp) to widen the endless remix pool.
 - Friends leaderboards via share codes, and seasonal events.
 - Zen mode (no move limit) for the youngest players.
 

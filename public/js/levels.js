@@ -6,7 +6,12 @@
 import { Rng } from './rng.js';
 import { TUNING } from './level-tuning.js';
 
+// Levels 1-60 are individually bot-tuned. Beyond that the reef never ends:
+// endless levels remix the bot-tuned late-game layouts (see getLevel).
 export const LEVEL_COUNT = 60;
+export const MAX_LEVEL = 99999;
+const REMIX_FROM = 31; // levels 31..60 are the remix pool
+const REMIX_SPAN = LEVEL_COUNT - REMIX_FROM + 1; // 30
 
 export const WORLDS = [
   { name: 'Sunny Shallows', bg: ['#7fd4f5', '#2a8fd6'] },
@@ -16,6 +21,17 @@ export const WORLDS = [
   { name: 'Moonlit Lagoon', bg: ['#8fa8ff', '#2b2f7a'] },
   { name: 'Abyss Trench', bg: ['#5a7bd6', '#0d1638'] },
 ];
+
+const ROMAN = ['', 'I', 'II', 'III', 'IV', 'V', 'VI', 'VII', 'VIII', 'IX', 'X'];
+
+/** World info for any level number (worlds repeat with a numeral: "Coral Gardens II"). */
+export function worldOf(n) {
+  const w = Math.floor((n - 1) / 10);
+  const base = WORLDS[w % WORLDS.length];
+  const lap = Math.floor(w / WORLDS.length) + 1;
+  const numeral = lap <= 10 ? ROMAN[lap] : String(lap);
+  return { index: w, name: lap > 1 ? `${base.name} ${numeral}` : base.name, bg: base.bg, boss: n % 10 === 0 };
+}
 
 export const CREATURES = ['Crab', 'Starfish', 'Urchin', 'Turtle', 'Jelly', 'Snail'];
 
@@ -128,6 +144,7 @@ export function levelRecipe(n) {
 
 /** Full playable config for level n (seed decides the random gem fall). */
 export function getLevel(n, seed) {
+  if (n > LEVEL_COUNT) return remixLevel(n, seed);
   const recipe = levelRecipe(n);
   const t = TUNING[n] || defaultTuning(recipe);
   const objectives = recipe.goals.map((g) => {
@@ -150,6 +167,45 @@ export function getLevel(n, seed) {
     stars: t.stars,
     objectives,
     seed: seed >>> 0,
+  };
+}
+
+/** Endless levels (61+): a bot-tuned late-game layout, mirrored on odd laps,
+ * with its goal creatures re-coloured and a slightly tighter move limit on
+ * each lap (capped, so it stays winnable). Boss levels stay on every 10th. */
+function remixLevel(n, seed) {
+  const k = n - LEVEL_COUNT - 1;
+  const lap = Math.floor(k / REMIX_SPAN) + 1;
+  const base = getLevel(REMIX_FROM + (k % REMIX_SPAN), seed);
+  const rng = new Rng(n * 104729 + 7);
+  const mirror = lap % 2 === 1;
+  const flip = ([r, c, ...rest]) => [r, mirror ? base.cols - 1 - c : c, ...rest];
+  const perm = rng.shuffle([...Array(base.colors).keys()]);
+  // up to 9% fewer moves; collect goals are move-sensitive, so they keep theirs
+  const squeeze = base.objectives.some((o) => o.type === 'collect') ? 1 : 1 - 0.03 * Math.min(lap, 3);
+  const moves = Math.max(10, Math.round(base.moves * squeeze));
+  const ratio = moves / base.moves;
+  const round500 = (x) => Math.max(500, Math.round(x / 500) * 500);
+  const objectives = base.objectives.map((o) => {
+    if (o.type === 'collect') return { ...o, color: perm[o.color] };
+    if (o.type === 'score') return { ...o, target: round500(o.target * ratio) };
+    return { ...o };
+  });
+  const stars = base.stars.map((x) => round500(x * ratio));
+  if (stars[1] <= stars[0]) stars[1] = stars[0] + 500;
+  if (stars[2] <= stars[1]) stars[2] = stars[1] + 1000;
+  const w = worldOf(n);
+  return {
+    ...base,
+    level: n,
+    world: w.index,
+    boss: w.boss,
+    holes: base.holes.map(flip),
+    jelly: base.jelly.map(flip),
+    crates: base.crates.map(flip),
+    moves,
+    stars,
+    objectives,
   };
 }
 

@@ -127,3 +127,34 @@ test('mode keys and configs are stable', () => {
   assert.notEqual(dailyConfig('2026-11-17').seed, dailyConfig('2026-11-18').seed);
   assert.equal(deepConfig('2026-W47').bonusMoves, true);
 });
+
+test('endless levels (61+) are valid, mirrored remixes and keep boss rhythm', async () => {
+  const { worldOf, MAX_LEVEL } = await import('../public/js/levels.js');
+  for (const n of [61, 70, 75, 90, 91, 150, 333, 1000, 5000, MAX_LEVEL]) {
+    const cfg = getLevel(n, 42);
+    assert.equal(cfg.level, n);
+    assert.equal(cfg.boss, n % 10 === 0);
+    assert.ok(cfg.moves >= 10 && cfg.moves <= 45, `level ${n} moves`);
+    assert.ok(cfg.stars[0] < cfg.stars[1] && cfg.stars[1] < cfg.stars[2], `level ${n} stars`);
+    for (const [r, c] of [...cfg.holes, ...cfg.jelly, ...cfg.crates]) assert.ok(r >= 0 && c >= 0 && r < cfg.rows && c < cfg.cols);
+    for (const o of cfg.objectives) if (o.type === 'collect') assert.ok(o.color >= 0 && o.color < cfg.colors);
+    const g = new Game(cfg);
+    assert.ok(g.findMove(), `level ${n} starts with a move`);
+    assert.ok(worldOf(n).name.length > 0);
+  }
+  assert.equal(worldOf(61).name, 'Sunny Shallows II');
+  assert.equal(worldOf(1).name, 'Sunny Shallows');
+  assert.deepEqual(getLevel(150, 7), getLevel(150, 7), 'deterministic');
+});
+
+test('endless levels stay winnable for the bot (sampled)', () => {
+  for (const n of [61, 78, 100, 133, 148, 190, 208, 264, 301]) {
+    let wins = 0;
+    for (let s = 0; s < 6; s++) {
+      const g = new Game(getLevel(n, 9000 + s * 13));
+      while (g.state === 'playing') { const m = g.smartMove(); g.swap(m[0], m[1]); }
+      if (g.state === 'won') wins++;
+    }
+    assert.ok(wins >= 2, `level ${n}: bot won ${wins}/6`);
+  }
+});

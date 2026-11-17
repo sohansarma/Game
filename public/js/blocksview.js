@@ -143,7 +143,7 @@ export class BlocksView {
     const C = this.cell;
     const now = performance.now();
     if (res.lines) {
-      sfx.match(Math.min(8, res.lines + res.combo));
+      sfx.lines(res.lines, res.combo);
       if (res.lines >= 2) haptic(35);
       for (const [r, c, col] of res.clearedCells) {
         this.flashes.push({ r, c, color: col, t0: now });
