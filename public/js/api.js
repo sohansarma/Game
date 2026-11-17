@@ -32,6 +32,13 @@ async function sharedDb() {
   return shared;
 }
 
+/** True when running inside the claude.ai artifact viewer. */
+export function inArtifact() {
+  return typeof window !== 'undefined' && !!window.claude?.use;
+}
+
+const SIGN_IN = 'Sign in to Claude to join the shared leaderboard. Your scores are saved on this device.';
+
 export function backendKind() {
   return shared ? 'shared' : online ? 'server' : null;
 }
@@ -150,6 +157,7 @@ export function isOnline() {
 
 export async function checkServer() {
   if (await sharedDb()) return (online = true);
+  if (inArtifact()) return (online = false); // no Node server behind an artifact
   try {
     await req('/health', {}, 3000);
   } catch {
@@ -203,6 +211,7 @@ export async function submit(entry) {
       throw friendly(e);
     }
   }
+  if (inArtifact()) return { error: SIGN_IN };
   try {
     const p = await ensureRegistered();
     const res = await req('/scores', {
@@ -249,6 +258,7 @@ export async function top(board, key) {
       throw friendly(e);
     }
   }
+  if (inArtifact()) throw Object.assign(new Error(SIGN_IN), { status: 401 });
   const s = load();
   const q = new URLSearchParams({ board, key: key || 'all', playerId: s.playerId });
   return req('/leaderboard?' + q.toString());

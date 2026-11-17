@@ -75,7 +75,7 @@ async function onboarding() {
   let name = load().name;
   const res = await modal(`
     <div class="logo">Tide<span>pop</span></div>
-    <p>Welcome to the reef! Match sea creatures, beat 60 levels, take on the <b>Daily Dive</b> and build reefs in <b>Reef Blocks</b>.</p>
+    <p>Welcome to the reef! Match sea creatures, explore an endless reef of levels, take on the <b>Daily Dive</b> and build reefs in <b>Reef Blocks</b>.</p>
     <p class="small muted">Free forever · no ads · no purchases · plays offline</p>
     <div class="tip">Your leaderboard name (no personal info needed):<br><b id="ob-name" style="font-size:1.2rem">${esc(name)}</b>
       <button class="btn sm ghost" id="ob-roll" style="margin-left:6px">🎲 New name</button></div>
@@ -800,7 +800,7 @@ async function showLeaderboard(board = 'daily') {
   } catch (e) {
     if (currentScreen() !== 'leaderboard') return;
     const lb = localBest(tab.board);
-    if (e?.status === 403) { list.innerHTML = `<div class="tip">${esc(e.message)} Your best here: <b>${lb !== undefined ? fmt(lb) : '–'}</b></div>`; return; }
+    if (e?.status === 403 || e?.status === 401) { list.innerHTML = `<div class="tip">${esc(e.message)} Your best here: <b>${lb !== undefined ? fmt(lb) : '–'}</b></div>`; return; }
     list.innerHTML = `<div class="tip">📡 Can't reach the leaderboard server right now (offline, or no server is set up for this copy of the game).<br><br>Your best here: <b>${lb !== undefined ? fmt(lb) + ' ' + unit : '–'}</b>${s.pending.length ? `<br>${s.pending.length} score(s) waiting to be sent.` : ''}</div>`;
   }
 }
