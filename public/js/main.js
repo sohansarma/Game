@@ -629,6 +629,7 @@ async function endLevel(run) {
 // ------------------------------------------------------------------ arcade hub
 const VIEWS = {
   miner: () => import('./arcade/miner-view.js'),
+  puffer: () => import('./arcade/puffer-view.js'),
 };
 
 function arcadeStats(id) {

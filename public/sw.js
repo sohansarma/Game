@@ -5,7 +5,7 @@ const SHELL = [
   './', 'index.html', 'config.js', 'manifest.webmanifest', 'css/style.css',
   'js/main.js', 'js/engine.js', 'js/rng.js', 'js/blocks.js', 'js/levels.js', 'js/level-tuning.js', 'js/modes.js',
   'js/storage.js', 'js/audio.js', 'js/api.js', 'js/ui.js', 'js/creatures.js', 'js/matchview.js', 'js/blocksview.js',
-  'js/achievements.js', 'js/arcade/index.js', 'js/arcade/miner.js', 'js/arcade/miner-view.js', 'icons/icon.svg', 'icons/icon-192.png', 'icons/icon-512.png', 'icons/apple-touch-icon.png',
+  'js/achievements.js', 'js/arcade/index.js', 'js/arcade/miner.js', 'js/arcade/miner-view.js', 'js/arcade/puffer.js', 'js/arcade/puffer-view.js', 'icons/icon.svg', 'icons/icon-192.png', 'icons/icon-512.png', 'icons/apple-touch-icon.png',
 ];
 
 self.addEventListener('install', (e) => {

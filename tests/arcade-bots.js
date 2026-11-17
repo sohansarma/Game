@@ -3,6 +3,13 @@
 import { T, SHOP_ITEMS } from '../public/js/arcade/miner.js';
 
 export const BOTS = {
+  // Flaps toward the next gap, with occasional mistakes so it eventually loses.
+  puffer(sim, rng) {
+    const next = sim.pipes.find((p) => p.x + 16 > 25) || sim.pipes[0];
+    if (!sim.started || (sim.y > next.gy + 5 && sim.vy > 0 && rng.next() < 0.97)) sim.flap();
+    sim.step();
+    if (sim.tick > 20000) sim.quit();
+  },
   miner(sim, rng) {
     if (sim.atShop()) {
       if (sim.gold >= SHOP_ITEMS.pick.price(sim) && sim.pick < 2) { sim.buy('pick'); return; }
