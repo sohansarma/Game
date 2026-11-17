@@ -204,7 +204,7 @@ function replay(seed, log) {
 export default {
   id: 'breaker',
   title: 'Coral Breaker',
-  icon: '🧱',
+  icon: '💥',
   tagline: 'Bounce the pearl, smash the coral',
   color: ['#ff8a65', '#3e2723'],
   maxLog: 40000,

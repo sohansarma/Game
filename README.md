@@ -1,6 +1,8 @@
-# 🐚 Tidepop
+# 🐚 Tidepop Arcade
 
-**A free, ad-free puzzle game for all ages.** Swap cute sea creatures in an **endless match-3 adventure**, take on a **Daily Dive** where everyone gets the same board, chase a **weekly endless Deep Dive**, or relax with **Reef Blocks**, a block puzzle. Each mode has a **fair leaderboard**: the server replays every submitted game, so scores can't be faked.
+**A free, ad-free arcade of 10 games for all ages**: Tidepop (match-3), Reef Blocks, Deep Miner, Puffer Dash, Sea Serpent, Shell Merge, Reef Tower, Sort Splash, Coral Breaker and Crab Catch. Every game has a daily challenge that's the same for everyone, an all-time board and server-verified scores.
+
+The original game: Swap cute sea creatures in an **endless match-3 adventure**, take on a **Daily Dive** where everyone gets the same board, chase a **weekly endless Deep Dive**, or relax with **Reef Blocks**, a block puzzle. Each mode has a **fair leaderboard**: the server replays every submitted game, so scores can't be faked.
 
 - 💸 Free forever: no ads, no real-money purchases, no lives or timers. Boosters are bought with shells you earn by playing.
 - 📱 Installable PWA: add it to the home screen on iOS or Android and play offline.
@@ -25,7 +27,32 @@ The design agent scored four concepts (match-3 saga, endless block puzzle, merge
 
 ---
 
-## Features
+## The arcade
+
+You open the app into the **Arcade hub**. It's built to bring you back every day and keep you competing:
+
+- ⏳ A **live countdown** to the daily reset (UTC midnight). It turns red in the last hour.
+- 🔥 A **hot game of the day** that pays **2× shells**, a different game each day.
+- 🎯 **Daily missions**: play 3 daily challenges, beat a personal best, play the hot game. Finishing all three opens a chest worth 150 shells plus boosters.
+- 📉 **Rank alerts**: if another player passes you on a daily board, the hub tells you and shows your current rank on that game's card.
+- 🏆 **Leaderboards** for every game (today and all-time), with streaks, achievements and shareable results.
+
+| # | Game | Genre | How you score |
+|---|---|---|---|
+| 1 | 🐚 **Tidepop** | Match-3 saga (endless levels) + Daily Dive + Deep Dive | Stars and dive scores |
+| 2 | 🧱 **Reef Blocks** | Block puzzle | Lines, multi-line clears and combos |
+| 3 | ⛏️ **Deep Miner** | Turn-based mining | Gold earned + 10 per metre. Energy, ores, TNT, lava, shops every 25 m |
+| 4 | 🐡 **Puffer Dash** | Tap-to-flap | 10 per coral passed + pearls. Medals at 10, 25 and 50 |
+| 5 | 🐍 **Sea Serpent** | Snake | Shrimp (more as you grow), 6-second golden pearls, falling rocks |
+| 6 | 🐳 **Shell Merge** | 2048-style merge | Merged values, up a ladder of sea creatures to the 👑 |
+| 7 | 🗼 **Reef Tower** | Timing stacker | 10 per floor + perfect-drop streak bonus |
+| 8 | 🧪 **Sort Splash** | Colour-sort puzzles | Puzzle rewards against an oxygen supply. Puzzles are checked by a solver before you get them |
+| 9 | 💥 **Coral Breaker** | Brick breaker | Bricks, power-ups (wide paddle, extra life, bonus pearl), wall-clear bonus |
+| 10 | 🦀 **Crab Catch** | 60-second whack-a-crab | Catches × combo, golden crabs, avoid jellyfish, ⏰ adds time |
+
+**How the games are built:** each arcade game is a pure, deterministic simulation in `public/js/arcade/<game>.js`; the drawing and input code is in `<game>-view.js`. Turn-based games log moves. Real-time games run at a fixed 60 ticks per second and log only `[tick, input]`. The server, or the shared leaderboard in the hosted copy, replays the log with the same file to get the true score. A forged log can't stall the server: input that's out of sync with the replay, or a run over one hour long, is rejected.
+
+## Features (Tidepop)
 
 **Game modes**
 - **Adventure**: unlimited levels. Levels 1–60 are hand-shaped and individually bot-tuned across 6 worlds (Sunny Shallows → Abyss Trench). From level 61 the reef never ends: new worlds ("Coral Gardens II", "…III") open every 10 levels, each a remix of a bot-tuned late-game layout (mirrored, re-coloured goals, a slightly tighter move limit on later laps). Every 10th level is a boss. Goals: reach a score, collect creatures, clean algae 🌿, break barnacle crates 📦, or a mix.
@@ -44,7 +71,7 @@ The design agent scored four concepts (match-3 saga, endless block puzzle, merge
 - 1–3 stars per level, chosen by score thresholds that a bot tuned (see [balancing](#difficulty-balancing)).
 - 🐚 Shells are earned from levels, dives, achievements and daily treasure, and spent in the Shell Shop on 🔨 Hammer, 🔀 Shuffle and ➕ +5 Moves.
 - A 7-day daily treasure calendar builds a login streak 🔥. Missing a day just restarts the streak; you never lose anything.
-- 24 achievements (including reaching level 100 and 250), a booster gift for each first clear of every 5th level, and a new-best celebration.
+- 33 achievements, including level 100 and 250, playing all 10 games, and a score milestone in each arcade game, a booster gift for each first clear of every 5th level, and a new-best celebration.
 - If you run out of moves, you can buy +5 moves with a booster or with shells. Retries are free and unlimited.
 
 **Accessibility and quality**
@@ -69,7 +96,7 @@ Requires Node 18+ and **no npm dependencies**.
 
 ```bash
 npm start            # game + leaderboard at http://localhost:8080
-npm test             # 32 tests: engines, levels (incl. endless), server API, anti-cheat
+npm test             # 42 tests: every game's engine + replay, levels, server API, anti-cheat
 npm run balance      # re-tune levels 1–60 with the bot (~30 s)
 ```
 
