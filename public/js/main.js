@@ -633,6 +633,7 @@ const VIEWS = {
   serpent: () => import('./arcade/serpent-view.js'),
   merge: () => import('./arcade/merge-view.js'),
   stack: () => import('./arcade/stack-view.js'),
+  sort: () => import('./arcade/sort-view.js'),
 };
 
 function arcadeStats(id) {

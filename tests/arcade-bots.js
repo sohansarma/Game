@@ -1,8 +1,25 @@
 // Simple bots that play each arcade game through its public sim API.
 // They exist to test determinism and server verification, not to play well.
 import { T, SHOP_ITEMS } from '../public/js/arcade/miner.js';
+import { solve as sortSolve } from '../public/js/arcade/sort.js';
 
 export const BOTS = {
+  sort(sim, rng) {
+    if (!sim._plan || !sim._plan.length || sim._planLevel !== sim.level) {
+      sim._plan = sim.level <= 4 ? sortSolve(sim.tubes, 20000) : null;
+      sim._planLevel = sim.level;
+      if (!sim._plan) { // too hard for the bot: random legal pours until oxygen runs out
+        const legal = [];
+        for (let a = 0; a < sim.tubes.length; a++) for (let b = 0; b < sim.tubes.length; b++) if (sim.pourCount(a, b)) legal.push([a, b]);
+        if (!legal.length) { if (!sim.extraTube().ok) sim.quit(); return; }
+        const [a, b] = rng.pick(legal);
+        sim.pour(a, b);
+        return;
+      }
+    }
+    const [a, b] = sim._plan.shift();
+    if (!sim.pour(a, b).ok) sim._plan = null;
+  },
   // Drops when roughly lined up; gets sloppier over time so runs end.
   stack(sim, rng) {
     if (!sim.started) { sim.drop(); return; }

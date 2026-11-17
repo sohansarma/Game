@@ -12,8 +12,9 @@ import puffer from './puffer.js';
 import serpent from './serpent.js';
 import merge from './merge.js';
 import stack from './stack.js';
+import sort from './sort.js';
 
-export const ARCADE = [miner, puffer, serpent, merge, stack];
+export const ARCADE = [miner, puffer, serpent, merge, stack, sort];
 
 export const ARCADE_BY_ID = Object.fromEntries(ARCADE.map((g) => [g.id, g]));
 
