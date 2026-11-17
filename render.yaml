@@ -1,0 +1,14 @@
+# One-click deploy on Render (free web service). Note: the free plan has no
+# persistent disk, so leaderboards reset when the service is redeployed or
+# restarted. Add a disk (paid) or use Fly.io volumes for permanent boards.
+services:
+  - type: web
+    name: tidepop
+    runtime: node
+    plan: free
+    buildCommand: "echo no build needed"
+    startCommand: node server/server.js
+    healthCheckPath: /api/health
+    envVars:
+      - key: DATA_DIR
+        value: ./data

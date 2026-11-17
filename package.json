@@ -1,0 +1,14 @@
+{
+  "name": "gem-bloom",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Free, ad-free match-3 + block puzzle PWA with verified leaderboards",
+  "scripts": {
+    "start": "node server/server.js",
+    "test": "node --test tests/*.test.js",
+    "balance": "node scripts/balance.js"
+  },
+  "engines": { "node": ">=18" },
+  "license": "MIT"
+}
