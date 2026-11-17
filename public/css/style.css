@@ -287,3 +287,5 @@ body.reduced-motion *, body.reduced-motion *::before, body.reduced-motion *::aft
 .hstat.big b { font-size: 1.35rem; }
 .hstat.warn b { color: var(--coral); }
 .arcade-controls { min-height: 44px; display: flex; align-items: center; justify-content: center; margin-bottom: 4px; }
+.dpad { display: grid; grid-template-columns: repeat(4, 56px); gap: 8px; justify-content: center; }
+.dpad .btn { min-height: 44px; padding: 0; font-size: 1.1rem; }

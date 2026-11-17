@@ -630,6 +630,7 @@ async function endLevel(run) {
 const VIEWS = {
   miner: () => import('./arcade/miner-view.js'),
   puffer: () => import('./arcade/puffer-view.js'),
+  serpent: () => import('./arcade/serpent-view.js'),
 };
 
 function arcadeStats(id) {
