@@ -27,9 +27,15 @@ jobs:
         with:
           node-version: 22
       - run: npm test
-      - uses: actions/configure-pages@v5
-      - uses: actions/upload-pages-artifact@v3
+      - id: pages
+        uses: actions/configure-pages@v5
+        continue-on-error: true
+      - if: steps.pages.outcome != 'success'
+        run: echo "::notice::GitHub Pages is not enabled yet. Enable it in Settings → Pages → Source 'GitHub Actions', then re-run this workflow."
+      - if: steps.pages.outcome == 'success'
+        uses: actions/upload-pages-artifact@v3
         with:
           path: public
       - id: deployment
+        if: steps.pages.outcome == 'success'
         uses: actions/deploy-pages@v4
