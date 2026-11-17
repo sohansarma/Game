@@ -13,7 +13,7 @@ let srv, store, base, dir;
 
 before(async () => {
   dir = mkdtempSync(path.join(tmpdir(), 'tidepop-'));
-  ({ server: srv, store } = createServer({ dataDir: dir }));
+  ({ server: srv, store } = createServer({ dataDir: dir, rate: { capacity: 500 } }));
   await new Promise((r) => srv.listen(0, r));
   base = `http://127.0.0.1:${srv.address().port}`;
 });
@@ -168,4 +168,28 @@ test('bad input handling', async () => {
   const big = await fetch(base + '/api/scores', { method: 'POST', body: 'x'.repeat(70000) }).catch(() => ({ status: 413 }));
   assert.equal(big.status, 413);
   assert.equal((await post('/api/unknown', {})).status, 404);
+});
+
+test('online matches: create, join, append-only moves, resign', async () => {
+  const host = await register('Witty Squid 71'), guest = await register('Zippy Seal 72'), stranger = await register('Gentle Crab 73');
+  const call = (who, body) => post('/api/match', { ...body, playerId: who.playerId, token: who.token });
+  assert.equal((await call(host, { action: 'create', code: 'BAD!!', game: 'chess', seed: 1 })).status, 400);
+  assert.equal((await call(host, { action: 'create', code: 'K7PQX', game: 'poker', seed: 1 })).status, 400);
+  assert.equal((await call(host, { action: 'create', code: 'K7PQX', game: 'chess', seed: 1, opts: { hostSide: 'w' } })).status, 200);
+  assert.equal((await call(guest, { action: 'create', code: 'K7PQX', game: 'chess', seed: 1 })).status, 409, 'code taken');
+  assert.equal((await call(host, { action: 'join', code: 'K7PQX' })).status, 400, 'cannot join own match');
+  const j = await call(guest, { action: 'join', code: 'K7PQX' });
+  assert.equal(j.status, 200);
+  assert.equal(j.body.me, 'guest');
+  assert.equal((await call(stranger, { action: 'join', code: 'K7PQX' })).status, 409, 'match full');
+  assert.equal((await call(host, { action: 'move', code: 'K7PQX', moves: ['e2e4'] })).status, 200);
+  assert.equal((await call(host, { action: 'move', code: 'K7PQX', moves: ['d2d4'] })).status, 409, 'cannot rewrite history');
+  assert.equal((await call(host, { action: 'move', code: 'K7PQX', moves: ['e2e4', 'zz'] })).status, 400, 'bad move format');
+  assert.equal((await call(stranger, { action: 'move', code: 'K7PQX', moves: ['e7e5'] })).status, 403);
+  assert.equal((await call(guest, { action: 'move', code: 'K7PQX', moves: ['e7e5'] })).status, 200);
+  const g = await get(`/api/match?code=K7PQX&playerId=${host.playerId}`);
+  assert.deepEqual([g.body.hostMoves, g.body.guestMoves, g.body.me, g.body.guestName], [['e2e4'], ['e7e5'], 'host', 'Zippy Seal 72']);
+  assert.equal((await call(guest, { action: 'resign', code: 'K7PQX' })).status, 200);
+  assert.equal((await get('/api/match?code=K7PQX')).body.resigned, 'guest');
+  assert.equal((await get('/api/match?code=NOPE2')).status, 404);
 });

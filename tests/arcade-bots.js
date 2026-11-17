@@ -5,7 +5,13 @@ import { solve as sortSolve } from '../public/js/arcade/sort.js';
 
 import { name as chessSq } from '../public/js/arcade/chess.js';
 
+import { aiChoose as ludoAI } from '../public/js/arcade/ludo.js';
+
 export const BOTS = {
+  ludo(sim, rng) {
+    if (!sim.canMove()) { sim.resign(); return; }
+    sim.move(ludoAI(sim.game, 0.7, rng));
+  },
   // Random legal moves (it will lose to the ladder, which is the point).
   chess(sim, rng) {
     const ms = sim.game.moves();

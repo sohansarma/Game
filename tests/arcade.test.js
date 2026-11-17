@@ -60,7 +60,7 @@ for (const g of ARCADE) {
 let srv, base, dir;
 before(async () => {
   dir = mkdtempSync(path.join(tmpdir(), 'tidepop-arcade-'));
-  ({ server: srv } = createServer({ dataDir: dir }));
+  ({ server: srv } = createServer({ dataDir: dir, rate: { capacity: 500 } }));
   await new Promise((r) => srv.listen(0, r));
   base = `http://127.0.0.1:${srv.address().port}`;
 });

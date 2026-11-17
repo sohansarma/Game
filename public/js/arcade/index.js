@@ -16,8 +16,9 @@ import sort from './sort.js';
 import breaker from './breaker.js';
 import crabCatch from './catch.js';
 import chess from './chess.js';
+import ludo from './ludo.js';
 
-export const ARCADE = [miner, puffer, serpent, merge, stack, sort, breaker, crabCatch, chess];
+export const ARCADE = [chess, ludo, miner, puffer, serpent, merge, stack, sort, breaker, crabCatch];
 
 export const ARCADE_BY_ID = Object.fromEntries(ARCADE.map((g) => [g.id, g]));
 

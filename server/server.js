@@ -33,9 +33,9 @@ const SECURITY_HEADERS = {
   'permissions-policy': 'camera=(), microphone=(), geolocation=()',
 };
 
-export function createServer({ dataDir = process.env.DATA_DIR || path.resolve(__dirname, '..', 'data'), now } = {}) {
+export function createServer({ dataDir = process.env.DATA_DIR || path.resolve(__dirname, '..', 'data'), now, rate } = {}) {
   const store = createStore(dataDir);
-  const api = createApi(store, { now });
+  const api = createApi(store, { now, rate });
 
   const server = http.createServer(async (req, res) => {
     try {

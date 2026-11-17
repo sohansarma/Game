@@ -73,9 +73,9 @@ function rateLimiter({ capacity = 40, refillPerSec = 0.5 } = {}) {
   };
 }
 
-export function createApi(store, { now = () => new Date(), origin = process.env.ALLOWED_ORIGIN || '*' } = {}) {
+export function createApi(store, { now = () => new Date(), origin = process.env.ALLOWED_ORIGIN || '*', rate = {} } = {}) {
   const { db } = store;
-  const limit = rateLimiter();
+  const limit = rateLimiter(rate);
   const fail = (status, error) => Object.assign(new Error(error), { status });
 
   function auth(body) {
@@ -122,6 +122,72 @@ export function createApi(store, { now = () => new Date(), origin = process.env.
     store.dirty();
     const rank = ranking(id).findIndex(([pid]) => pid === playerId) + 1;
     return { score: board[playerId]?.score ?? score, best: board[playerId]?.score, rank, improved };
+  }
+
+  // ---- online matches (chess / ludo): each player only writes their own moves
+  const MATCH_CODE = /^[A-HJ-NP-Z2-9]{5}$/;
+  const MATCH_GAMES = { chess: 400, ludo: 3000 };
+  function matchView(m, playerId) {
+    return {
+      code: m.code, game: m.game, seed: m.seed, opts: m.opts,
+      hostName: db.players[m.host.pid]?.name || 'Host', guestName: m.guest ? db.players[m.guest.pid]?.name || 'Guest' : null,
+      hostMoves: m.host.moves, guestMoves: m.guest?.moves || [], joined: !!m.guest,
+      resigned: m.resigned || null, me: playerId === m.host.pid ? 'host' : m.guest && playerId === m.guest.pid ? 'guest' : null,
+    };
+  }
+  function handleMatch(body) {
+    const p = auth(body);
+    void p;
+    db.matches ||= {};
+    const now = Date.now();
+    for (const [k, m] of Object.entries(db.matches)) if (now - m.at > 7 * 86400000) delete db.matches[k];
+    const code = body.code;
+    if (!MATCH_CODE.test(code || '')) throw fail(400, 'bad code');
+    const m = db.matches[code];
+    switch (body.action) {
+      case 'create': {
+        if (m) throw fail(409, 'code already used');
+        if (!MATCH_GAMES[body.game]) throw fail(400, 'unknown game');
+        const seed = Number(body.seed);
+        if (!Number.isInteger(seed) || seed < 0 || seed > 0xffffffff) throw fail(400, 'bad seed');
+        const opts = body.game === 'chess' ? { hostSide: body.opts?.hostSide === 'b' ? 'b' : 'w' } : { bots: !!body.opts?.bots };
+        if (Object.keys(db.matches).length > 5000) throw fail(503, 'too many open matches');
+        db.matches[code] = { code, game: body.game, seed, opts, host: { pid: body.playerId, moves: [] }, guest: null, at: now };
+        store.dirty();
+        return { ok: true };
+      }
+      case 'join': {
+        if (!m) throw fail(404, 'No match with that code');
+        if (m.host.pid === body.playerId) throw fail(400, "That's your own match – share the code with a friend");
+        if (m.guest && m.guest.pid !== body.playerId) throw fail(409, 'That match already has two players');
+        if (!m.guest) { m.guest = { pid: body.playerId, moves: [] }; m.at = now; store.dirty(); }
+        return matchView(m, body.playerId);
+      }
+      case 'move': {
+        if (!m) throw fail(404, 'No match with that code');
+        const side = m.host.pid === body.playerId ? m.host : m.guest?.pid === body.playerId ? m.guest : null;
+        if (!side) throw fail(403, 'not in this match');
+        const mv = body.moves;
+        const okMove = m.game === 'chess' ? (x) => typeof x === 'string' && /^[a-h][1-8][a-h][1-8][qrbn]?$/.test(x) : (x) => Number.isInteger(x) && x >= 0 && x < 4;
+        if (!Array.isArray(mv) || mv.length > MATCH_GAMES[m.game] || !mv.every(okMove)) throw fail(400, 'bad moves');
+        // moves are append-only: the new list must extend the stored one
+        if (mv.length < side.moves.length || side.moves.some((x, i) => x !== mv[i])) throw fail(409, 'moves out of sync');
+        side.moves = mv;
+        m.at = now;
+        store.dirty();
+        return { ok: true };
+      }
+      case 'resign': {
+        if (!m) throw fail(404, 'No match with that code');
+        const role = m.host.pid === body.playerId ? 'host' : m.guest?.pid === body.playerId ? 'guest' : null;
+        if (!role) throw fail(403, 'not in this match');
+        m.resigned ||= role;
+        store.dirty();
+        return { ok: true };
+      }
+      default:
+        throw fail(400, 'unknown action');
+    }
   }
 
   async function handleScore(body) {
@@ -205,6 +271,12 @@ export function createApi(store, { now = () => new Date(), origin = process.env.
           me: myIdx >= 0 ? { rank: myIdx + 1, score: ranked[myIdx][1].score } : null,
         }, origin);
       }
+      if (req.method === 'GET' && url.pathname === '/api/match') {
+        const code = url.searchParams.get('code');
+        const m = typeof code === 'string' && db.matches?.[code];
+        if (!m) throw fail(404, 'No match with that code');
+        return send(res, 200, matchView(m, url.searchParams.get('playerId')), origin);
+      }
       if (req.method !== 'POST') throw fail(404, 'not found');
       if (!limit(ip)) throw fail(429, 'slow down a little');
       const body = await readBody(req);
@@ -234,6 +306,8 @@ export function createApi(store, { now = () => new Date(), origin = process.env.
           store.dirty();
           return send(res, 200, { ok: true }, origin);
         }
+        case '/api/match':
+          return send(res, 200, handleMatch(body), origin);
         case '/api/scores':
           return send(res, 200, await handleScore(body), origin);
         default:

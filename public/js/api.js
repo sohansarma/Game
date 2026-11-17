@@ -274,3 +274,132 @@ export async function top(board, key) {
 if (typeof window !== 'undefined') {
   window.addEventListener('online', () => flushPending().catch(() => {}));
 }
+
+// ---------------------------------------------------------------------------
+// Online matches (Chess / Ludo). Each player writes only their own moves.
+// Shared-db mode: entries live in the player's own `players/<id>` doc under
+// `matches[CODE]`. Server mode: /api/match endpoints.
+const MATCH_TTL = 7 * 86400000;
+
+async function writeMine(sh, fn) {
+  const ref = sh.db.collection('players').doc(sh.uid);
+  const snap = await ref.get();
+  const doc = snap.exists ? snap.data() : { scores: {}, levels: {} };
+  doc.matches ||= {};
+  fn(doc);
+  const now = Date.now();
+  for (const [k, m] of Object.entries(doc.matches)) if (!m || now - (m.at || 0) > MATCH_TTL) delete doc.matches[k];
+  doc.name = load().name;
+  doc.updatedAt = now;
+  await ref.set(doc);
+}
+
+async function sharedFind(sh, code) {
+  const snap = await sh.db.collection('players').get();
+  let host = null, guest = null;
+  snap.docs.forEach((d) => {
+    const m = d.data()?.matches?.[code];
+    if (!m || Date.now() - (m.at || 0) > MATCH_TTL) return;
+    const entry = { pid: d.id, name: String(d.data().name || 'Player').slice(0, 40), ...m };
+    if (m.role === 'host') host = entry;
+    else if (m.role === 'guest' && (!guest || entry.at < guest.at)) guest = entry;
+  });
+  return { host, guest };
+}
+
+function combine(host, guest, me) {
+  if (!host) return null;
+  return {
+    code: host.code,
+    game: host.game,
+    seed: host.seed,
+    opts: host.opts,
+    hostName: host.name,
+    guestName: guest?.name || null,
+    hostMoves: host.moves || [],
+    guestMoves: guest?.moves || [],
+    joined: !!guest,
+    resigned: host.resigned ? 'host' : guest?.resigned ? 'guest' : null,
+    me,
+  };
+}
+
+export const matches = {
+  async available() {
+    if (await sharedDb()) return true;
+    if (inArtifact()) return false;
+    return checkServer();
+  },
+
+  async create(code, game, seed, opts) {
+    const sh = await sharedDb();
+    if (sh) {
+      await writeMine(sh, (doc) => { doc.matches[code] = { role: 'host', code, game, seed, opts, moves: [], at: Date.now() }; });
+      return { ok: true };
+    }
+    const p = await ensureRegistered();
+    return req('/match', { method: 'POST', body: JSON.stringify({ action: 'create', code, game, seed, opts, playerId: p.playerId, token: p.token }) });
+  },
+
+  async join(code) {
+    const sh = await sharedDb();
+    if (sh) {
+      const { host, guest } = await sharedFind(sh, code);
+      if (!host) throw Object.assign(new Error('No match with that code'), { status: 404 });
+      if (host.pid === sh.uid) throw Object.assign(new Error("That's your own match – share the code with a friend"), { status: 400 });
+      if (guest && guest.pid !== sh.uid) throw Object.assign(new Error('That match already has two players'), { status: 409 });
+      if (!guest) await writeMine(sh, (doc) => { doc.matches[code] = { role: 'guest', code, game: host.game, seed: host.seed, opts: host.opts, moves: [], at: Date.now() }; });
+      return this.get(code);
+    }
+    const p = await ensureRegistered();
+    return req('/match', { method: 'POST', body: JSON.stringify({ action: 'join', code, playerId: p.playerId, token: p.token }) });
+  },
+
+  async get(code) {
+    const sh = await sharedDb();
+    if (sh) {
+      const { host, guest } = await sharedFind(sh, code);
+      const me = host?.pid === sh.uid ? 'host' : guest?.pid === sh.uid ? 'guest' : null;
+      return combine(host, guest, me);
+    }
+    const p = load();
+    return req('/match?' + new URLSearchParams({ code, playerId: p.playerId }).toString());
+  },
+
+  async push(code, moves) {
+    const sh = await sharedDb();
+    if (sh) {
+      await writeMine(sh, (doc) => { if (doc.matches[code]) { doc.matches[code].moves = moves; doc.matches[code].at = Date.now(); } });
+      return { ok: true };
+    }
+    const p = await ensureRegistered();
+    return req('/match', { method: 'POST', body: JSON.stringify({ action: 'move', code, moves, playerId: p.playerId, token: p.token }) });
+  },
+
+  async resign(code) {
+    const sh = await sharedDb();
+    if (sh) {
+      await writeMine(sh, (doc) => { if (doc.matches[code]) doc.matches[code].resigned = true; });
+      return { ok: true };
+    }
+    const p = await ensureRegistered();
+    return req('/match', { method: 'POST', body: JSON.stringify({ action: 'resign', code, playerId: p.playerId, token: p.token }) });
+  },
+
+  /** Poll a match; calls cb(match) when it changes. Returns a stop function. */
+  watch(code, cb, ms = 2500) {
+    let last = '';
+    let stopped = false;
+    const tick = async () => {
+      if (stopped) return;
+      try {
+        const m = await this.get(code);
+        const sig = JSON.stringify([m?.hostMoves, m?.guestMoves, m?.joined, m?.resigned]);
+        if (sig !== last) { last = sig; cb(m); }
+      } catch { /* offline – try again */ }
+      if (!stopped) setTimeout(tick, document.hidden ? ms * 4 : ms);
+    };
+    tick();
+    return () => { stopped = true; };
+  },
+};

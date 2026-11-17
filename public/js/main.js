@@ -6,6 +6,7 @@ import { getLevel, LEVEL_COUNT, MAX_LEVEL, worldOf } from './levels.js';
 import { dailyConfig, deepConfig, dayKey, weekKey, blocksSeed, ENGINE_VERSION, BOARDS } from './modes.js';
 import { ARCADE, ARCADE_BY_ID, arcadeSeed } from './arcade/index.js';
 import { hashString } from './rng.js';
+import { ChessVersus, LudoVersus, newCode, validCode, rebuild, describe } from './versus.js';
 import { load, update, save, totalStars, highestUnlocked, exportSave, importSave, resetSave, randomNickname, ADJECTIVES, ANIMALS } from './storage.js';
 import { MatchView } from './matchview.js';
 import { BlocksView } from './blocksview.js';
@@ -445,6 +446,7 @@ let currentRun = null;
 
 async function pauseMenu() {
   if (!view) return;
+  if (currentRun?.kind === 'versus') return versusPause(currentRun);
   const s = load();
   const run = currentRun;
   const r = await modal(`<h2>Paused</h2>
@@ -637,6 +639,7 @@ const VIEWS = {
   breaker: () => import('./arcade/breaker-view.js'),
   catch: () => import('./arcade/catch-view.js'),
   chess: () => import('./arcade/chess-view.js'),
+  ludo: () => import('./arcade/ludo-view.js'),
 };
 
 function arcadeStats(id) {
@@ -807,7 +810,8 @@ async function arcadeMenu(id) {
     <p class="small muted">Your best: <b>${fmt(st.best)}</b> · Today's daily: <b>${today !== undefined ? fmt(today) : 'not played'}</b></p>
     <div class="tip">📅 The <b>daily challenge</b> is the same for every player today. Best score of the day wins – it ends in <b>${hms(msToReset())}</b>.</div>`, {
     buttons: [
-      { label: '▶ Play', value: 'play', cls: 'green' },
+      { label: g.board ? '▶ Play the ladder' : '▶ Play', value: 'play', cls: 'green' },
+      ...(g.board ? [{ label: '👥 Play a friend', value: 'friend', cls: 'blue' }] : []),
       { label: `📅 Daily challenge${today === undefined ? ' (new!)' : ''}`, value: 'daily', cls: 'blue' },
       { label: '🏆 Leaderboard', value: 'lb', cls: 'ghost' },
       { label: '❓ How to play', value: 'how', cls: 'ghost' },
@@ -817,6 +821,257 @@ async function arcadeMenu(id) {
   else if (r === 'daily') playArcade(id, { daily: true });
   else if (r === 'lb') showLeaderboard(id + 'Daily');
   else if (r === 'how') { await arcadeHow(id); arcadeMenu(id); }
+  else if (r === 'friend') versusMenu(id);
+}
+
+// ------------------------------------------------------------------ play a friend (chess / ludo)
+async function versusMenu(id) {
+  const g = ARCADE_BY_ID[id];
+  const recent = Object.entries(load().versus || {}).filter(([, v]) => v.game === id && Date.now() - v.at < 7 * 86400000);
+  const r = await modal(`<h2>${g.icon} Play a friend</h2>
+    <p class="muted small">Friendly games aren't ranked – just bragging rights.</p>
+    ${recent.length ? `<div class="list">${recent.map(([code, v]) => `<button class="item" data-code="${code}"><span class="grow" style="text-align:left"><b>${code}</b> · ${v.role === 'host' ? 'you created' : 'you joined'}</span><span class="val">Resume ▶</span></button>`).join('')}</div>` : ''}`, {
+    buttons: [
+      { label: '📱 Same device (pass & play)', value: 'local', cls: 'green' },
+      { label: '🌐 Create online match', value: 'create', cls: 'blue' },
+      { label: '🔑 Join with a code', value: 'join', cls: 'blue' },
+      { label: 'Back', value: 'back', cls: 'ghost' },
+    ],
+    onOpen: (sheet) => {
+      for (const b of $$('[data-code]', sheet)) b.onclick = () => { closeModal('resume:' + b.dataset.code); };
+    },
+  });
+  if (!r || r === 'back') return arcadeMenu(id);
+  if (r === 'local') return localVersus(id);
+  if (r.startsWith('resume:')) return openOnline(r.slice(7));
+  if (!(await api.matches.available())) {
+    await modal(`<h2>Online play unavailable</h2><p>${api.inArtifact() ? 'Sign in to Claude to play friends online.' : "Can't reach the game server right now."} You can still play on the same device.</p>`, { buttons: [{ label: 'OK', value: null }] });
+    return versusMenu(id);
+  }
+  if (r === 'create') return createOnline(id);
+  if (r === 'join') return joinOnline();
+}
+
+async function localVersus(id) {
+  if (id === 'chess') return playVersus(id, new ChessVersus({}), null);
+  const n = await modal('<h2>🎲 How many players?</h2><p class="muted small">Pass the phone around. Empty seats can be filled with bots.</p>', {
+    buttons: [
+      { label: '2 players', value: '2' },
+      { label: '2 players + 2 bots', value: '2b', cls: 'blue' },
+      { label: '3 players', value: '3', cls: 'blue' },
+      { label: '4 players', value: '4', cls: 'blue' },
+    ],
+  });
+  if (!n) return versusMenu(id);
+  const seats = { 2: ['human', null, 'human', null], '2b': ['human', 'ai', 'human', 'ai'], 3: ['human', 'human', 'human', null], 4: ['human', 'human', 'human', 'human'] }[n];
+  return playVersus(id, new LudoVersus({ seed: randSeed(), seats }), null);
+}
+
+async function createOnline(id) {
+  let opts;
+  if (id === 'chess') {
+    const side = await modal('<h2>♟️ Pick your colour</h2>', { buttons: [{ label: '♔ White (moves first)', value: 'w' }, { label: '♚ Black', value: 'b', cls: 'blue' }, { label: '🎲 Random', value: 'r', cls: 'ghost' }] });
+    if (!side) return versusMenu(id);
+    opts = { hostSide: side === 'r' ? (Math.random() < 0.5 ? 'w' : 'b') : side };
+  } else {
+    const b = await modal('<h2>🎲 Online Ludo</h2><p>You are red, your friend is yellow.</p>', { buttons: [{ label: 'Just the two of us', value: 'n' }, { label: 'Add 2 bots (green & blue)', value: 'y', cls: 'blue' }] });
+    if (!b) return versusMenu(id);
+    opts = { bots: b === 'y' };
+  }
+  const code = newCode();
+  try {
+    await api.matches.create(code, id, randSeed(), opts);
+  } catch (e) {
+    toast(e.message || "Couldn't create the match");
+    return versusMenu(id);
+  }
+  update((d) => { d.versus = { ...(d.versus || {}), [code]: { game: id, role: 'host', at: Date.now() } }; });
+  openOnline(code, true);
+}
+
+async function joinOnline() {
+  let code = '';
+  const r = await modal(`<h2>🔑 Join a match</h2><p class="muted small">Ask your friend for their 5-letter code.</p>
+    <input id="j-code" maxlength="5" autocomplete="off" autocapitalize="characters" placeholder="ABCDE" style="text-align:center;font-size:1.6rem;letter-spacing:6px;width:100%;text-transform:uppercase">`, {
+    buttons: [{ label: 'Join', value: 'go', cls: 'green' }, { label: 'Cancel', value: null, cls: 'ghost' }],
+    row: true,
+    onOpen: (sheet) => { const i = $('#j-code', sheet); i.oninput = () => { code = i.value.toUpperCase().replace(/[^A-Z0-9]/g, ''); i.value = code; }; setTimeout(() => i.focus(), 50); },
+  });
+  if (r !== 'go') return showHub();
+  if (!validCode(code)) { toast('Codes are 5 letters/numbers, like K7PQX'); return joinOnline(); }
+  try {
+    const m = await api.matches.join(code);
+    update((d) => { d.versus = { ...(d.versus || {}), [code]: { game: m.game, role: 'guest', at: Date.now() } }; });
+    openOnline(code);
+  } catch (e) {
+    toast(e.message || "Couldn't join that match");
+    joinOnline();
+  }
+}
+
+async function openOnline(code, justCreated) {
+  let m;
+  try { m = await api.matches.get(code); } catch { m = null; }
+  if (!m || !m.me) { toast('That match has expired'); update((d) => { if (d.versus) delete d.versus[code]; }); return showHub(); }
+  const sim = rebuild(m, m.me);
+  playVersus(m.game, sim, { code, role: m.me, match: m, justCreated });
+}
+
+function myMovesOf(sim, id, role, match) {
+  if (id === 'chess') {
+    const side = role === 'host' ? match.opts.hostSide : match.opts.hostSide === 'w' ? 'b' : 'w';
+    return sim.moves.filter((_, i) => (i % 2 === 0 ? 'w' : 'b') === side);
+  }
+  const seat = role === 'host' ? 0 : 2;
+  return sim.moves.filter(([s]) => s === seat).map(([, t]) => t);
+}
+
+async function playVersus(id, sim, online) {
+  leaveGame();
+  try { history.pushState({ g: 1 }, ''); } catch { /* sandboxed */ }
+  const g = ARCADE_BY_ID[id];
+  const mod = await VIEWS[id]();
+  setBackground(g.color);
+  const run = { kind: 'versus', id, sim, online };
+  currentRun = run;
+  const el = showScreen('arcade', `
+    <div class="hud">
+      <button class="icon-btn" id="ar-pause" aria-label="Menu">⏸</button>
+      <div class="box grow arcade-hud" id="ar-hud"></div>
+    </div>
+    <div class="board-wrap"><canvas id="ar-canvas" aria-label="${esc(g.title)} board"></canvas></div>
+    <div id="ar-controls" class="arcade-controls"></div>
+    <div class="mode-label" id="ar-label"></div>`);
+  const refresh = () => {
+    const box = $('#ar-hud', el);
+    if (!box) return;
+    let stats;
+    if (id === 'chess') {
+      const c = sim.game.history.filter((h) => h.captured);
+      stats = [
+        { label: 'Mode', value: online ? `🌐 ${online.code}` : '📱 Pass & play', big: true },
+        { label: 'Move', value: Math.floor(sim.game.ply / 2) + 1 },
+        { label: 'Captures', value: c.length },
+      ];
+    } else {
+      stats = [
+        { label: 'Mode', value: online ? `🌐 ${online.code}` : '📱 Pass & play', big: true },
+        ...sim.seats.map((s, i) => (s ? { label: sim.label(i), value: `🏠 ${sim.game.tokens[i].filter((p) => p === 56).length}/4` } : null)).filter(Boolean).slice(0, 3),
+      ];
+    }
+    box.innerHTML = stats.map((h) => `<div class="hstat ${h.big ? 'big' : ''}"><span class="lbl">${esc(String(h.label))}</span><b>${h.value}</b></div>`).join('');
+    const lbl = $('#ar-label', el);
+    if (lbl) lbl.innerHTML = online ? (online.match.joined || online.joinedNow ? `Playing ${esc(online.role === 'host' ? online.match.guestName || 'your friend' : online.match.hostName || 'your friend')} · moves sync automatically` : `Waiting for a friend to join with code <b>${online.code}</b>`) : 'Friendly game · not ranked';
+  };
+  let pushed = online ? myMovesOf(sim, id, online.role, online.match).length : 0;
+  let applied = online ? (online.role === 'host' ? online.match.guestMoves : online.match.hostMoves).length : 0;
+  const pushMine = () => {
+    if (!online) return;
+    const mine = myMovesOf(sim, id, online.role, online.match);
+    if (mine.length === pushed) return;
+    pushed = mine.length;
+    api.matches.push(online.code, mine).catch(() => toast('Move not sent yet – check your connection'));
+  };
+  view = new mod.default({
+    canvas: $('#ar-canvas', el),
+    controls: $('#ar-controls', el),
+    sim,
+    reducedMotion: load().settings.reducedMotion,
+    hooks: {
+      onChange: () => { refresh(); pushMine(); },
+      onRound: () => { pushMine(); },
+      onOver: () => endVersus(run),
+      onQuit: async () => {
+        const ok = await modal(`<h2>${online ? 'Resign this match?' : 'End this game?'}</h2>`, { buttons: [{ label: online ? 'Resign' : 'End game', value: true, cls: 'red' }, { label: 'Keep playing', value: false, cls: 'ghost' }], row: true });
+        if (!ok) return;
+        if (online) api.matches.resign(online.code).catch(() => {});
+        sim.resign();
+        endVersus(run);
+      },
+    },
+  });
+  if (id === 'chess' && sim.game.history.length) {
+    const h = sim.game.history[sim.game.history.length - 1];
+    view.lastMove = [h.uci.slice(0, 2), h.uci.slice(2, 4)].map((x) => 'abcdefgh'.indexOf(x[0]) + (8 - Number(x[1])) * 8);
+  }
+  $('#ar-pause', el).onclick = () => { sfx.tap(); versusPause(run); };
+  refresh();
+  if (online) {
+    if (online.justCreated) shareCode(online.code, id);
+    run.stopWatch = api.matches.watch(online.code, (m) => {
+      if (!m || currentRun !== run) return;
+      if (m.joined && !online.match.joined) { online.match = m; online.joinedNow = true; toast(`🎉 ${m.me === 'host' ? m.guestName : m.hostName} joined!`); sfx.win(); }
+      online.match = m;
+      if (id === 'chess') {
+        const hs = m.opts.hostSide, gs = hs === 'w' ? 'b' : 'w';
+        sim.names = { [hs]: m.hostName || 'Host', [gs]: m.guestName || 'Guest' };
+      } else sim.names = { 0: m.hostName || 'Host', 2: m.guestName || 'Guest' };
+      const opp = online.role === 'host' ? m.guestMoves : m.hostMoves;
+      while (applied < opp.length && !sim.over) {
+        const mv = opp[applied];
+        let res;
+        if (id === 'chess') {
+          if (sim.game.turn === sim.mySide) break;
+          res = sim.apply(mv);
+          if (res.ok) view.remoteMoved(res.human);
+        } else {
+          const seat = online.role === 'host' ? 2 : 0;
+          if (sim.game.turn !== seat) break;
+          res = sim.apply(seat, mv);
+          if (res.ok) view.remoteEvents(res.events);
+        }
+        if (!res.ok) break;
+        applied++;
+        if (res.end && id === 'chess') setTimeout(() => endVersus(run), 900);
+      }
+      if (m.resigned && !sim.over) {
+        const them = m.resigned !== online.role;
+        sim.resign(id === 'chess' ? (them ? (sim.mySide === 'w' ? 'b' : 'w') : sim.mySide) : undefined);
+        toast(them ? '🏳️ Your friend resigned' : 'You resigned');
+        endVersus(run);
+      }
+      refresh();
+      if (id === 'ludo' && sim.over) setTimeout(() => endVersus(run), 1500);
+    });
+  }
+}
+
+function shareCode(code, id) {
+  const g = ARCADE_BY_ID[id];
+  modal(`<h2>${g.icon} Match created!</h2><p>Send this code to a friend. They open Tidepop → ${esc(g.title)} → Play a friend → Join.</p>
+    <div class="big-score" style="letter-spacing:8px">${code}</div>
+    <p class="muted small">You can start ${id === 'chess' ? 'if you play White' : 'right away'} – their moves appear here as soon as they play.</p>`, {
+    buttons: [{ label: '📤 Share code', value: 'share', cls: 'blue' }, { label: 'Got it', value: null, cls: 'ghost' }], row: true,
+  }).then((r) => { if (r === 'share') shareText(`Play ${g.title} with me on Tidepop! Join code: ${code}\n${location.origin}${location.pathname}`); });
+}
+
+async function versusPause(run) {
+  const r = await modal('<h2>Menu</h2>', { buttons: [{ label: '▶ Resume', value: null, cls: 'green' }, { label: run.online ? '🏳️ Resign' : '🏁 End game', value: 'end', cls: 'ghost' }, { label: '🕹️ Back to arcade (match stays open)', value: 'hub', cls: 'ghost' }] });
+  if (r === 'end') view?.hooks.onQuit?.();
+  else if (r === 'hub') { run.stopWatch?.(); showHub(); }
+}
+
+async function endVersus(run) {
+  if (run.ended) return;
+  run.ended = true;
+  run.stopWatch?.();
+  const { sim, id, online } = run;
+  noteGameEnd(id, false);
+  if (online) update((d) => { if (d.versus) delete d.versus[online.code]; });
+  let html;
+  if (id === 'chess') {
+    const r = sim.result || { reason: 'Game over' };
+    const won = online && r.winner && r.winner === sim.mySide;
+    html = `<h2>${r.winner ? (online ? (won ? '🏆 You win!' : 'You lost') : `${sim.names[r.winner]} wins!`) : '🤝 Draw'}</h2><p class="muted">${esc(r.reason)}</p>`;
+    if (online) won ? sfx.win() : sfx.lose();
+  } else {
+    const places = sim.places();
+    html = `<h2>🎲 Final standings</h2><div class="list">${places.map((p) => `<div class="item"><span class="rank">${['🥇', '🥈', '🥉', '4️⃣'][p.place - 1]}</span><span class="name">${esc(p.name)}</span></div>`).join('')}</div>`;
+    sfx.win();
+  }
+  const r = await modal(html, { dismissable: false, buttons: [{ label: '↻ Play again', value: 'again', cls: 'green' }, { label: '🕹️ Arcade', value: 'hub', cls: 'ghost' }] });
+  if (r === 'again') versusMenu(id);
+  else showHub();
 }
 
 async function playArcade(id, { daily }) {
@@ -853,6 +1108,7 @@ async function playArcade(id, { daily }) {
       onOver: () => endArcade(run),
       onRound: (end) => {
         if (end.winner && end.winner === (sim.mySide || 'w')) toast(`🏆 ${end.reason}! +${fmt(end.gained)} · next: ${sim.opponent}`);
+        else if (end.place) toast(end.place <= 2 ? `🎲 ${end.reason}! +${fmt(end.gained)} · next match vs smarter bots` : `🎲 ${end.reason} · +${fmt(end.gained)}`);
         else if (!end.winner) toast(`🤝 ${end.reason} · +${fmt(end.gained)} · rematch!`);
       },
       onQuit: async () => {
