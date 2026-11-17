@@ -11,6 +11,7 @@ export const BOARDS = {
   blocks: { title: 'Reef Blocks', game: 'blocks', period: 'all' },
   stars: { title: 'Adventure Stars', game: 'stars', period: 'all' },
   ...arcadeBoards(),
+  ugc: { title: 'Community game', game: 'ugc', period: 'all', ugc: true },
 };
 
 export function dayKey(date = new Date()) {

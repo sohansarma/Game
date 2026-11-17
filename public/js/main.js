@@ -7,6 +7,7 @@ import { dailyConfig, deepConfig, dayKey, weekKey, blocksSeed, ENGINE_VERSION, B
 import { ARCADE, ARCADE_BY_ID, arcadeSeed, tierOf, challengeHash, parseChallenge } from './arcade/index.js';
 import { hashString } from './rng.js';
 import { ChessVersus, LudoVersus, newCode, validCode, rebuild, describe } from './versus.js';
+import { TEMPLATES, RULE_INFO, EMOJI, PALETTES, sanitize as ugcSanitize, starterSpec, createSim as ugcCreate } from './maker/engine.js';
 import { load, update, save, totalStars, highestUnlocked, exportSave, importSave, resetSave, randomNickname, ADJECTIVES, ANIMALS } from './storage.js';
 import { MatchView } from './matchview.js';
 import { BlocksView } from './blocksview.js';
@@ -742,6 +743,10 @@ function showHub() {
         ${ms.list.map((m) => `<div class="mission ${m.cur >= m.goal ? 'done' : ''}"><span>${m.cur >= m.goal ? '✅' : '⬜'} ${esc(m.text)}</span><span class="small">${m.cur}/${m.goal}</span></div>`).join('')}
         ${ms.claimed ? '<p class="small muted center">Chest claimed – new missions at reset!</p>' : `<button class="btn wide ${allDone ? 'green' : 'ghost'}" id="u-chest" ${allDone ? '' : 'disabled'}>${allDone ? '🎁 Open the mission chest' : 'Complete all 3 to open the chest'}</button>`}
       </div>
+      <div class="community-row">
+        <button class="card" id="u-community"><span class="emoji">🌟</span><b>Community games</b><span class="sub">Made by players · play, rate & compete</span></button>
+        <button class="card" id="u-studio"><span class="emoji">🛠️</span><b>Creator Studio</b><span class="sub">Build your own game – no coding</span></button>
+      </div>
       <div class="game-grid">${games.map((g) => {
         const rk = ranks[g.dailyBoard + ':' + dayKey()];
         return `<button class="game-card ${g.id === hot.id ? 'hot' : ''}" data-g="${g.id}">
@@ -755,6 +760,8 @@ function showHub() {
   on('#u-settings', showSettings);
   on('#u-gift', () => (dailyStatus().canClaim ? maybeDailyReward() : toast('Already claimed today – see you tomorrow! 🔥')));
   on('#u-hot', () => hot.open());
+  on('#u-community', () => showCommunity());
+  on('#u-studio', () => showStudio());
   on('#u-chest', () => {
     update((d) => { d.missions = { ...missionState(), claimed: true }; d.shells += 150; d.boosters.hammer++; d.boosters.moves++; });
     sfx.win();
@@ -1259,6 +1266,330 @@ async function endArcade(run) {
   else if (r === 'share') { await shareText(`${g.icon} Tidepop ${g.title} daily ${run.key}\nScore: ${fmt(score)}${rank ? ` · Rank #${rank}` : ''}\nBeat me: ${location.origin}${location.pathname}`); showHub(); }
   else if (r === 'lb') showLeaderboard(board);
   else showHub();
+}
+
+// ------------------------------------------------------------------ community games + creator studio
+const stars5 = (r) => '★★★★★'.slice(0, Math.round(r)) + '☆☆☆☆☆'.slice(0, 5 - Math.round(r));
+function ugcCard(g) {
+  const [c1, c2] = PALETTES[g.palette] || PALETTES[0];
+  return `<button class="ugc-card" data-id="${g.id}" style="--c1:${c1};--c2:${c2}">
+    <span class="ugc-hero">${g.hero}</span>
+    <span class="grow" style="min-width:0;text-align:left"><b class="ugc-title">${esc(g.title)}</b>
+      <span class="sub">by ${esc(g.owner)}${g.mine ? ' (you)' : ''} · ${TEMPLATES[g.template]?.icon || ''} ${TEMPLATES[g.template]?.name || ''} · v${g.version}</span>
+      <span class="sub"><span class="star-on">${stars5(g.rating)}</span> ${g.ratings ? g.rating.toFixed(1) + ` (${g.ratings})` : 'no ratings yet'} · ▶ ${fmt(g.plays)}</span></span></button>`;
+}
+
+async function showCommunity(tab = 'trending') {
+  leaveGame();
+  setBackground(['#ffb74d', '#4a148c']);
+  const el = showScreen('community', `
+    <div class="topbar"><button class="icon-btn" id="c-back" aria-label="Back">←</button><h2 class="grow">Community games</h2>
+      <button class="icon-btn" id="c-studio" aria-label="Creator Studio">🛠️</button></div>
+    <div class="tabs" role="tablist">${[['trending', '🔥 Trending'], ['top', '⭐ Top rated'], ['new', '🆕 New'], ['mine', '🛠️ Mine']].map(([k, l]) => `<button class="tab ${k === tab ? 'on' : ''}" data-t="${k}">${l}</button>`).join('')}</div>
+    <div class="scroll"><div class="list" id="c-list"><p class="center muted">Loading…</p></div></div>`);
+  $('#c-back', el).onclick = () => { sfx.tap(); showHub(); };
+  $('#c-studio', el).onclick = () => { sfx.tap(); showStudio(); };
+  for (const b of $$('.tab', el)) b.onclick = () => { sfx.tap(); showCommunity(b.dataset.t); };
+  const list = $('#c-list', el);
+  if (!(await api.ugc.available())) {
+    list.innerHTML = `<div class="tip">${api.inArtifact() ? 'Sign in to Claude to browse and play community games.' : "Can't reach the game server right now."}</div>`;
+    return;
+  }
+  let games;
+  try { games = await api.ugc.list(); } catch { list.innerHTML = '<div class="tip">📡 Couldn\'t load community games. Try again in a moment.</div>'; return; }
+  if (currentScreen() !== 'community') return;
+  const bayes = (g) => (g.rating * g.ratings + 3.5 * 3) / (g.ratings + 3);
+  const sorted = {
+    trending: [...games].sort((a, b) => b.recentPlays * 2 + bayes(b) * 3 - (a.recentPlays * 2 + bayes(a) * 3)),
+    top: [...games].filter((g) => g.ratings).sort((a, b) => bayes(b) - bayes(a)),
+    new: [...games].sort((a, b) => b.createdAt - a.createdAt),
+    mine: games.filter((g) => g.mine),
+  }[tab];
+  list.innerHTML = sorted.length ? sorted.map(ugcCard).join('') : `<div class="tip">${tab === 'mine' ? "You haven't published a game yet. Open the 🛠️ Creator Studio to make one!" : 'No games here yet – be the first to create one in the 🛠️ Creator Studio!'}</div>`;
+  for (const b of $$('.ugc-card', list)) b.onclick = () => { sfx.tap(); ugcDetail(b.dataset.id); };
+}
+
+async function ugcDetail(id) {
+  let g;
+  try { g = await api.ugc.get(id); } catch (e) { toast(e.message || "Couldn't open that game"); return; }
+  const key = `${g.id}-${g.version}`;
+  const played = (load().ugcPlayed || {})[id];
+  const r = await modal(`<div style="font-size:3rem">${g.hero}</div><h2>${esc(g.title)}</h2>
+    <p class="muted small">by <b>${esc(g.owner)}</b> · ${TEMPLATES[g.template].icon} ${TEMPLATES[g.template].name} · version ${g.version}</p>
+    ${g.description ? `<p>${esc(g.description)}</p>` : ''}
+    <p><span class="star-on">${stars5(g.rating)}</span> ${g.ratings ? `${g.rating.toFixed(1)} from ${g.ratings} rating${g.ratings > 1 ? 's' : ''}` : 'Not rated yet'} · ▶ ${fmt(g.plays)} plays</p>
+    ${g.mine ? '<p class="small muted">🛠️ You made this – players rate it after they play.</p>' : played ? `<div class="rate-row" role="group" aria-label="Your rating">${[1, 2, 3, 4, 5].map((n) => `<button class="rate-star ${n <= (g.myRating || 0) ? 'on' : ''}" data-s="${n}" aria-label="${n} star${n > 1 ? 's' : ''}">★</button>`).join('')}</div><p class="small muted">${g.myRating ? 'Your rating – tap to change' : 'Tap to rate this game'}</p>` : '<p class="small muted">Play once to rate it.</p>'}
+    <div class="tip"><b>What's new</b><br>${(g.history || []).slice(-3).reverse().map((h) => `v${h.v} · ${new Date(h.at).toLocaleDateString()} – ${esc(h.note)}`).join('<br>')}</div>
+    <div class="tip"><b>🏆 Top scores (v${g.version})</b><div id="u-top" class="small">Loading…</div></div>`, {
+    buttons: [
+      { label: '▶ Play', value: 'play', cls: 'green' },
+      ...(g.mine ? [{ label: '✏️ Edit & publish update', value: 'edit', cls: 'blue' }] : []),
+      ...(!g.mine ? [{ label: '🚩 Report', value: 'report', cls: 'ghost' }] : []),
+      { label: 'Back', value: 'back', cls: 'ghost' },
+    ],
+    onOpen: (sheet) => {
+      for (const b of $$('.rate-star', sheet)) b.onclick = async () => {
+        const n = Number(b.dataset.s);
+        $$('.rate-star', sheet).forEach((x) => x.classList.toggle('on', Number(x.dataset.s) <= n));
+        sfx.star(n - 1);
+        try { await api.ugc.rate(id, n); toast(`Rated ${n}★ – thanks!`); } catch { toast("Couldn't save your rating"); }
+      };
+      api.top('ugc', key).then((d) => {
+        const t = $('#u-top', sheet);
+        if (t) t.innerHTML = d.entries.length ? d.entries.slice(0, 5).map((e) => `${['🥇', '🥈', '🥉', '4.', '5.'][e.rank - 1]} ${esc(e.name)}${e.me ? ' (you)' : ''} – <b>${fmt(e.score)}</b>`).join('<br>') : 'No scores yet – set the first one!';
+      }).catch(() => { const t = $('#u-top', sheet); if (t) t.textContent = '–'; });
+    },
+  });
+  if (r === 'play') playUgc(g);
+  else if (r === 'edit') editGame(g.spec, g.id, g.version);
+  else if (r === 'report') {
+    const ok = await modal('<h2>🚩 Report this game?</h2><p>Report games that are mean, scary or inappropriate. Games with several reports are hidden.</p>', { buttons: [{ label: 'Report', value: true, cls: 'red' }, { label: 'Cancel', value: false, cls: 'ghost' }], row: true });
+    if (ok) { await api.ugc.report(id).catch(() => {}); toast('Thanks – our community keeps Tidepop kind.'); }
+    showCommunity();
+  } else if (r === 'back' && currentScreen() !== 'community') showCommunity();
+}
+
+async function playUgc(g, { test = false } = {}) {
+  leaveGame();
+  try { history.pushState({ g: 1 }, ''); } catch { /* sandboxed */ }
+  const mod = await import('./maker/view.js');
+  const spec = test ? g.spec : g.specs[g.version];
+  const seed = randSeed();
+  const sim = ugcCreate(spec, seed);
+  const run = { kind: 'ugc', g, spec, seed, sim, test };
+  currentRun = run;
+  setBackground(PALETTES[spec.palette] || PALETTES[0]);
+  const el = showScreen('arcade', `
+    <div class="hud"><button class="icon-btn" id="ar-pause" aria-label="Pause">⏸</button><div class="box grow arcade-hud" id="ar-hud"></div></div>
+    <div class="board-wrap"><canvas id="ar-canvas" aria-label="${esc(spec.title)}"></canvas></div>
+    <div id="ar-controls" class="arcade-controls"></div>
+    <div class="mode-label">${test ? '🧪 Test play – not ranked' : `${spec.hero} ${esc(spec.title)} · by ${esc(g.owner)}`}</div>`);
+  const refresh = () => { const box = $('#ar-hud', el); if (box) box.innerHTML = mod.hud(sim).map((h) => `<div class="hstat ${h.warn ? 'warn' : ''} ${h.big ? 'big' : ''}"><span class="lbl">${esc(h.label)}</span><b>${h.value}</b></div>`).join(''); };
+  view = new mod.default({
+    canvas: $('#ar-canvas', el), controls: $('#ar-controls', el), sim, reducedMotion: load().settings.reducedMotion,
+    hooks: { onChange: refresh, onOver: () => endUgc(run), onQuit: () => { sim.quit(); endUgc(run); } },
+  });
+  $('#ar-pause', el).onclick = async () => {
+    sfx.tap();
+    const r = await modal('<h2>Paused</h2>', { buttons: [{ label: '▶ Resume', value: null, cls: 'green' }, { label: '↻ Restart', value: 'restart', cls: 'blue' }, { label: test ? '✏️ Back to editor' : '🌟 Back to community', value: 'quit', cls: 'ghost' }] });
+    if (r === 'restart') playUgc(g, { test });
+    else if (r === 'quit') { if (test) editGame(g.spec, g.id, g.version, true); else showCommunity(); }
+  };
+  refresh();
+}
+
+async function endUgc(run) {
+  if (run.ended) return;
+  run.ended = true;
+  const { g, sim, test } = run;
+  const score = sim.score;
+  if (test) {
+    const r = await modal(`<h2>🧪 Test run over</h2><div class="big-score">${fmt(score)}</div><p class="muted">${esc(sim.overReason)} · lasted ${Math.round(sim.tick / 60)}s</p>
+      <p class="small muted">Tip: a good game lasts 30–120 seconds for a new player. Tweak speed, spawn rate and lives until it feels right.</p>`, { dismissable: false, buttons: [{ label: '↻ Test again', value: 'again', cls: 'green' }, { label: '✏️ Back to editor', value: 'edit', cls: 'blue' }] });
+    if (r === 'again') playUgc(g, { test: true });
+    else editGame(g.spec, g.id, g.version, true);
+    return;
+  }
+  const best = (load().ugcBest || {})[`${g.id}-${g.version}`] || 0;
+  const firstPlay = !(load().ugcPlayed || {})[g.id];
+  const shells = Math.min(30, 2 + Math.floor(score / 100));
+  update((d) => {
+    d.ugcPlayed = { ...(d.ugcPlayed || {}), [g.id]: ((d.ugcPlayed || {})[g.id] || 0) + 1 };
+    d.ugcBest = { ...(d.ugcBest || {}), [`${g.id}-${g.version}`]: Math.max(best, score) };
+    d.shells += shells;
+  });
+  noteGameEnd('community', score > best);
+  api.ugc.played(g.id).catch(() => {});
+  score > best ? sfx.win() : sfx.lose();
+  announceAchievements();
+  const p = modal(`<h2>${g.hero} ${esc(sim.overReason || 'Game over')}</h2><div class="big-score">${fmt(score)}</div>
+    ${score > best ? '<p>🎉 New personal best!</p>' : `<p class="muted">Best: ${fmt(best)}</p>`}
+    <div class="reward">+${shells} 🐚</div><p class="muted small" id="r-rank">Checking leaderboard…</p>
+    ${firstPlay && !g.mine ? `<div class="tip">How was <b>${esc(g.title)}</b>?<div class="rate-row">${[1, 2, 3, 4, 5].map((n) => `<button class="rate-star" data-s="${n}" aria-label="${n} stars">★</button>`).join('')}</div></div>` : ''}`, {
+    dismissable: false,
+    buttons: [{ label: '↻ Play again', value: 'again', cls: 'green' }, { label: '🌟 More community games', value: 'more', cls: 'blue' }, { label: '🕹️ Arcade', value: 'hub', cls: 'ghost' }],
+    onOpen: (sheet) => {
+      for (const b of $$('.rate-star', sheet)) b.onclick = () => {
+        const n = Number(b.dataset.s);
+        $$('.rate-star', sheet).forEach((x) => x.classList.toggle('on', Number(x.dataset.s) <= n));
+        sfx.star(n - 1);
+        api.ugc.rate(g.id, n).then(() => toast(`Rated ${n}★ – the creator thanks you!`)).catch(() => {});
+      };
+    },
+  });
+  api.ugc.submit(g, g.version, run.seed, sim.log).then((res) => {
+    const el = $('#r-rank');
+    if (el) el.innerHTML = res?.rank ? `Rank on v${g.version}: <b>#${res.rank}</b>${res.rank > 1 ? ' – one more try?' : ' 👑'}` : '';
+  }).catch((e) => { const el = $('#r-rank'); if (el) el.textContent = e.status === 401 || api.inArtifact() ? 'Sign in to Claude to post scores.' : ''; });
+  const r = await p;
+  if (r === 'again') playUgc(g);
+  else if (r === 'more') showCommunity();
+  else showHub();
+}
+
+// ---- studio
+function drafts() {
+  return load().drafts || {};
+}
+function saveDraft(id, spec, version) {
+  update((d) => { d.drafts = { ...(d.drafts || {}), [id]: { spec, version: version || 0, at: Date.now() } }; });
+}
+
+async function showStudio() {
+  leaveGame();
+  setBackground(['#80cbc4', '#1a237e']);
+  const ds = Object.entries(drafts()).sort((a, b) => b[1].at - a[1].at);
+  const el = showScreen('studio', `
+    <div class="topbar"><button class="icon-btn" id="st-back" aria-label="Back">←</button><h2 class="grow">Creator Studio</h2>
+      <button class="icon-btn" id="st-community" aria-label="Community games">🌟</button></div>
+    <div class="scroll">
+      <p class="muted">Build a game from a template, test it, publish it – then improve it based on what players think. No coding needed!</p>
+      <h3>Start a new game</h3>
+      <div class="mode-grid">${Object.entries(TEMPLATES).map(([k, t]) => `<button class="card" data-tpl="${k}"><span class="emoji">${t.icon}</span><b>${t.name}</b><span class="sub">${esc(t.blurb)}</span></button>`).join('')}</div>
+      ${ds.length ? `<h3 style="margin-top:16px">Drafts on this device</h3><div class="list">${ds.map(([id, d]) => `<button class="item" data-draft="${id}"><span style="font-size:1.6rem">${d.spec.hero}</span><span class="grow" style="text-align:left"><b>${esc(d.spec.title || 'Untitled')}</b><div class="small muted">${TEMPLATES[d.spec.template].name}${d.version ? ` · update to v${d.version}` : ' · not published yet'}</div></span><span class="val">Edit ✏️</span></button>`).join('')}</div>` : ''}
+      <h3 style="margin-top:16px">Your published games</h3>
+      <div class="list" id="st-mine"><p class="muted small">Loading…</p></div>
+    </div>`);
+  $('#st-back', el).onclick = () => { sfx.tap(); showHub(); };
+  $('#st-community', el).onclick = () => { sfx.tap(); showCommunity(); };
+  for (const b of $$('[data-tpl]', el)) b.onclick = () => { sfx.tap(); editGame(starterSpec(b.dataset.tpl), api.newUgcId(), 0); };
+  for (const b of $$('[data-draft]', el)) b.onclick = () => { const d = drafts()[b.dataset.draft]; editGame(d.spec, b.dataset.draft, d.version); };
+  const mine = $('#st-mine', el);
+  if (!(await api.ugc.available())) { mine.innerHTML = `<div class="tip">${api.inArtifact() ? 'Sign in to Claude to publish games.' : "Can't reach the game server – drafts are saved on this device."}</div>`; return; }
+  let games = [];
+  try { games = (await api.ugc.list()).filter((g) => g.mine); } catch { mine.innerHTML = '<p class="muted small">Couldn\'t load your games.</p>'; return; }
+  if (currentScreen() !== 'studio') return;
+  const claimed = load().creatorClaimed || {};
+  const others = (g) => Math.max(0, g.players - (g.mePlayed ? 1 : 0));
+  const owed = games.reduce((sum, g) => sum + Math.max(0, others(g) - (claimed[g.id] || 0)) * 5, 0);
+  mine.innerHTML = games.length ? `${owed ? `<button class="btn wide green" id="st-claim">🎁 Collect ${owed} 🐚 creator rewards</button>` : ''}
+    ${games.map((g) => `<div class="item"><span style="font-size:1.6rem">${g.hero}</span><span class="grow" style="text-align:left;min-width:0"><b>${esc(g.title)}</b> <span class="small muted">v${g.version}</span>
+      <div class="small muted">▶ ${fmt(g.plays)} plays · 👥 ${g.players} players · <span class="star-on">★</span> ${g.ratings ? g.rating.toFixed(1) + ` (${g.ratings})` : '–'}${g.reports ? ` · 🚩 ${g.reports}` : ''}</div></span>
+      <button class="btn sm blue" data-edit="${g.id}">✏️</button><button class="btn sm ghost" data-del="${g.id}" aria-label="Unpublish">🗑️</button></div>`).join('')}
+    <p class="small muted">You earn 5 🐚 for every new player who tries your games.</p>` : '<p class="muted small">Nothing published yet – pick a template above to start.</p>';
+  $('#st-claim', mine) && ($('#st-claim', mine).onclick = () => {
+    update((d) => { d.shells += owed; d.creatorClaimed = { ...(d.creatorClaimed || {}), ...Object.fromEntries(games.map((g) => [g.id, others(g)])) }; });
+    sfx.coin(); toast(`+${owed} 🐚 – players love your games!`); showStudio();
+  });
+  for (const b of $$('[data-edit]', mine)) b.onclick = async () => { const g = await api.ugc.get(b.dataset.edit); editGame(g.spec, g.id, g.version); };
+  for (const b of $$('[data-del]', mine)) b.onclick = async () => {
+    const ok = await modal('<h2>Unpublish this game?</h2><p>It will disappear from the community along with its leaderboards.</p>', { buttons: [{ label: 'Unpublish', value: true, cls: 'red' }, { label: 'Keep it', value: false, cls: 'ghost' }], row: true });
+    if (ok) { await api.ugc.remove(b.dataset.del).catch(() => toast("Couldn't unpublish")); showStudio(); }
+  };
+}
+
+function editGame(spec0, id, version, fromTest) {
+  leaveGame();
+  const spec = JSON.parse(JSON.stringify(spec0));
+  spec.rules = { ...TEMPLATES[spec.template].rules, ...spec.rules };
+  const tpl = TEMPLATES[spec.template];
+  setBackground(PALETTES[spec.palette] || PALETTES[0]);
+  const emojiGrid = (list, field, cur) => `<div class="emoji-grid" data-field="${field}">${list.map((e) => `<button class="emoji-pick ${e === cur ? 'on' : ''}" data-e="${e}" aria-label="${e}">${e}</button>`).join('')}</div>`;
+  const el = showScreen('editor', `
+    <div class="topbar"><button class="icon-btn" id="ed-back" aria-label="Back">←</button><h2 class="grow">${tpl.icon} ${version ? `Update v${version} → v${version + 1}` : `New ${tpl.name} game`}</h2></div>
+    <div class="scroll editor">
+      <div class="preview-wrap"><canvas id="ed-preview" aria-label="Live preview"></canvas><span class="small muted">Live preview – it replays as you edit</span></div>
+      <label>Title<input id="ed-title" maxlength="30" value="${esc(spec.title)}" placeholder="e.g. Starfish Storm"></label>
+      <label>Description<textarea id="ed-desc" maxlength="160" placeholder="One line that makes people want to play">${esc(spec.description)}</textarea></label>
+      <h3>Hero</h3>${emojiGrid(EMOJI.heroes, 'hero', spec.hero)}
+      <h3>Goodies <span class="small muted">(up to 3 – tap to add/remove)</span></h3>
+      ${emojiGrid(EMOJI.items, 'good', null)}
+      <div id="ed-goods" class="pill-row"></div>
+      <h3>Hazards <span class="small muted">(up to 3)</span></h3>
+      ${emojiGrid(EMOJI.hazards, 'bad', null)}
+      <div id="ed-bads" class="pill-row"></div>
+      <h3>Colours</h3>
+      <div class="swatches">${PALETTES.map(([a, b], i) => `<button class="swatch ${i === spec.palette ? 'on' : ''}" data-p="${i}" style="background:linear-gradient(${a},${b})" aria-label="Palette ${i + 1}"></button>`).join('')}</div>
+      <h3>Rules</h3>
+      ${Object.keys(tpl.rules).map((k) => { const ri = RULE_INFO[k]; return `<label class="rule">${ri.label} <b id="rv-${k}">${spec.rules[k]}</b><input type="range" id="r-${k}" min="${ri.min}" max="${ri.max}" step="${ri.step || 1}" value="${spec.rules[k]}"></label>`; }).join('')}
+      <div class="row" style="gap:10px;margin:16px 0;flex-wrap:wrap">
+        <button class="btn blue grow" id="ed-test">🧪 Test play</button>
+        <button class="btn green grow" id="ed-publish">🚀 ${version ? 'Publish update' : 'Publish'}</button>
+      </div>
+      <p class="small muted">Drafts save automatically on this device. Published games can be updated any time – every version gets its own leaderboard.</p>
+    </div>`);
+  let previewView = null;
+  const restartPreview = async () => {
+    previewView?.destroy();
+    let clean;
+    try { clean = ugcSanitize({ ...spec, title: spec.title.length >= 3 ? spec.title : 'Preview' }); } catch { return; }
+    const mod = await import('./maker/view.js');
+    if (currentScreen() !== 'editor') return;
+    const sim = ugcCreate(clean, 12345);
+    if (clean.template === 'flap') sim.flap();
+    // a tiny autopilot so the preview shows the game in motion
+    const cv = $('#ed-preview', el);
+    previewView = new mod.default({ canvas: cv, controls: null, sim, reducedMotion: true, hooks: { onOver: () => setTimeout(restartPreview, 400) } });
+    previewView.auto = setInterval(() => {
+      if (sim.over) return;
+      if (clean.template === 'flap') { const w = sim.objs.find((o) => o.kind === 'wall' && o.x > 18); if (w && sim.hy > w.gy + 4 && sim.vy > 0) sim.flap(); }
+      else if (clean.template === 'tap') { const o = sim.objs.find((o) => o.good && sim.tick - o.born > 25); if (o) sim.tap(o.x, o.y); }
+      else { const o = sim.objs.filter((o) => o.good).sort((a, b) => b.y - a.y)[0]; if (o) previewView.pointer = [o.x, o.y]; }
+    }, 120);
+    const destroy = previewView.destroy.bind(previewView);
+    previewView.destroy = () => { clearInterval(previewView.auto); destroy(); };
+    view = previewView;
+  };
+  const persist = () => saveDraft(id, spec, version);
+  const renderPicks = () => {
+    $('#ed-goods', el).innerHTML = spec.good.map((g, i) => `<span class="pill">${g.e} <select data-gi="${i}" aria-label="Points">${[5, 10, 15, 25, 50, 100].map((p) => `<option ${p === g.pts ? 'selected' : ''}>${p}</option>`).join('')}</select> pts <button class="x" data-rg="${i}" aria-label="Remove">✕</button></span>`).join('') || '<span class="small muted">Pick at least one goodie</span>';
+    $('#ed-bads', el).innerHTML = spec.bad.map((b, i) => `<span class="pill">${b.e} <button class="x" data-rb="${i}" aria-label="Remove">✕</button></span>`).join('') || '<span class="small muted">Pick at least one hazard</span>';
+    for (const s2 of $$('[data-gi]', el)) s2.onchange = () => { spec.good[Number(s2.dataset.gi)].pts = Number(s2.value); persist(); };
+    for (const b of $$('[data-rg]', el)) b.onclick = () => { spec.good.splice(Number(b.dataset.rg), 1); renderPicks(); persist(); restartPreview(); };
+    for (const b of $$('[data-rb]', el)) b.onclick = () => { spec.bad.splice(Number(b.dataset.rb), 1); renderPicks(); persist(); restartPreview(); };
+  };
+  renderPicks();
+  $('#ed-title', el).oninput = (e) => { spec.title = e.target.value; persist(); };
+  $('#ed-desc', el).oninput = (e) => { spec.description = e.target.value; persist(); };
+  for (const grid of $$('.emoji-grid', el)) {
+    for (const b of $$('.emoji-pick', grid)) b.onclick = () => {
+      const f = grid.dataset.field, e = b.dataset.e;
+      sfx.tap();
+      if (f === 'hero') { spec.hero = e; $$('.emoji-pick', grid).forEach((x) => x.classList.toggle('on', x === b)); }
+      else if (f === 'good') { const i = spec.good.findIndex((g) => g.e === e); if (i >= 0) spec.good.splice(i, 1); else if (spec.good.length < 3) spec.good.push({ e, pts: 10 }); else toast('Up to 3 goodies'); renderPicks(); }
+      else { const i = spec.bad.findIndex((g) => g.e === e); if (i >= 0) spec.bad.splice(i, 1); else if (spec.bad.length < 3) spec.bad.push({ e }); else toast('Up to 3 hazards'); renderPicks(); }
+      persist();
+      restartPreview();
+    };
+  }
+  for (const b of $$('.swatch', el)) b.onclick = () => { spec.palette = Number(b.dataset.p); $$('.swatch', el).forEach((x) => x.classList.toggle('on', x === b)); setBackground(PALETTES[spec.palette]); persist(); restartPreview(); };
+  for (const k of Object.keys(tpl.rules)) {
+    const inp = $(`#r-${k}`, el);
+    inp.oninput = () => { spec.rules[k] = Number(inp.value); $(`#rv-${k}`, el).textContent = inp.value; persist(); };
+    inp.onchange = restartPreview;
+  }
+  $('#ed-back', el).onclick = () => { sfx.tap(); showStudio(); };
+  $('#ed-test', el).onclick = () => {
+    let clean;
+    try { clean = ugcSanitize(spec); } catch (e) { toast(e.message); return; }
+    playUgc({ id, version, owner: load().name, spec: clean, specs: {}, hero: clean.hero }, { test: true });
+  };
+  $('#ed-publish', el).onclick = async () => {
+    let clean;
+    try { clean = ugcSanitize(spec); } catch (e) { toast(e.message); return; }
+    if (!(await api.ugc.available())) { toast(api.inArtifact() ? 'Sign in to Claude to publish' : "Can't reach the server – your draft is saved"); return; }
+    let note = '';
+    const ok = await modal(`<h2>🚀 ${version ? `Publish version ${version + 1}` : 'Publish your game'}</h2>
+      <p>${clean.hero} <b>${esc(clean.title)}</b> will be playable by everyone in the community.</p>
+      <label class="small">${version ? "What's new? (players see this)" : 'Release note (optional)'}<input id="pub-note" maxlength="120" placeholder="${version ? 'e.g. Easier start, new 🍩 goodie' : 'First release'}" style="width:100%"></label>
+      <p class="small muted">Keep it friendly for all ages – games with several reports are hidden.</p>`, {
+      buttons: [{ label: 'Publish', value: true, cls: 'green' }, { label: 'Cancel', value: false, cls: 'ghost' }], row: true,
+      onOpen: (sheet) => { $('#pub-note', sheet).oninput = (e) => { note = e.target.value; }; },
+    });
+    if (!ok) return;
+    try {
+      const res = await api.ugc.publish(id, clean, note);
+      update((d) => { if (d.drafts) delete d.drafts[id]; d.published = (d.published || 0) + (version ? 0 : 1); });
+      sfx.win();
+      announceAchievements();
+      toast(`🚀 Published v${res.version}!`);
+      ugcDetail(id);
+    } catch (e) {
+      toast(e.message || "Couldn't publish");
+    }
+  };
+  if (!fromTest && !version && !spec.title) setTimeout(() => $('#ed-title', el)?.focus(), 300);
+  restartPreview();
 }
 
 // ------------------------------------------------------------------ Reef Blocks

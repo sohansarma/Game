@@ -291,3 +291,32 @@ body.reduced-motion *, body.reduced-motion *::before, body.reduced-motion *::aft
 .dpad .btn { min-height: 44px; padding: 0; font-size: 1.1rem; }
 .col { display: flex; flex-direction: column; align-items: center; }
 .chess-moves { min-height: 1.2em; word-spacing: 2px; }
+
+/* ---------------- community + studio ---------------- */
+.community-row { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-top: 12px; }
+.community-row .card { min-height: 92px; background: linear-gradient(135deg, rgba(255,183,77,.35), var(--panel)); }
+.ugc-card { display: flex; align-items: center; gap: 12px; padding: 12px; border-radius: 16px; text-align: left; width: 100%;
+  background: linear-gradient(120deg, color-mix(in srgb, var(--c1) 55%, transparent), color-mix(in srgb, var(--c2) 75%, transparent)); border: 2px solid var(--line); }
+.ugc-card .sub { display: block; font-size: .78rem; color: rgba(255,255,255,.85); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ugc-title { display: block; font-size: 1.05rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ugc-hero { font-size: 2.2rem; flex-shrink: 0; }
+.rate-row { display: flex; justify-content: center; gap: 4px; margin: 6px 0; }
+.rate-star { font-size: 2rem; color: rgba(255,255,255,.3); padding: 2px 4px; }
+.rate-star.on { color: var(--gold); text-shadow: 0 2px 0 #a66f00; }
+.editor label { display: flex; flex-direction: column; gap: 4px; margin-top: 10px; font-weight: 700; text-align: left; }
+.editor input:not([type=range]), .editor textarea { width: 100%; min-height: 0; }
+.editor textarea { min-height: 60px; }
+.editor h3 { margin: 14px 0 6px; }
+.preview-wrap { display: flex; flex-direction: column; align-items: center; gap: 4px; }
+.preview-wrap canvas { width: 160px; height: 240px; border-radius: 14px; border: 2px solid var(--line); }
+.emoji-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(40px, 1fr)); gap: 4px; }
+.emoji-pick { font-size: 1.5rem; padding: 4px 0; border-radius: 10px; background: var(--panel-2); border: 2px solid transparent; }
+.emoji-pick.on { border-color: var(--gold); background: rgba(255,212,94,.25); }
+.pill-row { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 6px; }
+.pill-row .pill select { padding: 2px 4px; border-radius: 8px; }
+.pill-row .x { margin-left: 2px; opacity: .7; }
+.swatches { display: flex; flex-wrap: wrap; gap: 8px; }
+.swatch { width: 40px; height: 40px; border-radius: 12px; border: 3px solid transparent; }
+.swatch.on { border-color: #fff; box-shadow: 0 0 0 2px var(--gold); }
+.rule { flex-direction: row !important; flex-wrap: wrap; align-items: center; justify-content: space-between; }
+.rule input[type=range] { width: 100%; accent-color: var(--gold); }

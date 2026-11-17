@@ -407,3 +407,175 @@ export const matches = {
     return () => { stopped = true; };
   },
 };
+
+// ---------------------------------------------------------------------------
+// Community games (Creator Studio). Creations are plain data specs.
+// Shared-db: games/<uid> = { name, creations: { id: record } } and
+// ratings/<uid> = { r: {id: stars}, p: {id: plays}, rep: {id: true} }.
+// Server: /api/ugc endpoints. Summaries look the same from both.
+import { sanitize as ugcSanitize, replay as ugcReplay } from './maker/engine.js';
+
+const UGC_ID = /^[a-z0-9]{8}$/;
+export function newUgcId() {
+  const c = 'abcdefghijkmnpqrstuvwxyz23456789';
+  const buf = crypto.getRandomValues ? crypto.getRandomValues(new Uint32Array(8)) : Array.from({ length: 8 }, () => Math.random() * 1e9);
+  return Array.from(buf, (n) => c[n % c.length]).join('');
+}
+
+function summarize(rec, ownerName, agg) {
+  const v = rec.version;
+  const spec = rec.specs[v];
+  const rs = Object.values(agg.r || {});
+  return {
+    id: rec.id, version: v, title: spec.title, description: spec.description, template: spec.template, hero: spec.hero, palette: spec.palette,
+    owner: ownerName, mine: !!agg.mine, createdAt: rec.createdAt, updatedAt: rec.updatedAt, history: rec.history || [],
+    rating: rs.length ? rs.reduce((a, b) => a + b, 0) / rs.length : 0, ratings: rs.length,
+    plays: Object.values(agg.p || {}).reduce((a, b) => a + b, 0), players: Object.keys(agg.p || {}).length,
+    recentPlays: agg.recent || 0, reports: Object.keys(agg.rep || {}).length, myRating: agg.myRating || 0, mePlayed: !!agg.mePlayed,
+  };
+}
+
+async function sharedUgcAll(sh) {
+  const [games, ratings] = await Promise.all([sh.db.collection('games').get(), sh.db.collection('ratings').get()]);
+  const agg = {};
+  ratings.docs.forEach((d) => {
+    const x = d.data() || {};
+    for (const [id, s] of Object.entries(x.r || {})) if (s >= 1 && s <= 5) { ((agg[id] ||= { r: {}, p: {}, rep: {} }).r[d.id] = s); if (d.id === sh.uid) agg[id].myRating = s; }
+    for (const [id, n] of Object.entries(x.p || {})) if (Number.isInteger(n) && n > 0 && n < 100000) { (agg[id] ||= { r: {}, p: {}, rep: {} }).p[d.id] = n; if (d.id === sh.uid) agg[id].mePlayed = true; }
+    for (const [id, t] of Object.entries(x.pt || {})) if (Date.now() - t < 7 * 86400000) (agg[id] ||= { r: {}, p: {}, rep: {} }).recent = (agg[id].recent || 0) + 1;
+    for (const id of Object.keys(x.rep || {})) (agg[id] ||= { r: {}, p: {}, rep: {} }).rep[d.id] = true;
+  });
+  const out = [];
+  games.docs.forEach((d) => {
+    const x = d.data() || {};
+    for (const rec of Object.values(x.creations || {})) {
+      if (!rec || !UGC_ID.test(rec.id) || !rec.specs?.[rec.version]) continue;
+      const a = agg[rec.id] || {};
+      out.push({ ...summarize(rec, String(x.name || 'Creator').slice(0, 40), { ...a, mine: d.id === sh.uid }), _rec: rec });
+    }
+  });
+  return out;
+}
+
+async function myRatingsDoc(sh, fn) {
+  const ref = sh.db.collection('ratings').doc(sh.uid);
+  const snap = await ref.get();
+  const doc = snap.exists ? snap.data() : {};
+  doc.r ||= {}; doc.p ||= {}; doc.pt ||= {}; doc.rep ||= {};
+  fn(doc);
+  await ref.set(doc);
+}
+
+export const ugc = {
+  async available() {
+    if (await sharedDb()) return true;
+    if (inArtifact()) return false;
+    return checkServer();
+  },
+
+  /** List published games (hidden ones filtered unless they're mine). */
+  async list() {
+    const sh = await sharedDb();
+    if (sh) return (await sharedUgcAll(sh)).filter((g) => g.reports < 3 || g.mine).map(({ _rec, ...g }) => g);
+    const p = load();
+    return (await req('/ugc?' + new URLSearchParams({ playerId: p.playerId }).toString())).games;
+  },
+
+  /** Full record incl. the spec for a given (or current) version. */
+  async get(id) {
+    const sh = await sharedDb();
+    if (sh) {
+      const g = (await sharedUgcAll(sh)).find((x) => x.id === id);
+      if (!g) throw Object.assign(new Error('That game was removed'), { status: 404 });
+      return { ...g, specs: g._rec.specs, spec: g._rec.specs[g.version], _rec: undefined };
+    }
+    const p = load();
+    return req('/ugc?' + new URLSearchParams({ id, playerId: p.playerId }).toString());
+  },
+
+  async publish(id, spec, note) {
+    const clean = ugcSanitize(spec);
+    const n = String(note || '').slice(0, 120);
+    const sh = await sharedDb();
+    if (sh) {
+      const ref = sh.db.collection('games').doc(sh.uid);
+      const snap = await ref.get();
+      const doc = snap.exists ? snap.data() : {};
+      doc.creations ||= {};
+      if (!doc.creations[id] && Object.keys(doc.creations).length >= 20) throw Object.assign(new Error('You can publish up to 20 games'), { status: 400 });
+      const now = Date.now();
+      const rec = doc.creations[id] || { id, version: 0, specs: {}, history: [], createdAt: now };
+      rec.version++;
+      rec.specs[rec.version] = clean;
+      // keep the last 10 versions' rules (older leaderboards stay verifiable)
+      for (const v of Object.keys(rec.specs)) if (Number(v) <= rec.version - 10) delete rec.specs[v];
+      rec.history = [...rec.history, { v: rec.version, at: now, note: n || (rec.version === 1 ? 'First release' : 'Updated') }].slice(-20);
+      rec.updatedAt = now;
+      doc.creations[id] = rec;
+      doc.name = load().name;
+      await ref.set(doc);
+      return { ok: true, version: rec.version };
+    }
+    const p = await ensureRegistered();
+    return req('/ugc', { method: 'POST', body: JSON.stringify({ action: 'publish', id, spec: clean, note: n, playerId: p.playerId, token: p.token }) });
+  },
+
+  async remove(id) {
+    const sh = await sharedDb();
+    if (sh) {
+      const ref = sh.db.collection('games').doc(sh.uid);
+      const snap = await ref.get();
+      if (!snap.exists) return { ok: true };
+      const doc = snap.data();
+      delete doc.creations?.[id];
+      await ref.set(doc);
+      return { ok: true };
+    }
+    const p = await ensureRegistered();
+    return req('/ugc', { method: 'POST', body: JSON.stringify({ action: 'delete', id, playerId: p.playerId, token: p.token }) });
+  },
+
+  async rate(id, stars) {
+    const s = Math.max(1, Math.min(5, Math.round(stars)));
+    const sh = await sharedDb();
+    if (sh) { await myRatingsDoc(sh, (d) => { d.r[id] = s; }); return { ok: true }; }
+    const p = await ensureRegistered();
+    return req('/ugc', { method: 'POST', body: JSON.stringify({ action: 'rate', id, stars: s, playerId: p.playerId, token: p.token }) });
+  },
+
+  async played(id) {
+    const sh = await sharedDb();
+    if (sh) { await myRatingsDoc(sh, (d) => { d.p[id] = (d.p[id] || 0) + 1; d.pt[id] = Date.now(); }); return { ok: true }; }
+    const p = await ensureRegistered();
+    return req('/ugc', { method: 'POST', body: JSON.stringify({ action: 'play', id, playerId: p.playerId, token: p.token }) });
+  },
+
+  async report(id) {
+    const sh = await sharedDb();
+    if (sh) { await myRatingsDoc(sh, (d) => { d.rep[id] = true; }); return { ok: true }; }
+    const p = await ensureRegistered();
+    return req('/ugc', { method: 'POST', body: JSON.stringify({ action: 'report', id, playerId: p.playerId, token: p.token }) });
+  },
+
+  /** Submit a run: verified by replaying with that version's rules. */
+  async submit(game, version, seed, log) {
+    const key = `${game.id}-${version}`;
+    const sh = await sharedDb();
+    if (sh) {
+      const r = ugcReplay(game.specs[version], seed, log);
+      if (!r.ok) throw Object.assign(new Error('replay failed'), { status: 422 });
+      const ref = sh.db.collection('players').doc(sh.uid);
+      const snap = await ref.get();
+      const doc = snap.exists ? snap.data() : { scores: {}, levels: {} };
+      doc.scores ||= {};
+      const id = `ugc:${key}`;
+      if (!doc.scores[id] || r.sim.score > doc.scores[id].s) doc.scores[id] = { s: r.sim.score, t: Date.now() };
+      doc.name = load().name;
+      await ref.set(doc);
+      const top = await sharedTop(sh, 'ugc', key);
+      return { ok: true, rank: top.me?.rank, verified: r.sim.score };
+    }
+    const p = await ensureRegistered();
+    return req('/scores', { method: 'POST', body: JSON.stringify({ board: 'ugc', key, seed, log, v: (await import('./modes.js')).ENGINE_VERSION, playerId: p.playerId, token: p.token }) });
+  },
+};

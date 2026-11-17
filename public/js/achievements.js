@@ -29,6 +29,8 @@ export const ACHIEVEMENTS = [
   { id: 'blocks_2000', icon: '🏰', name: 'Reef Architect', desc: 'Score 2,000 in Reef Blocks', goal: 2000, reward: 60, get: (s) => s.blocks.best },
   { id: 'blocks_combo', icon: '⚡', name: 'Combo Crafter', desc: 'Reach a x5 combo in Reef Blocks', goal: 5, reward: 30, get: (s) => s.stats.bestCombo },
   { id: 'perfect', icon: '✨', name: 'Spotless', desc: 'Clear the whole Reef Blocks board', goal: 1, reward: 40, get: (s) => s.stats.perfectClears },
+  { id: 'maker', icon: '🛠️', name: 'Game Maker', desc: 'Publish your own game in the Creator Studio', goal: 1, reward: 100, get: (s) => s.published || 0 },
+  { id: 'community_5', icon: '🌟', name: 'Community Fan', desc: 'Play 5 community games', goal: 5, reward: 40, get: (s) => Object.keys(s.ugcPlayed || {}).length },
   { id: 'arcade_all', icon: '🕹️', name: 'Arcade Explorer', desc: `Play all ${ARCADE.length + 2} games`, goal: ARCADE.length + 2, reward: 100, get: (s) => Object.keys(s.played || {}).length },
   ...ARCADE.map((g) => ({ id: `${g.id}_pro`, icon: g.icon, name: `${g.title} Pro`, desc: `Score ${g.milestone.toLocaleString('en-US')} in ${g.title}`, goal: g.milestone, reward: 50, get: (s) => s.arcade?.[g.id]?.best || 0 })),
 ];
