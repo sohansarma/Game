@@ -63,7 +63,7 @@ export class BlocksView {
       if (y < this.trayY - 10) return;
       const slot = Math.min(2, Math.max(0, Math.floor(x / (this.W / 3))));
       if (!this.game.tray[slot]) return;
-      cv.setPointerCapture?.(e.pointerId);
+      try { cv.setPointerCapture?.(e.pointerId); } catch { /* synthetic or lost pointer */ }
       // lift the piece above the finger so it stays visible
       const lift = e.pointerType === 'mouse' ? this.cell * 0.5 : this.cell * 2.2;
       this.drag = { slot, x, y, lift };

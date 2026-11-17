@@ -294,7 +294,7 @@ export class MatchView {
       if (this.busy) return;
       const cell = this.cellAt(e.clientX, e.clientY);
       if (!cell) return;
-      cv.setPointerCapture?.(e.pointerId);
+      try { cv.setPointerCapture?.(e.pointerId); } catch { /* synthetic or lost pointer */ }
       down = { cell, x: e.clientX, y: e.clientY, moved: false };
       this.clearHint();
       this.resetHintTimer();

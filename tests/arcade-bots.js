@@ -4,6 +4,13 @@ import { T, SHOP_ITEMS } from '../public/js/arcade/miner.js';
 import { solve as sortSolve } from '../public/js/arcade/sort.js';
 
 export const BOTS = {
+  // Follows the ball with an error that grows over time, so it eventually misses.
+  breaker(sim, rng) {
+    if (sim.attached) { if (sim.tick % 30 === 0) sim.launch(); }
+    else if (sim.tick % 4 === 0) sim.input(sim.bx + (rng.next() - 0.5) * (6 + sim.tick / 400));
+    sim.step();
+    if (sim.tick > 60 * 60 * 15) sim.quit();
+  },
   sort(sim, rng) {
     if (!sim._plan || !sim._plan.length || sim._planLevel !== sim.level) {
       sim._plan = sim.level <= 4 ? sortSolve(sim.tubes, 20000) : null;

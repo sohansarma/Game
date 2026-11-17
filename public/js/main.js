@@ -634,6 +634,7 @@ const VIEWS = {
   merge: () => import('./arcade/merge-view.js'),
   stack: () => import('./arcade/stack-view.js'),
   sort: () => import('./arcade/sort-view.js'),
+  breaker: () => import('./arcade/breaker-view.js'),
 };
 
 function arcadeStats(id) {

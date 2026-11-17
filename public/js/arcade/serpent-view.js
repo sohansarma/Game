@@ -56,7 +56,7 @@ export default class SerpentView {
     let start = null;
     const down = (e) => {
       start = { x: e.clientX, y: e.clientY };
-      cv.setPointerCapture?.(e.pointerId);
+      try { cv.setPointerCapture?.(e.pointerId); } catch { /* synthetic or lost pointer */ }
       if (!this.sim.started) this.sim.start();
     };
     const move = (e) => {

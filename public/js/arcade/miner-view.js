@@ -62,7 +62,7 @@ export default class MinerView {
   bind() {
     const cv = this.canvas;
     let start = null;
-    const down = (e) => { start = { x: e.clientX, y: e.clientY }; cv.setPointerCapture?.(e.pointerId); };
+    const down = (e) => { start = { x: e.clientX, y: e.clientY }; try { cv.setPointerCapture?.(e.pointerId); } catch { /* synthetic or lost pointer */ } };
     const up = (e) => {
       if (!start) return;
       const dx = e.clientX - start.x, dy = e.clientY - start.y;
