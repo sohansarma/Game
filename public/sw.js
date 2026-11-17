@@ -1,11 +1,11 @@
 // Offline support: cache the app shell, serve it cache-first, and never
 // cache API calls (leaderboards must be live).
-const VERSION = 'tidepop-v2';
+const VERSION = 'tidepop-v3';
 const SHELL = [
   './', 'index.html', 'config.js', 'manifest.webmanifest', 'css/style.css',
   'js/main.js', 'js/engine.js', 'js/rng.js', 'js/blocks.js', 'js/levels.js', 'js/level-tuning.js', 'js/modes.js',
   'js/storage.js', 'js/audio.js', 'js/api.js', 'js/ui.js', 'js/creatures.js', 'js/matchview.js', 'js/blocksview.js',
-  'js/achievements.js', 'icons/icon.svg', 'icons/icon-192.png', 'icons/icon-512.png', 'icons/apple-touch-icon.png',
+  'js/achievements.js', 'js/arcade/index.js', 'js/arcade/miner.js', 'js/arcade/miner-view.js', 'icons/icon.svg', 'icons/icon-192.png', 'icons/icon-512.png', 'icons/apple-touch-icon.png',
 ];
 
 self.addEventListener('install', (e) => {

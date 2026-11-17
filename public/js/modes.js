@@ -2,6 +2,7 @@
 // the server so a board key ("2026-11-17") always produces the same game.
 
 import { hashString, Rng } from './rng.js';
+import { arcadeBoards } from './arcade/index.js';
 
 export const BOARDS = {
   daily: { title: 'Daily Dive', game: 'match', period: 'day' },
@@ -9,6 +10,7 @@ export const BOARDS = {
   blocksDaily: { title: 'Reef Blocks Daily', game: 'blocks', period: 'day' },
   blocks: { title: 'Reef Blocks', game: 'blocks', period: 'all' },
   stars: { title: 'Adventure Stars', game: 'stars', period: 'all' },
+  ...arcadeBoards(),
 };
 
 export function dayKey(date = new Date()) {

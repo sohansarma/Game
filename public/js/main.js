@@ -4,6 +4,8 @@ import { Game, replay, SPECIAL } from './engine.js';
 import { BlockGame, replayBlocks } from './blocks.js';
 import { getLevel, LEVEL_COUNT, MAX_LEVEL, worldOf } from './levels.js';
 import { dailyConfig, deepConfig, dayKey, weekKey, blocksSeed, ENGINE_VERSION, BOARDS } from './modes.js';
+import { ARCADE, ARCADE_BY_ID, arcadeSeed } from './arcade/index.js';
+import { hashString } from './rng.js';
 import { load, update, save, totalStars, highestUnlocked, exportSave, importSave, resetSave, randomNickname, ADJECTIVES, ANIMALS } from './storage.js';
 import { MatchView } from './matchview.js';
 import { BlocksView } from './blocksview.js';
@@ -54,7 +56,7 @@ async function boot() {
 
   api.checkServer().then((ok) => { if (ok) api.flushPending().catch(() => {}); });
 
-  goHome();
+  showHub();
   if (!s.onboarded) await onboarding();
   else await maybeDailyReward();
 }
@@ -138,6 +140,7 @@ async function maybeDailyReward() {
     toast(`Got ${rewardText(r)}`);
     announceAchievements();
     if (currentScreen() === 'home') goHome();
+    if (currentScreen() === 'hub') showHub();
   }
 }
 
@@ -163,6 +166,7 @@ function goHome() {
   const creatures = PALETTE.map((_, i) => `<img alt="" src="${iconURL(i, 76)}">`).join('');
   const el = showScreen('home', `
     <div class="topbar">
+      <button class="icon-btn" id="h-arcade" aria-label="Back to the arcade">←</button>
       <span class="pill" title="Shells">🐚 ${fmt(s.shells)}</span>
       <span class="pill" title="Stars">⭐ ${totalStars(s)}</span>
       <span class="pill" title="Login streak">🔥 ${s.daily.streak}</span>
@@ -190,6 +194,7 @@ function goHome() {
     </div>`);
   const on = (id, fn) => { $(id, el).onclick = () => { sfx.tap(); fn(); }; };
   on('#h-play', () => startLevel(next));
+  on('#h-arcade', showHub);
   on('#h-map', showMap);
   on('#h-daily', startDaily);
   on('#h-deep', startDeep);
@@ -447,7 +452,7 @@ async function pauseMenu() {
     <div class="setting"><span>🎵 Music</span><button class="switch" role="switch" data-k="music" aria-checked="${s.settings.music}"></button></div>`, {
     buttons: [
       { label: '▶ Resume', value: 'resume', cls: 'green' },
-      ...(run?.kind === 'level' || run?.kind === 'deep' || run?.practice || run?.kind === 'blocks' ? [{ label: '↻ Restart', value: 'restart', cls: 'blue' }] : []),
+      ...(run?.kind === 'level' || run?.kind === 'deep' || run?.practice || run?.kind === 'blocks' || run?.kind === 'arcade' ? [{ label: '↻ Restart', value: 'restart', cls: 'blue' }] : []),
       { label: '❓ How to play', value: 'help', cls: 'ghost' },
       { label: run?.kind === 'daily' && !run.practice ? '🏠 Home (progress saved)' : '🏠 Quit to home', value: 'quit', cls: 'ghost' },
     ],
@@ -458,9 +463,11 @@ async function pauseMenu() {
     else if (run.kind === 'deep') playMatch({ kind: 'deep', key: run.key, cfg: deepConfig(run.key) });
     else if (run.kind === 'daily') playMatch({ kind: 'daily', key: run.key, cfg: run.cfg, practice: true });
     else if (run.kind === 'blocks') { update((d) => { d.blocksRun = null; }); playBlocks({ daily: run.daily }); }
-  } else if (r === 'help') { await howToPlay(); pauseMenu(); }
+    else if (run.kind === 'arcade') playArcade(run.id, { daily: run.daily });
+  } else if (r === 'help') { if (run?.kind === 'arcade') await arcadeHow(run.id); else await howToPlay(); pauseMenu(); }
   else if (r === 'quit') {
     if (run?.kind === 'level') showMap(run.n);
+    else if (run?.kind === 'blocks' || run?.kind === 'arcade') showHub();
     else goHome();
   }
 }
@@ -480,6 +487,7 @@ async function endMatch(run) {
   if (run.kind === 'level') return endLevel(run);
   run.ended = true;
   recordMatchStats(game);
+  noteGameEnd('tidepop', run.kind === 'deep' && game.score > (load().deep[run.key] || 0));
   const score = game.score;
   let rankLine = '<p class="muted small" id="r-rank">Checking leaderboard…</p>';
   let ranked = false;
@@ -577,6 +585,7 @@ async function endLevel(run) {
   }
   run.ended = true;
   recordMatchStats(game);
+  noteGameEnd('tidepop', game.score > (load().levels[n]?.best || 0));
   const stars = game.stars();
   const prev = load().levels[n];
   const prevStars = prev?.stars || 0;
@@ -615,6 +624,290 @@ async function endLevel(run) {
   if (r === 'next') startLevel(next);
   else if (r === 'retry') startLevel(n);
   else showMap(next);
+}
+
+// ------------------------------------------------------------------ arcade hub
+const VIEWS = {
+  miner: () => import('./arcade/miner-view.js'),
+};
+
+function arcadeStats(id) {
+  const a = load().arcade || {};
+  return { best: 0, games: 0, daily: {}, ...(a[id] || {}) };
+}
+
+function hubGames() {
+  const s = load();
+  return [
+    { id: 'tidepop', title: 'Tidepop', icon: '🐚', tagline: 'Match-3 adventure · endless levels', best: `⭐ ${totalStars(s)}`, played: s.dailyDive[dayKey()]?.best !== undefined, dailyBoard: 'daily', open: goHome },
+    { id: 'reef', title: 'Reef Blocks', icon: '🧱', tagline: 'Drag blocks, clear lines, chain combos', best: fmt(s.blocks.best), played: s.blocksDaily[dayKey()] !== undefined, dailyBoard: 'blocksDaily', open: blocksMenu },
+    ...ARCADE.map((g) => {
+      const st = arcadeStats(g.id);
+      return { id: g.id, title: g.title, icon: g.icon, tagline: g.tagline, best: fmt(st.best), played: st.daily[dayKey()] !== undefined, dailyBoard: g.id + 'Daily', open: () => arcadeMenu(g.id) };
+    }),
+  ];
+}
+
+function hotGameId() {
+  const ids = hubGames().map((g) => g.id);
+  return ids[hashString('hot-' + dayKey()) % ids.length];
+}
+
+function missionState() {
+  const s = load();
+  const day = dayKey();
+  return s.missions?.day === day ? s.missions : { day, best: 0, hot: 0, claimed: false };
+}
+
+function missions() {
+  const m = missionState();
+  const games = hubGames();
+  const hot = games.find((g) => g.id === hotGameId());
+  const dailies = games.filter((g) => g.played).length;
+  return {
+    claimed: m.claimed,
+    list: [
+      { text: 'Play 3 daily challenges', cur: Math.min(3, dailies), goal: 3 },
+      { text: 'Beat one of your personal bests', cur: Math.min(1, m.best), goal: 1 },
+      { text: `Play today's hot game: ${hot.icon} ${hot.title}`, cur: Math.min(1, m.hot), goal: 1 },
+    ],
+  };
+}
+
+/** Records a finished game for missions; returns true if it was the hot game (2x shells). */
+function noteGameEnd(id, isBest) {
+  const hot = id === hotGameId();
+  update((d) => {
+    const day = dayKey();
+    if (d.missions?.day !== day) d.missions = { day, best: 0, hot: 0, claimed: false };
+    if (isBest) d.missions.best++;
+    if (hot) d.missions.hot++;
+    d.played ||= {};
+    d.played[id] = (d.played[id] || 0) + 1;
+  });
+  return hot;
+}
+
+function msToReset() {
+  const now = new Date();
+  return Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate() + 1) - now.getTime();
+}
+const hms = (ms) => {
+  const t = Math.max(0, Math.floor(ms / 1000));
+  return `${String(Math.floor(t / 3600)).padStart(2, '0')}:${String(Math.floor((t % 3600) / 60)).padStart(2, '0')}:${String(t % 60).padStart(2, '0')}`;
+};
+let hubTimer = null;
+
+function showHub() {
+  leaveGame();
+  setBackground(['#4fc3f7', '#283593']);
+  const s = load();
+  const games = hubGames();
+  const hot = games.find((g) => g.id === hotGameId());
+  const ms = missions();
+  const allDone = ms.list.every((m) => m.cur >= m.goal);
+  const st = dailyStatus();
+  const ranks = s.lastRanks || {};
+  const el = showScreen('hub', `
+    <div class="topbar">
+      <span class="pill" title="Shells">🐚 ${fmt(s.shells)}</span>
+      <span class="pill" title="Login streak">🔥 ${s.daily.streak}</span>
+      <span class="spacer"></span>
+      <button class="icon-btn" id="u-lb" aria-label="Leaderboards">🏆</button>
+      <button class="icon-btn ${st.canClaim ? 'badge-dot' : ''}" id="u-gift" aria-label="Daily treasure">🎁</button>
+      <button class="icon-btn" id="u-settings" aria-label="Settings">⚙️</button>
+    </div>
+    <div class="scroll">
+      <div class="home-hero"><div class="logo">Tide<span>pop</span> <small class="arcade-word">Arcade</small></div></div>
+      <div class="hub-timer" role="timer">⏳ Today's challenges end in <b id="u-timer">${hms(msToReset())}</b></div>
+      <button class="hot-card" id="u-hot"><span class="hot-flame">🔥</span><span class="grow"><small>HOT TODAY · 2× SHELLS</small><b>${hot.icon} ${esc(hot.title)}</b></span><span class="btn sm">Play</span></button>
+      <div class="missions">
+        <div class="row"><b class="grow">🎯 Daily missions</b><span class="small muted">reward: 🐚 150 + 🎁</span></div>
+        ${ms.list.map((m) => `<div class="mission ${m.cur >= m.goal ? 'done' : ''}"><span>${m.cur >= m.goal ? '✅' : '⬜'} ${esc(m.text)}</span><span class="small">${m.cur}/${m.goal}</span></div>`).join('')}
+        ${ms.claimed ? '<p class="small muted center">Chest claimed – new missions at reset!</p>' : `<button class="btn wide ${allDone ? 'green' : 'ghost'}" id="u-chest" ${allDone ? '' : 'disabled'}>${allDone ? '🎁 Open the mission chest' : 'Complete all 3 to open the chest'}</button>`}
+      </div>
+      <div class="game-grid">${games.map((g) => {
+        const rk = ranks[g.dailyBoard + ':' + dayKey()];
+        return `<button class="game-card ${g.id === hot.id ? 'hot' : ''}" data-g="${g.id}">
+          ${g.id === hot.id ? '<span class="tag">🔥 2×</span>' : g.played ? `<span class="tag done">${rk ? '#' + rk : '✓'} today</span>` : '<span class="tag">Daily!</span>'}
+          <span class="game-icon">${g.icon}</span><b>${esc(g.title)}</b><span class="sub">${esc(g.tagline)}</span><span class="sub">Best: <b>${g.best}</b></span></button>`;
+      }).join('')}</div>
+      <p class="center small muted" style="margin-top:14px">${games.length} games · free forever · no ads · playing as <b>${esc(s.name)}</b></p>
+    </div>`);
+  const on = (id, fn) => { const b = $(id, el); if (b) b.onclick = () => { sfx.tap(); fn(); }; };
+  on('#u-lb', () => showLeaderboard());
+  on('#u-settings', showSettings);
+  on('#u-gift', () => (dailyStatus().canClaim ? maybeDailyReward() : toast('Already claimed today – see you tomorrow! 🔥')));
+  on('#u-hot', () => hot.open());
+  on('#u-chest', () => {
+    update((d) => { d.missions = { ...missionState(), claimed: true }; d.shells += 150; d.boosters.hammer++; d.boosters.moves++; });
+    sfx.win();
+    toast('Mission chest: +150 🐚, 🔨 +1, ➕ +1');
+    announceAchievements();
+    showHub();
+  });
+  for (const b of $$('.game-card', el)) b.onclick = () => { sfx.tap(); games.find((g) => g.id === b.dataset.g).open(); };
+  clearInterval(hubTimer);
+  hubTimer = setInterval(() => {
+    const t = $('#u-timer');
+    if (!t || currentScreen() !== 'hub') { clearInterval(hubTimer); return; }
+    const left = msToReset();
+    t.textContent = hms(left);
+    if (left < 3600000) t.parentElement.classList.add('urgent');
+  }, 1000);
+  checkRankAlerts(games);
+}
+
+let rankCheckAt = 0;
+/** FOMO: tell players when someone overtook them on a daily board. */
+async function checkRankAlerts(games) {
+  if (Date.now() - rankCheckAt < 60000 || !load().settings.leaderboard) return;
+  rankCheckAt = Date.now();
+  const key = dayKey();
+  for (const g of games.filter((x) => x.played)) {
+    try {
+      const data = await api.top(g.dailyBoard, key);
+      if (!data.me) continue;
+      const id = g.dailyBoard + ':' + key;
+      const prev = load().lastRanks?.[id];
+      update((d) => { d.lastRanks = { ...(d.lastRanks || {}), [id]: data.me.rank }; });
+      if (prev && data.me.rank > prev) {
+        toast(`📉 ${data.me.rank - prev} player${data.me.rank - prev > 1 ? 's' : ''} passed you in ${g.title}! You're #${data.me.rank} – win it back!`);
+        sfx.bad();
+      }
+      const tag = $(`.game-card[data-g="${g.id}"] .tag.done`);
+      if (tag) tag.textContent = `#${data.me.rank} today`;
+    } catch {
+      return; // offline / signed out – skip quietly
+    }
+  }
+}
+
+async function arcadeHow(id) {
+  const mod = await VIEWS[id]();
+  return modal(`<h2>${ARCADE_BY_ID[id].icon} How to play</h2>${mod.HOW}`, { buttons: [{ label: 'Got it!', value: true }] });
+}
+
+async function arcadeMenu(id) {
+  const g = ARCADE_BY_ID[id];
+  const st = arcadeStats(id);
+  const today = st.daily[dayKey()];
+  const hot = id === hotGameId();
+  const r = await modal(`<h2>${g.icon} ${esc(g.title)}</h2>
+    <p class="muted">${esc(g.tagline)}</p>
+    ${hot ? '<div class="reward">🔥 Hot today: 2× shells</div>' : ''}
+    <p class="small muted">Your best: <b>${fmt(st.best)}</b> · Today's daily: <b>${today !== undefined ? fmt(today) : 'not played'}</b></p>
+    <div class="tip">📅 The <b>daily challenge</b> is the same for every player today. Best score of the day wins – it ends in <b>${hms(msToReset())}</b>.</div>`, {
+    buttons: [
+      { label: '▶ Play', value: 'play', cls: 'green' },
+      { label: `📅 Daily challenge${today === undefined ? ' (new!)' : ''}`, value: 'daily', cls: 'blue' },
+      { label: '🏆 Leaderboard', value: 'lb', cls: 'ghost' },
+      { label: '❓ How to play', value: 'how', cls: 'ghost' },
+    ],
+  });
+  if (r === 'play') playArcade(id, { daily: false });
+  else if (r === 'daily') playArcade(id, { daily: true });
+  else if (r === 'lb') showLeaderboard(id + 'Daily');
+  else if (r === 'how') { await arcadeHow(id); arcadeMenu(id); }
+}
+
+async function playArcade(id, { daily }) {
+  leaveGame();
+  try { history.pushState({ g: 1 }, ''); } catch { /* sandboxed */ }
+  const g = ARCADE_BY_ID[id];
+  const mod = await VIEWS[id]();
+  const key = dayKey();
+  const runSeed = randSeed();
+  const sim = g.create(arcadeSeed(id, daily, key, runSeed));
+  const run = { kind: 'arcade', id, daily, key, seed: runSeed, sim };
+  currentRun = run;
+  setBackground(g.color);
+  const s = load();
+  const el = showScreen('arcade', `
+    <div class="hud">
+      <button class="icon-btn" id="ar-pause" aria-label="Pause">⏸</button>
+      <div class="box grow arcade-hud" id="ar-hud"></div>
+    </div>
+    <div class="board-wrap"><canvas id="ar-canvas" aria-label="${esc(g.title)} game area"></canvas></div>
+    <div id="ar-controls" class="arcade-controls"></div>
+    <div class="mode-label">${daily ? `📅 Daily challenge · ends in ${hms(msToReset())}` : `${g.icon} ${esc(g.title)} · best ${fmt(arcadeStats(id).best)}`}</div>`);
+  const refresh = () => {
+    const box = $('#ar-hud', el);
+    if (box) box.innerHTML = mod.hud(sim).map((h) => `<div class="hstat ${h.warn ? 'warn' : ''} ${h.big ? 'big' : ''}"><span class="lbl">${esc(h.label)}</span><b>${h.value}</b></div>`).join('');
+  };
+  view = new mod.default({
+    canvas: $('#ar-canvas', el),
+    controls: $('#ar-controls', el),
+    sim,
+    reducedMotion: s.settings.reducedMotion,
+    hooks: {
+      onChange: refresh,
+      onOver: () => endArcade(run),
+      onQuit: async () => {
+        const ok = await modal('<h2>End this run?</h2><p>Your score so far will be saved and submitted.</p>', { buttons: [{ label: 'End run', value: true, cls: 'green' }, { label: 'Keep playing', value: false, cls: 'ghost' }], row: true });
+        if (ok && !sim.over) { sim.quit(); endArcade(run); }
+      },
+    },
+  });
+  $('#ar-pause', el).onclick = () => { sfx.tap(); pauseMenu(); };
+  refresh();
+  if (!arcadeStats(id).games) arcadeHow(id);
+}
+
+async function endArcade(run) {
+  if (run.ended) return;
+  run.ended = true;
+  const g = ARCADE_BY_ID[run.id];
+  const score = run.sim.score;
+  const prev = arcadeStats(run.id);
+  const prevBest = run.daily ? prev.daily[run.key] || 0 : prev.best;
+  const isBest = score > prev.best;
+  const hot = noteGameEnd(run.id, isBest);
+  const shells = Math.min(60, 2 + Math.floor(score / g.shellsPer)) * (hot ? 2 : 1);
+  update((d) => {
+    d.arcade ||= {};
+    const a = { best: 0, games: 0, daily: {}, ...(d.arcade[run.id] || {}) };
+    a.games++;
+    a.best = Math.max(a.best, score);
+    if (run.daily) a.daily = { ...a.daily, [run.key]: Math.max(a.daily[run.key] || 0, score) };
+    // keep only the last 30 days of daily scores
+    for (const k of Object.keys(a.daily)) if (k < dayKey(new Date(Date.now() - 30 * 86400000))) delete a.daily[k];
+    d.arcade[run.id] = a;
+    d.shells += shells;
+  });
+  isBest || score > prevBest ? sfx.win() : sfx.lose();
+  announceAchievements();
+  const board = run.daily ? run.id + 'Daily' : run.id;
+  const p = modal(`<h2>${g.icon} ${run.sim.overReason || 'Game over!'}</h2>
+    <div class="big-score">${fmt(score)}</div>
+    ${isBest ? '<p>🎉 New personal best!</p>' : `<p class="muted">Best: ${fmt(prev.best)}</p>`}
+    ${run.daily ? `<p class="small muted">Daily challenge · ${score > prevBest && prevBest ? 'improved your best today!' : prevBest ? `today's best ${fmt(Math.max(prevBest, score))}` : 'first try today'}</p>` : ''}
+    <div class="reward">+${shells} 🐚${hot ? ' (🔥 2×)' : ''}</div>
+    <p class="muted small" id="r-rank">Checking leaderboard…</p>`, {
+    dismissable: false,
+    buttons: [
+      { label: '↻ Play again', value: 'again', cls: 'green' },
+      ...(run.daily ? [{ label: '📤 Share', value: 'share', cls: 'blue' }] : []),
+      { label: '🏆 Leaderboard', value: 'lb', cls: 'ghost' },
+      { label: '🕹️ Arcade', value: 'hub', cls: 'ghost' },
+    ],
+  });
+  let rank = null;
+  submitRun({ board, key: run.daily ? run.key : 'all', seed: run.seed, log: run.sim.log, score }).then((res) => {
+    rank = res?.rank;
+    if (res?.rank && run.daily) update((d) => { d.lastRanks = { ...(d.lastRanks || {}), [`${board}:${run.key}`]: res.rank }; });
+    const el = $('#r-rank');
+    if (!el) return;
+    if (res?.queued) el.textContent = "Offline – we'll submit your score later.";
+    else if (res?.skipped) el.textContent = 'Leaderboard is turned off in settings.';
+    else if (res?.rank) el.innerHTML = `${run.daily ? "Today's" : 'All-time'} rank: <b>#${res.rank}</b>${res.rank > 1 ? ' – one more try?' : ' 👑'}`;
+    else el.textContent = res?.error || '';
+  });
+  const r = await p;
+  if (r === 'again') playArcade(run.id, { daily: run.daily });
+  else if (r === 'share') { await shareText(`${g.icon} Tidepop ${g.title} daily ${run.key}\nScore: ${fmt(score)}${rank ? ` · Rank #${rank}` : ''}\nBeat me: ${location.origin}${location.pathname}`); showHub(); }
+  else if (r === 'lb') showLeaderboard(board);
+  else showHub();
 }
 
 // ------------------------------------------------------------------ Reef Blocks
@@ -698,7 +991,8 @@ async function endBlocks(run) {
   const s = load();
   const prevBest = run.daily ? s.blocksDaily[run.key] || 0 : s.blocks.best;
   const isBest = score > prevBest;
-  const shells = Math.min(40, 3 + Math.floor(score / 100));
+  const hotBonus = noteGameEnd('reef', isBest) ? 2 : 1;
+  const shells = Math.min(40, 3 + Math.floor(score / 100)) * hotBonus;
   update((d) => {
     d.blocks.games++;
     if (score > d.blocks.best) d.blocks.best = score;
@@ -737,22 +1031,26 @@ async function endBlocks(run) {
   });
   const r = await p;
   if (r === 'again') playBlocks({ daily: run.daily });
-  else if (r === 'share') { await shareText(`🧱 Tidepop Daily Reef ${run.key}\nScore: ${fmt(score)}${rank ? ` · Rank #${rank}` : ''}\n${location.origin}${location.pathname}`); goHome(); }
+  else if (r === 'share') { await shareText(`🧱 Tidepop Daily Reef ${run.key}\nScore: ${fmt(score)}${rank ? ` · Rank #${rank}` : ''}\n${location.origin}${location.pathname}`); showHub(); }
   else if (r === 'lb') showLeaderboard(board);
-  else goHome();
+  else showHub();
 }
 
 // ------------------------------------------------------------------ leaderboards
-const LB_TABS = [
-  { board: 'daily', label: '📅 Daily Dive', key: () => dayKey() },
-  { board: 'deep', label: '🐋 Deep Dive', key: () => weekKey() },
-  { board: 'blocksDaily', label: '🧱 Daily Reef', key: () => dayKey() },
-  { board: 'blocks', label: '🧱 Reef Blocks', key: () => 'all' },
-  { board: 'stars', label: '⭐ Adventure', key: () => 'all' },
+const LB_GAMES = () => [
+  { id: 'tidepop', label: '🐚 Tidepop', boards: [['daily', '📅 Daily Dive'], ['deep', '🐋 Deep Dive'], ['stars', '⭐ Adventure']] },
+  { id: 'reef', label: '🧱 Reef Blocks', boards: [['blocksDaily', '📅 Today'], ['blocks', '🏆 All-time']] },
+  ...ARCADE.map((g) => ({ id: g.id, label: `${g.icon} ${g.title}`, boards: [[g.id + 'Daily', '📅 Today'], [g.id, '🏆 All-time']] })),
 ];
+const boardKey = (board) => (BOARDS[board].period === 'day' ? dayKey() : BOARDS[board].period === 'week' ? weekKey() : 'all');
 
 function localBest(board) {
   const s = load();
+  const def = BOARDS[board];
+  if (def?.arcade) {
+    const st = arcadeStats(def.arcade);
+    return def.daily ? st.daily[dayKey()] : st.best || undefined;
+  }
   switch (board) {
     case 'daily': return s.dailyDive[dayKey()]?.best;
     case 'deep': return s.deep[weekKey()];
@@ -766,15 +1064,19 @@ async function showLeaderboard(board = 'daily') {
   leaveGame();
   setBackground(['#7c4dff', '#1a237e']);
   const s = load();
-  const tab = LB_TABS.find((t) => t.board === board) || LB_TABS[0];
+  if (!BOARDS[board]) board = 'daily';
+  const games = LB_GAMES();
+  const game = games.find((g) => g.boards.some(([b]) => b === board)) || games[0];
+  const tab = { board, key: () => boardKey(board) };
   const el = showScreen('leaderboard', `
     <div class="topbar"><button class="icon-btn" id="l-back" aria-label="Back">←</button><h2 class="grow">Leaderboards</h2>
       <button class="icon-btn" id="l-refresh" aria-label="Refresh">⟳</button></div>
-    <div class="tabs" role="tablist">${LB_TABS.map((t) => `<button role="tab" class="tab ${t.board === tab.board ? 'on' : ''}" data-b="${t.board}" aria-selected="${t.board === tab.board}">${t.label}</button>`).join('')}</div>
+    <div class="tabs" role="tablist" aria-label="Game">${games.map((g) => `<button role="tab" class="tab ${g.id === game.id ? 'on' : ''}" data-b="${g.boards[0][0]}" aria-selected="${g.id === game.id}">${g.label}</button>`).join('')}</div>
+    <div class="tabs sub" role="tablist" aria-label="Board">${game.boards.map(([b, label]) => `<button role="tab" class="tab ${b === board ? 'on' : ''}" data-b="${b}" aria-selected="${b === board}">${label}</button>`).join('')}</div>
     <p class="small muted" id="l-sub">${BOARDS[tab.board].period === 'day' ? `Today (${tab.key()} UTC)` : BOARDS[tab.board].period === 'week' ? `This week (${tab.key()})` : 'All time'} · every score is verified by replaying the game${api.backendKind() === 'shared' ? '' : ' on the server'}</p>
     <div class="scroll"><div class="list" id="l-list"><p class="center muted">Loading…</p></div></div>
     <p class="center small muted">You are <b>${esc(s.name)}</b> · <button class="btn sm ghost" id="l-name">Change name</button></p>`);
-  $('#l-back', el).onclick = () => { sfx.tap(); goHome(); };
+  $('#l-back', el).onclick = () => { sfx.tap(); showHub(); };
   $('#l-refresh', el).onclick = () => { sfx.tap(); showLeaderboard(tab.board); };
   $('#l-name', el).onclick = () => { sfx.tap(); showSettings(); };
   for (const b of $$('.tab', el)) b.onclick = () => { sfx.tap(); showLeaderboard(b.dataset.b); };
@@ -820,7 +1122,7 @@ function showAchievements() {
       ${got ? '' : `<div class="progress"><div style="width:${(v / a.goal) * 100}%"></div></div>`}</div>
       <span class="val">${got ? '✅' : `+${a.reward}🐚`}</span></div>`;
   }).join('')}</div></div>`);
-  $('#a-back', el).onclick = () => { sfx.tap(); goHome(); };
+  $('#a-back', el).onclick = () => { sfx.tap(); showHub(); };
 }
 
 async function showShop() {
@@ -846,6 +1148,7 @@ async function showShop() {
   });
   if (r === 'again') showShop();
   else if (currentScreen() === 'home') goHome();
+  else if (currentScreen() === 'hub') showHub();
 }
 
 function howToPlay() {
@@ -923,7 +1226,7 @@ function showSettings() {
       <p class="small muted">Tidepop v1.0 (engine ${ENGINE_VERSION}) · free, open & ad-free · no tracking.</p>
     </div>`);
   wireSwitches(el);
-  $('#s-back', el).onclick = () => { sfx.tap(); goHome(); };
+  $('#s-back', el).onclick = () => { sfx.tap(); showHub(); };
   $('#s-help', el).onclick = () => howToPlay();
   $('#s-save-name', el).onclick = async () => {
     const name = `${$('#s-adj', el).value} ${$('#s-animal', el).value} ${$('#s-num', el).value}`;

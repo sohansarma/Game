@@ -8,6 +8,7 @@ import { replayBlocks } from '../public/js/blocks.js';
 import { getLevel, MAX_LEVEL } from '../public/js/levels.js';
 import { BOARDS, acceptableKeys, dayKey, weekKey, dailyConfig, deepConfig, blocksSeed, ENGINE_VERSION } from '../public/js/modes.js';
 import { ADJECTIVES, ANIMALS } from '../public/js/storage.js';
+import { verifyArcade } from '../public/js/arcade/index.js';
 
 const MAX_BODY = 64 * 1024;
 const LIMITS = { daily: 60, deep: 600, blocksDaily: 3000, blocks: 5000, stars: 400 };
@@ -157,7 +158,11 @@ export function createApi(store, { now = () => new Date(), origin = process.env.
     if (!acceptableKeys(board, now()).includes(key)) throw fail(422, 'this board is closed');
 
     let score;
-    if (board === 'daily' || board === 'deep') {
+    if (BOARDS[board].arcade) {
+      const v = verifyArcade(board, key, Number(body.seed), log);
+      if (!v.ok) throw fail(422, 'replay failed: ' + v.reason);
+      score = v.score;
+    } else if (board === 'daily' || board === 'deep') {
       const cfg = board === 'daily' ? dailyConfig(key) : deepConfig(key);
       const r = replay(cfg, log, { maxBoosters: 0 });
       if (!r.ok) throw fail(422, 'replay failed: ' + r.reason);

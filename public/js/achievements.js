@@ -2,6 +2,7 @@
 
 import { load, update, totalStars } from './storage.js';
 import { WORLDS } from './levels.js';
+import { ARCADE } from './arcade/index.js';
 
 const worldDone = (s, w) => {
   for (let n = w * 10 + 1; n <= w * 10 + 10; n++) if (!(s.levels[n]?.stars > 0)) return 0;
@@ -28,6 +29,8 @@ export const ACHIEVEMENTS = [
   { id: 'blocks_2000', icon: '🏰', name: 'Reef Architect', desc: 'Score 2,000 in Reef Blocks', goal: 2000, reward: 60, get: (s) => s.blocks.best },
   { id: 'blocks_combo', icon: '⚡', name: 'Combo Crafter', desc: 'Reach a x5 combo in Reef Blocks', goal: 5, reward: 30, get: (s) => s.stats.bestCombo },
   { id: 'perfect', icon: '✨', name: 'Spotless', desc: 'Clear the whole Reef Blocks board', goal: 1, reward: 40, get: (s) => s.stats.perfectClears },
+  { id: 'arcade_all', icon: '🕹️', name: 'Arcade Explorer', desc: `Play all ${ARCADE.length + 2} games`, goal: ARCADE.length + 2, reward: 100, get: (s) => Object.keys(s.played || {}).length },
+  ...ARCADE.map((g) => ({ id: `${g.id}_pro`, icon: g.icon, name: `${g.title} Pro`, desc: `Score ${g.milestone.toLocaleString('en-US')} in ${g.title}`, goal: g.milestone, reward: 50, get: (s) => s.arcade?.[g.id]?.best || 0 })),
 ];
 
 /** Check and award; returns newly unlocked achievements. */

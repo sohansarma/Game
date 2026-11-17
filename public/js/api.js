@@ -6,6 +6,7 @@ import { load, update } from './storage.js';
 import { replay } from './engine.js';
 import { replayBlocks } from './blocks.js';
 import { getLevel } from './levels.js';
+import { verifyArcade } from './arcade/index.js';
 import { BOARDS, acceptableKeys, dailyConfig, deepConfig, blocksSeed, dayKey } from './modes.js';
 
 const BASE = (typeof window !== 'undefined' && window.TIDEPOP_API !== undefined ? window.TIDEPOP_API : '') + '/api';
@@ -52,6 +53,12 @@ function verifyLocally(entry) {
     return { stars: r.game.stars() };
   }
   if (!acceptableKeys(board).includes(entry.key)) throw Object.assign(new Error('this board is closed'), { status: 422 });
+  if (BOARDS[board].arcade) {
+    const v = verifyArcade(board, entry.key, Number(entry.seed), entry.log);
+    if (!v.ok) throw Object.assign(new Error('replay failed: ' + v.reason), { status: 422 });
+    if (typeof entry.score === 'number' && entry.score !== v.score) throw Object.assign(new Error('score mismatch'), { status: 422 });
+    return { score: v.score };
+  }
   let g;
   if (board === 'daily' || board === 'deep') {
     const r = replay(board === 'daily' ? dailyConfig(entry.key) : deepConfig(entry.key), entry.log, { maxBoosters: 0 });

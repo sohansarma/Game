@@ -251,3 +251,39 @@ body.reduced-motion *, body.reduced-motion *::before, body.reduced-motion *::aft
   #screen-blocks .hud, #screen-blocks .boosters, #screen-blocks .mode-label { grid-column: 1; }
   .hud { flex-wrap: wrap; }
 }
+
+/* ---------------- arcade hub ---------------- */
+.arcade-word { font-size: 1.1rem; letter-spacing: 3px; text-transform: uppercase; color: var(--muted); vertical-align: middle; }
+.hub-timer { text-align: center; font-weight: 800; margin: 2px 0 10px; color: var(--muted); }
+.hub-timer b { color: #fff; font-variant-numeric: tabular-nums; }
+.hub-timer.urgent b { color: var(--coral); animation: pulse 1s infinite; }
+.hot-card {
+  width: 100%; display: flex; align-items: center; gap: 12px; padding: 12px 14px; border-radius: var(--radius); text-align: left;
+  background: linear-gradient(90deg, #ff7043, #ffb300); color: #3b1300; box-shadow: 0 6px 18px rgba(255, 112, 67, .35);
+}
+.hot-card small { display: block; font-weight: 900; letter-spacing: 1px; font-size: .7rem; opacity: .8; }
+.hot-card b { font-size: 1.15rem; }
+.hot-card .btn { box-shadow: none; background: #fff; color: #3b1300; }
+.hot-flame { font-size: 2rem; animation: bob 1.6s ease-in-out infinite; }
+.missions { margin-top: 12px; padding: 12px 14px; border-radius: var(--radius); background: var(--panel); border: 2px solid var(--line); display: flex; flex-direction: column; gap: 8px; }
+.mission { display: flex; justify-content: space-between; gap: 10px; font-size: .92rem; }
+.mission.done { color: var(--mint); }
+.game-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-top: 12px; }
+.game-card {
+  position: relative; display: flex; flex-direction: column; gap: 2px; text-align: left; padding: 14px 12px 12px; min-height: 140px;
+  border-radius: var(--radius); background: var(--panel); border: 2px solid var(--line); overflow: hidden;
+}
+.game-card.hot { border-color: #ffb300; box-shadow: 0 0 0 2px rgba(255, 179, 0, .35); }
+.game-card .game-icon { font-size: 2.2rem; line-height: 1.1; }
+.game-card b { font-size: 1.05rem; }
+.game-card .sub { font-size: .78rem; color: var(--muted); }
+.game-card .tag { position: absolute; top: 10px; right: 10px; font-size: .7rem; font-weight: 800; background: var(--coral); padding: 2px 8px; border-radius: 999px; }
+.game-card .tag.done { background: var(--mint); color: #063; }
+.game-card:active { transform: scale(.98); }
+.tabs.sub .tab { padding: 6px 12px; font-size: .8rem; }
+.arcade-hud { flex-direction: row !important; justify-content: space-around; gap: 6px; flex-wrap: wrap; }
+.hstat { display: flex; flex-direction: column; align-items: center; min-width: 56px; }
+.hstat b { font-size: 1rem; font-variant-numeric: tabular-nums; }
+.hstat.big b { font-size: 1.35rem; }
+.hstat.warn b { color: var(--coral); }
+.arcade-controls { min-height: 44px; display: flex; align-items: center; justify-content: center; margin-bottom: 4px; }
