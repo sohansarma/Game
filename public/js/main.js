@@ -6,7 +6,8 @@ import { getLevel, LEVEL_COUNT, MAX_LEVEL, worldOf } from './levels.js';
 import { dailyConfig, deepConfig, dayKey, weekKey, blocksSeed, ENGINE_VERSION, BOARDS } from './modes.js';
 import { ARCADE, ARCADE_BY_ID, arcadeSeed, tierOf, challengeHash, parseChallenge } from './arcade/index.js';
 import { hashString } from './rng.js';
-import { ChessVersus, LudoVersus, newCode, validCode, rebuild, describe } from './versus.js';
+import { ChessVersus, ChessCasual, LudoVersus, TIME_CONTROLS, newCode, validCode, rebuild, describe } from './versus.js';
+import { CASUAL_LEVELS } from './arcade/chess.js';
 import { TEMPLATES, RULE_INFO, EMOJI, PALETTES, sanitize as ugcSanitize, starterSpec, createSim as ugcCreate } from './maker/engine.js';
 import { load, update, save, totalStars, highestUnlocked, exportSave, importSave, resetSave, randomNickname, ADJECTIVES, ANIMALS } from './storage.js';
 import { MatchView } from './matchview.js';
@@ -886,6 +887,7 @@ async function arcadeMenu(id) {
     buttons: [
       { label: g.board ? '▶ Play the ladder' : '▶ Play', value: 'play', cls: 'green' },
       ...(id === 'ludo' ? [{ label: '🤖 Quick game vs computer', value: 'cpu', cls: 'blue' }] : []),
+      ...(id === 'chess' ? [{ label: '🤖 Play vs computer', value: 'cpu', cls: 'blue' }] : []),
       ...(g.board ? [{ label: '👥 Play a friend', value: 'friend', cls: 'blue' }] : []),
       { label: `📅 Daily challenge${today === undefined ? ' (new!)' : ''}`, value: 'daily', cls: 'blue' },
       { label: '🏆 Leaderboard', value: 'lb', cls: 'ghost' },
@@ -897,7 +899,7 @@ async function arcadeMenu(id) {
   else if (r === 'lb') showLeaderboard(id + 'Daily');
   else if (r === 'how') { await arcadeHow(id); arcadeMenu(id); }
   else if (r === 'friend') versusMenu(id);
-  else if (r === 'cpu') ludoVsComputer();
+  else if (r === 'cpu') (id === 'chess' ? chessSetup() : ludoVsComputer());
 }
 
 // ------------------------------------------------------------------ play a friend (chess / ludo)
@@ -965,8 +967,74 @@ async function ludoVsComputer() {
   return playVersus('ludo', new LudoVersus({ seed: randSeed(), seats: ludoSeats(me, Number(n), 'ai'), mine: [me], first: me }), null);
 }
 
+// ---------------------------------------------------------------- chess setup
+function pickChessSide(title) {
+  return new Promise((resolve) => {
+    modal(`<h2>♟️ ${esc(title)}</h2><div class="colour-pick">
+      <button class="colour-btn side-w" data-s="w"><span>♔</span>White<small>moves first</small></button>
+      <button class="colour-btn side-b" data-s="b"><span>♚</span>Black</button></div>
+      <button class="btn sm ghost" data-s="r" style="margin-top:10px">🎲 Random</button>`, {
+      buttons: [{ label: 'Cancel', value: null, cls: 'ghost' }],
+      onOpen: (sheet) => { for (const b of $$('[data-s]', sheet)) b.onclick = () => { sfx.tap(); closeModal(b.dataset.s); }; },
+    }).then((r) => resolve(r === 'r' ? (Math.random() < 0.5 ? 'w' : 'b') : r === 'w' || r === 'b' ? r : null));
+  });
+}
+
+/** Settings sheet: side, bot level, clock, auto-flip. Remembers your last choice. */
+function chessOptions({ title, side = true, level = true, flip = false }) {
+  const prev = { side: 'w', level: 3, clock: 'none', flip: true, ...(load().chessPrefs || {}) };
+  const rec = load().chessRecord || {};
+  const seg = (key, items, cur) => `<div class="seg" data-key="${key}">${items.map(([v, l]) => `<button class="seg-btn ${String(v) === String(cur) ? 'on' : ''}" data-v="${v}">${l}</button>`).join('')}</div>`;
+  return new Promise((resolve) => {
+    let state = { ...prev };
+    modal(`<h2>${title}</h2>
+      ${side ? `<h3>Your side</h3>${seg('side', [['w', '♔ White'], ['b', '♚ Black'], ['r', '🎲 Random']], prev.side)}` : ''}
+      ${level ? `<h3>Opponent</h3>${seg('level', CASUAL_LEVELS.map((L, i) => [i + 1, `${L.name}<small>${L.elo}${rec[i + 1] ? ` · ${rec[i + 1].w}-${rec[i + 1].d}-${rec[i + 1].l}` : ''}</small>`]), prev.level)}` : ''}
+      <h3>Time control</h3>${seg('clock', TIME_CONTROLS.map((t) => [t.id, t.label]), prev.clock)}
+      ${flip ? `<h3>Board</h3>${seg('flip', [['true', '🔄 Turn board each move'], ['false', 'Keep White at bottom']], prev.flip)}` : ''}`, {
+      buttons: [{ label: '▶ Start game', value: 'go', cls: 'green' }, { label: 'Cancel', value: null, cls: 'ghost' }],
+      onOpen: (sheet) => {
+        for (const group of $$('.seg', sheet)) {
+          for (const b of $$('.seg-btn', group)) b.onclick = () => {
+            $$('.seg-btn', group).forEach((x) => x.classList.toggle('on', x === b));
+            const k = group.dataset.key;
+            state[k] = k === 'level' ? Number(b.dataset.v) : k === 'flip' ? b.dataset.v === 'true' : b.dataset.v;
+            sfx.tap();
+          };
+        }
+      },
+    }).then((r) => {
+      if (r !== 'go') return resolve(null);
+      update((d) => { d.chessPrefs = state; });
+      resolve({ ...state, side: state.side === 'r' ? (Math.random() < 0.5 ? 'w' : 'b') : state.side });
+    });
+  });
+}
+
+async function chessSetup(again) {
+  const opts = again || (await chessOptions({ title: '🤖 Play vs computer' }));
+  if (!opts) return arcadeMenu('chess');
+  playVersus('chess', new ChessCasual({ mySide: opts.side, level: opts.level, clock: opts.clock, name: load().name }), null, { casual: opts });
+}
+
+function toPgn(sim) {
+  const r = sim.result;
+  const res = !r ? '*' : r.winner === 'w' ? '1-0' : r.winner === 'b' ? '0-1' : '1/2-1/2';
+  const d = new Date();
+  const tags = [['Event', 'Tidepop casual game'], ['Site', 'Tidepop'], ['Date', `${d.getFullYear()}.${String(d.getMonth() + 1).padStart(2, '0')}.${String(d.getDate()).padStart(2, '0')}`],
+    ['White', sim.names?.w || 'White'], ['Black', sim.names?.b || 'Black'], ['Result', res], ...(r ? [['Termination', r.reason]] : [])];
+  const h = sim.game.history;
+  let moves = '';
+  for (let i = 0; i < h.length; i += 2) moves += `${i / 2 + 1}. ${h[i].san}${h[i + 1] ? ' ' + h[i + 1].san : ''} `;
+  return `${tags.map(([k, v]) => `[${k} "${String(v).replace(/"/g, "'")}"]`).join('\n')}\n\n${moves}${res}`;
+}
+
 async function localVersus(id) {
-  if (id === 'chess') return playVersus(id, new ChessVersus({}), null);
+  if (id === 'chess') {
+    const opts = await chessOptions({ title: '📱 Pass & play', side: false, level: false, flip: true });
+    if (!opts) return versusMenu(id);
+    return playVersus(id, new ChessVersus({ clock: opts.clock, autoFlip: opts.flip }), null);
+  }
   const n = await modal('<h2>🎲 Pass & play</h2><p class="muted small">Everyone plays on this phone and taps their own dice. Empty seats can be bots.</p>', {
     buttons: [
       { label: '2 players', value: '2' },
@@ -1044,13 +1112,13 @@ function myMovesOf(sim, id, role, match) {
   return sim.moves.filter(([x]) => x === seat).map(([, t]) => t);
 }
 
-async function playVersus(id, sim, online) {
+async function playVersus(id, sim, online, extra = {}) {
   leaveGame();
   try { history.pushState({ g: 1 }, ''); } catch { /* sandboxed */ }
   const g = ARCADE_BY_ID[id];
   const mod = await VIEWS[id]();
   setBackground(g.color);
-  const run = { kind: 'versus', id, sim, online };
+  const run = { kind: 'versus', id, sim, online, casual: extra.casual };
   currentRun = run;
   const el = showScreen('arcade', `
     <div class="hud">
@@ -1067,7 +1135,7 @@ async function playVersus(id, sim, online) {
     if (id === 'chess') {
       const c = sim.game.history.filter((h) => h.captured);
       stats = [
-        { label: 'Mode', value: online ? `🌐 ${online.code}` : '📱 Pass & play', big: true },
+        { label: 'Mode', value: online ? `🌐 ${online.code}` : sim.level ? `🤖 ${CASUAL_LEVELS[sim.level - 1].name}` : '📱 Pass & play', big: true },
         { label: 'Move', value: Math.floor(sim.game.ply / 2) + 1 },
         { label: 'Captures', value: c.length },
       ];
@@ -1079,7 +1147,7 @@ async function playVersus(id, sim, online) {
     }
     box.innerHTML = stats.map((h) => `<div class="hstat ${h.big ? 'big' : ''}"><span class="lbl">${esc(String(h.label))}</span><b>${h.value}</b></div>`).join('');
     const lbl = $('#ar-label', el);
-    if (lbl) lbl.innerHTML = online ? (online.match.joined || online.joinedNow ? `Playing ${esc(online.role === 'host' ? online.match.guestName || 'your friend' : online.match.hostName || 'your friend')} · moves sync automatically` : `Waiting for a friend to join with code <b>${online.code}</b>`) : 'Friendly game · not ranked';
+    if (lbl) lbl.innerHTML = online ? (online.match.joined || online.joinedNow ? `Playing ${esc(online.role === 'host' ? online.match.guestName || 'your friend' : online.match.hostName || 'your friend')} · moves sync automatically` : `Waiting for a friend to join with code <b>${online.code}</b>`) : sim.level ? `Casual game vs ${esc(CASUAL_LEVELS[sim.level - 1].name)} (${CASUAL_LEVELS[sim.level - 1].elo})${sim.clock ? '' : ' · no clock'}` : 'Friendly game · not ranked';
   };
   let pushed = online ? myMovesOf(sim, id, online.role, online.match).length : 0;
   let applied = online ? (online.role === 'host' ? online.match.guestMoves : online.match.hostMoves).length : 0;
@@ -1099,8 +1167,22 @@ async function playVersus(id, sim, online) {
       onChange: () => { refresh(); pushMine(); },
       onRound: () => { pushMine(); },
       onOver: () => endVersus(run),
+      onDraw: async () => {
+        if (sim.offerDraw) {
+          const ok = sim.offerDraw();
+          if (ok) { toast('🤝 The bot accepts a draw'); endVersus(run); }
+          else toast(sim.moves.length < 20 ? 'The bot wants to play on – too early for a draw' : 'The bot declines – it thinks it is better');
+          return;
+        }
+        if (sim.local) {
+          const asker = sim.names[sim.game.turn], other = sim.names[sim.game.turn === 'w' ? 'b' : 'w'];
+          const r = await modal(`<h2>½ Draw offer</h2><p><b>${esc(asker)}</b> offers a draw. <b>${esc(other)}</b>, do you accept?</p>`, { buttons: [{ label: 'Accept draw', value: true, cls: 'green' }, { label: 'Play on', value: false, cls: 'ghost' }], row: true });
+          if (r) { sim.agreeDraw(); endVersus(run); }
+        }
+      },
       onQuit: async () => {
-        const ok = await modal(`<h2>${online ? 'Resign this match?' : 'End this game?'}</h2>`, { buttons: [{ label: online ? 'Resign' : 'End game', value: true, cls: 'red' }, { label: 'Keep playing', value: false, cls: 'ghost' }], row: true });
+        const chessy = id === 'chess';
+        const ok = await modal(`<h2>${online || chessy ? 'Resign this game?' : 'End this game?'}</h2>${chessy ? `<p class="muted">${sim.local ? `${esc(sim.names[sim.game.turn])} resigns – the other side wins.` : 'Your opponent wins the game.'}</p>` : ''}`, { buttons: [{ label: online || chessy ? '🏳️ Resign' : 'End game', value: true, cls: 'red' }, { label: 'Keep playing', value: false, cls: 'ghost' }], row: true });
         if (!ok) return;
         if (online) api.matches.resign(online.code).catch(() => {});
         sim.resign();
@@ -1183,9 +1265,38 @@ async function endVersus(run) {
   let html;
   if (id === 'chess') {
     const r = sim.result || { reason: 'Game over' };
-    const won = online && r.winner && r.winner === sim.mySide;
-    html = `<h2>${r.winner ? (online ? (won ? '🏆 You win!' : 'You lost') : `${sim.names[r.winner]} wins!`) : '🤝 Draw'}</h2><p class="muted">${esc(r.reason)}</p>`;
-    if (online) won ? sfx.win() : sfx.lose();
+    const mine = sim.mySide;
+    const won = mine && r.winner === mine;
+    const res = !r.winner ? '½–½' : r.winner === 'w' ? '1–0' : '0–1';
+    html = `<h2>${r.winner ? (mine ? (won ? '🏆 You win!' : 'You lost') : `${esc(sim.names[r.winner])} wins!`) : '🤝 Draw'}</h2>
+      <div class="big-score">${res}</div><p class="muted">${esc(r.reason)} · ${Math.ceil(sim.game.ply / 2)} moves</p>`;
+    if (run.casual) {
+      const lvl = sim.level;
+      update((d) => {
+        const rec = { w: 0, d: 0, l: 0, ...((d.chessRecord || {})[lvl] || {}) };
+        rec[!r.winner ? 'd' : won ? 'w' : 'l']++;
+        d.chessRecord = { ...(d.chessRecord || {}), [lvl]: rec };
+        if (won) d.shells += 5 * lvl;
+      });
+      const rec = load().chessRecord[lvl];
+      html += `<p class="small">Your record vs ${esc(CASUAL_LEVELS[lvl - 1].name)}: <b>${rec.w}W · ${rec.d}D · ${rec.l}L</b></p>${won ? `<div class="reward">+${5 * lvl} 🐚</div>` : ''}${won && lvl < 6 ? `<p class="small muted">Ready for ${esc(CASUAL_LEVELS[lvl].name)} (${CASUAL_LEVELS[lvl].elo})?</p>` : ''}`;
+    }
+    if (mine) won ? sfx.win() : r.winner ? sfx.lose() : sfx.coin();
+    const out = await modal(html, {
+      dismissable: false,
+      buttons: [
+        ...(run.casual ? [{ label: '↻ Rematch', value: 'rematch', cls: 'green' }] : []),
+        ...(run.casual && won && sim.level < 6 ? [{ label: `⬆️ Next level: ${CASUAL_LEVELS[sim.level].name}`, value: 'up', cls: 'blue' }] : []),
+        { label: run.casual ? '⚙️ New game' : '↻ Play again', value: 'again', cls: run.casual ? 'ghost' : 'green' },
+        { label: '📋 Copy PGN', value: 'pgn', cls: 'ghost' },
+        { label: '🕹️ Arcade', value: 'hub', cls: 'ghost' },
+      ],
+    });
+    if (out === 'pgn') { await shareText(toPgn(sim)); return showHub(); }
+    if (out === 'rematch') return chessSetup(run.casual);
+    if (out === 'up') return chessSetup({ ...run.casual, level: sim.level + 1 });
+    if (out === 'again') return run.casual ? chessSetup() : versusMenu(id);
+    return showHub();
   } else {
     const places = sim.places();
     html = `<h2>🎲 Final standings</h2><div class="list">${places.map((p) => `<div class="item"><span class="rank">${['🥇', '🥈', '🥉', '4️⃣'][p.place - 1]}</span><span class="name">${esc(p.name)}</span></div>`).join('')}</div>`;
@@ -1203,6 +1314,10 @@ async function playArcade(id, { daily, seed: forcedSeed, challenge } = {}) {
   const mod = await VIEWS[id]();
   const key = dayKey();
   let colour = null;
+  if (id === 'chess') {
+    colour = await pickChessSide(daily ? "Today's ladder – choose your side" : 'Ladder – choose your side');
+    if (colour === null) return arcadeMenu(id);
+  }
   if (id === 'ludo') {
     colour = await pickLudoColour(daily ? "Today's league – pick your colour" : 'League – pick your colour');
     if (colour === null) return arcadeMenu(id);

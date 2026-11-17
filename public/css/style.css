@@ -326,3 +326,17 @@ body.reduced-motion *, body.reduced-motion *::before, body.reduced-motion *::aft
   background: color-mix(in srgb, var(--c) 35%, transparent); border: 3px solid var(--c); color: #fff; }
 .colour-btn span { font-size: 2rem; }
 .colour-btn.on { box-shadow: 0 0 0 3px #fff; }
+
+.seg { display: flex; flex-wrap: wrap; gap: 6px; justify-content: center; }
+.seg-btn { padding: 8px 12px; border-radius: 12px; background: var(--panel-2); border: 2px solid var(--line); font-weight: 800; font-size: .9rem; display: flex; flex-direction: column; align-items: center; }
+.seg-btn small { font-weight: 600; font-size: .7rem; opacity: .8; }
+.seg-btn.on { background: var(--gold); color: #4a2a00; border-color: var(--gold); }
+.sheet h3 { margin: 12px 0 6px; font-size: .95rem; }
+.side-w { --c: #f5efe2; }
+.side-b { --c: #3a3740; }
+.colour-btn small { font-size: .7rem; font-weight: 600; opacity: .8; }
+.chess-moves { width: 100%; overflow-x: auto; white-space: nowrap; font-size: .85rem; padding: 4px 2px; scrollbar-width: none; }
+.chess-moves::-webkit-scrollbar { display: none; }
+.chess-moves .mv { margin-right: 10px; }
+.chess-btns { justify-content: center; gap: 6px; flex-wrap: wrap; }
+.chess-btns .btn { padding: 0 10px; }

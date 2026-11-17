@@ -247,7 +247,7 @@ const PST = {
   K: [-30, -40, -40, -50, -50, -40, -40, -30, -30, -40, -40, -50, -50, -40, -40, -30, -30, -40, -40, -50, -50, -40, -40, -30, -30, -40, -40, -50, -50, -40, -40, -30, -20, -30, -30, -40, -40, -30, -30, -20, -10, -20, -20, -20, -20, -20, -20, -10, 20, 20, 0, 0, 0, 0, 20, 20, 20, 30, 10, 0, 0, 10, 30, 20],
 };
 
-function evaluate(g) {
+export function evaluate(g) {
   let s = 0;
   for (let i = 0; i < 64; i++) {
     const p = g.board[i];
@@ -309,6 +309,40 @@ export const LEVELS = [
   { name: 'Kraken', depth: 3, noise: 0 },
 ];
 
+// Levels for casual "play vs computer" (not replayed by the server, so the
+// top levels may search deeper).
+export const CASUAL_LEVELS = [
+  { name: 'Beginner', elo: '~600', depth: 0, noise: 260, budget: 4000 },
+  { name: 'Casual', elo: '~900', depth: 1, noise: 110, budget: 8000 },
+  { name: 'Club', elo: '~1200', depth: 2, noise: 45, budget: 25000 },
+  { name: 'Strong', elo: '~1500', depth: 2, noise: 8, budget: 40000 },
+  { name: 'Expert', elo: '~1700', depth: 3, noise: 4, budget: 90000 },
+  { name: 'Master', elo: '~1900', depth: 4, noise: 2, budget: 220000 },
+];
+
+/** Search the side to move's best move. Root alpha-beta; noise adds personality. */
+export function searchMove(g, { depth, noise = 0, budget = 25000 }, rng) {
+  const moves = g.moves();
+  if (!moves.length) return null;
+  const b = { n: 0, max: budget };
+  let best = null, bestV = -Infinity, alpha = -Infinity;
+  for (const m of ordered(g, moves)) {
+    const u = g.makeRaw(m);
+    let v = depth === 0 ? -quiesce(g, -Infinity, Infinity, b, 1) : -search(g, depth - 1, -Infinity, noise ? Infinity : -alpha, b);
+    g.unmakeRaw(u);
+    v += noise ? (rng.next() - 0.5) * noise : rng.next() * 0.5;
+    if (v > bestV) { bestV = v; best = m; }
+    if (!noise && v > alpha) alpha = v;
+  }
+  return { uci: name(best.from) + name(best.to) + (best.promo || ''), score: bestV };
+}
+
+/** Casual AI move (uses any rng – e.g. Math.random based). */
+export function casualMove(g, level, rng) {
+  const L = CASUAL_LEVELS[Math.max(1, Math.min(level, CASUAL_LEVELS.length)) - 1];
+  return searchMove(g.clone(), L, rng)?.uci || null;
+}
+
 /** Deterministic AI move for the side to move. */
 export function aiMove(g, level, rng) {
   const L = LEVELS[Math.min(level, LEVELS.length) - 1];
@@ -332,13 +366,31 @@ export function aiMove(g, level, rng) {
 class ChessLadder {
   constructor(seed) {
     this.seed = seed >>> 0;
-    this.rng = new Rng(seed);
+    this.mySide = 'w';
+    this.log = [];
+    this.reset();
+  }
+
+  /** Choose your colour – only before your first move. */
+  setColour(side) {
+    if (this.log.length || (side !== 'w' && side !== 'b')) return false;
+    this.log.push(['c', side]);
+    this.mySide = side;
+    this.reset();
+    return true;
+  }
+
+  canMove() {
+    return !this.over && this.game.turn === this.mySide;
+  }
+
+  reset() {
+    this.rng = new Rng(this.seed);
     this.level = 1;
     this.points = 0;
     this.wins = 0;
     this.over = false;
     this.overReason = '';
-    this.log = [];
     this.last = null; // last game result summary
     this.newGame();
   }
@@ -348,11 +400,17 @@ class ChessLadder {
 
   newGame() {
     this.game = new Chess();
+    this.opening = null;
+    // playing Black: the bot opens
+    if (this.mySide === 'b') {
+      const reply = aiMove(this.game, this.aiLevel, this.rng);
+      this.opening = this.game.play(reply);
+    }
   }
 
-  /** Human (white) move; the AI replies immediately. */
+  /** Your move; the AI replies immediately. */
   move(uci) {
-    if (this.over || this.game.turn !== 'w') return { ok: false };
+    if (this.over || this.game.turn !== this.mySide) return { ok: false };
     const mv = this.game.play(uci);
     if (!mv) return { ok: false };
     this.log.push(['m', uci]);
@@ -370,8 +428,9 @@ class ChessLadder {
     if (!r) return false;
     const L = this.level;
     let gained = 0;
-    if (r.winner === 'w') {
-      gained = 100 * L + Math.max(0, 80 - this.game.ply) * 2 + Math.max(0, this.game.material('w') - this.game.material('b')) * 5;
+    const me = this.mySide, them = me === 'w' ? 'b' : 'w';
+    if (r.winner === me) {
+      gained = 100 * L + Math.max(0, 80 - this.game.ply) * 2 + Math.max(0, this.game.material(me) - this.game.material(them)) * 5;
       this.wins++;
       this.level++;
     } else if (r.winner === null) {
@@ -380,7 +439,7 @@ class ChessLadder {
     this.points += gained;
     this.last = { ...r, gained, level: L };
     out.end = this.last;
-    if (r.winner === 'b') {
+    if (r.winner === them) {
       this.over = true;
       this.overReason = `${r.reason}! ${this.wins} win${this.wins === 1 ? '' : 's'} on the ladder`;
     } else {
@@ -403,7 +462,8 @@ function replay(seed, log) {
   for (const a of log) {
     if (!Array.isArray(a)) return { ok: false, reason: 'bad action', sim };
     if (sim.over) return { ok: false, reason: 'input after game over', sim };
-    if (a[0] === 'm') { if (!sim.move(a[1]).ok) return { ok: false, reason: 'illegal move', sim }; }
+    if (a[0] === 'c') { if (!sim.setColour(a[1])) return { ok: false, reason: 'bad colour', sim }; }
+    else if (a[0] === 'm') { if (!sim.move(a[1]).ok) return { ok: false, reason: 'illegal move', sim }; }
     else if (a[0] === 'r') sim.resign();
     else return { ok: false, reason: 'unknown action', sim };
   }

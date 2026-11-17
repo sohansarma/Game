@@ -213,6 +213,22 @@ export const sfx = {
     for (let i = 0; i < 10; i++) bell(pent(523.25, i), 0.8, { vol: 0.11, when: i * 0.035, pan: -0.8 + i * 0.16 });
     noise(0.8, { vol: 0.05, type: 'highpass', from: 5000, to: 10000, verb: 0.6 });
   },
+  chessMove() { // wooden piece set down
+    if (!ok()) return;
+    tone(240, 0.07, { type: 'triangle', vol: 0.32, to: 170, verb: 0.08, attack: 0.001 });
+    noise(0.035, { vol: 0.14, type: 'bandpass', from: 1800, to: 1200, q: 2, verb: 0 });
+  },
+  chessCapture() { // two pieces knock
+    if (!ok()) return;
+    tone(320, 0.06, { type: 'triangle', vol: 0.3, verb: 0.05, attack: 0.001 });
+    tone(200, 0.1, { type: 'triangle', vol: 0.34, to: 140, when: 0.05, verb: 0.1, attack: 0.001 });
+    noise(0.06, { vol: 0.18, type: 'bandpass', from: 2400, to: 900, q: 1.5, when: 0.04, verb: 0 });
+  },
+  chessCheck() {
+    if (!ok()) return;
+    bell(880, 0.5, { vol: 0.14, ratio: 2.4, index: 1.6 });
+    bell(1175, 0.6, { vol: 0.1, ratio: 2.4, index: 1.6, when: 0.09 });
+  },
   dice() { // a few clacks as the die tumbles, then it settles
     if (!ok()) return;
     for (let i = 0; i < 5; i++) {
