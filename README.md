@@ -1,6 +1,6 @@
 # 🐚 Tidepop Arcade
 
-**A free, ad-free arcade of 10 games for all ages**: Tidepop (match-3), Reef Blocks, Deep Miner, Puffer Dash, Sea Serpent, Shell Merge, Reef Tower, Sort Splash, Coral Breaker and Crab Catch. Every game has a daily challenge that's the same for everyone, an all-time board and server-verified scores.
+**A free, ad-free arcade of 12 games for all ages, plus a Creator Studio where players build and publish their own games.** The 12 games are Tidepop (match-3), Reef Blocks, ♟️ Chess, 🎲 Ludo, Deep Miner, Puffer Dash, Sea Serpent, Shell Merge, Reef Tower, Sort Splash, Coral Breaker and Crab Catch. Every arcade game has a daily challenge, a weekly tournament, an all-time board and challenge links you can send to friends. All scores are verified by replaying the game.
 
 The original game: Swap cute sea creatures in an **endless match-3 adventure**, take on a **Daily Dive** where everyone gets the same board, chase a **weekly endless Deep Dive**, or relax with **Reef Blocks**, a block puzzle. Each mode has a **fair leaderboard**: the server replays every submitted game, so scores can't be faked.
 
@@ -39,6 +39,8 @@ You open the app into the **Arcade hub**. It's built to bring you back every day
 
 | # | Game | Genre | How you score |
 |---|---|---|---|
+| ♟️ | **Chess Ladder** | Chess (full rules) | Beat ever-stronger sea bots (Hermit Crab → Kraken). Win = 100 × level + bonuses. A loss ends the run. Play friends on one device or online with a code |
+| 🎲 | **Ludo League** | Ludo | Finish 1st or 2nd vs 3 bots to advance to smarter bots. 2–4 player pass & play, or online with a code |
 | 1 | 🐚 **Tidepop** | Match-3 saga (endless levels) + Daily Dive + Deep Dive | Stars and dive scores |
 | 2 | 🧱 **Reef Blocks** | Block puzzle | Lines, multi-line clears and combos |
 | 3 | ⛏️ **Deep Miner** | Turn-based mining | Gold earned + 10 per metre. Energy, ores, TNT, lava, shops every 25 m |
@@ -51,6 +53,29 @@ You open the app into the **Arcade hub**. It's built to bring you back every day
 | 10 | 🦀 **Crab Catch** | 60-second whack-a-crab | Catches × combo, golden crabs, avoid jellyfish, ⏰ adds time |
 
 **How the games are built:** each arcade game is a pure, deterministic simulation in `public/js/arcade/<game>.js`; the drawing and input code is in `<game>-view.js`. Turn-based games log moves. Real-time games run at a fixed 60 ticks per second and log only `[tick, input]`. The server, or the shared leaderboard in the hosted copy, replays the log with the same file to get the true score. A forged log can't stall the server: input that's out of sync with the replay, or a run over one hour long, is rejected.
+
+## Play with and against friends
+
+- **⚔️ Challenge links.** Any arcade run can be sent as a link (`#ch-…`). Your friend plays the *exact same* run (same seed), sees whose score they're chasing, and gets a win, tie or loss result with a rematch button.
+- **👥 Chess and Ludo against friends.**
+  - *Pass and play* works on one device.
+  - *Online* matches use a 5-letter code. Each player writes only their own moves, and both devices replay them through the same rules engine, so the games can't drift apart.
+  - The server only accepts moves that extend the stored list, so earlier moves can't be rewritten.
+- **🗓️ Weekly tournaments.** Every endless run also counts for that game's weekly board. When a new week starts, last week's top 10 collect shell prizes.
+- **🎖️ Ranks.** Each game has Bronze → Silver → Gold → Platinum → Diamond → Legend tiers based on your best score, with a rank-up celebration.
+- **Never-ending play.** Every arcade game either continues indefinitely or has a ladder or league that keeps getting harder (Chess, Ludo, Sort Splash puzzles, Coral Breaker walls, Tidepop levels).
+
+## 🛠️ Creator Studio & 🌟 Community games
+
+Players can make games for each other without writing code:
+
+1. **Pick a template**: Catcher 🧺, Flapper 🪽, Tapper 👆 or Arena 🌀.
+2. **Design it**: title, description, hero, up to 3 goodies with point values, up to 3 hazards, colours, and rule sliders (speed, spawn rate, gravity, gaps, lives, time limit, how quickly it gets harder). A live preview plays the game as you edit, and drafts save automatically.
+3. **Test play, then publish.** Everyone in the community can play it.
+4. **Improve it over time.** Each update gets a version number and a "what's new" note. Every version has its own fair leaderboard, and older versions' rules are kept so their scores stay verifiable.
+5. **Players play, rate (1–5★) and compete.** The Community tab sorts games by Trending, Top rated, New and Mine. Creators earn 5 🐚 for every new player who tries their game.
+
+**Safety.** A game is *data*, not code: emoji come from a curated palette, every number is clamped, titles go through a word filter, and only a trusted engine runs the game. Players can report a game, and it's hidden after 3 reports. A creator can only change or unpublish their own games.
 
 ## Features (Tidepop)
 
@@ -71,7 +96,7 @@ You open the app into the **Arcade hub**. It's built to bring you back every day
 - 1–3 stars per level, chosen by score thresholds that a bot tuned (see [balancing](#difficulty-balancing)).
 - 🐚 Shells are earned from levels, dives, achievements and daily treasure, and spent in the Shell Shop on 🔨 Hammer, 🔀 Shuffle and ➕ +5 Moves.
 - A 7-day daily treasure calendar builds a login streak 🔥. Missing a day just restarts the streak; you never lose anything.
-- 33 achievements, including level 100 and 250, playing all 10 games, and a score milestone in each arcade game, a booster gift for each first clear of every 5th level, and a new-best celebration.
+- 37 achievements, including publishing a game, playing community games, level 100 and 250, playing all 10 games, and a score milestone in each arcade game, a booster gift for each first clear of every 5th level, and a new-best celebration.
 - If you run out of moves, you can buy +5 moves with a booster or with shells. Retries are free and unlimited.
 
 **Accessibility and quality**
@@ -96,7 +121,7 @@ Requires Node 18+ and **no npm dependencies**.
 
 ```bash
 npm start            # game + leaderboard at http://localhost:8080
-npm test             # 42 tests: every game's engine + replay, levels, server API, anti-cheat
+npm test             # 51 tests: every game's engine + replay, chess move generation, levels, matches, Creator Studio, server API, anti-cheat
 npm run balance      # re-tune levels 1–60 with the bot (~30 s)
 ```
 
