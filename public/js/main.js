@@ -18,7 +18,7 @@ import { sfx, unlockAudio, configureAudio, haptic, purr } from './audio.js';
 import { tideNumber, shareText as tideShareText, EMOJI as TIDE_EMOJI } from './arcade/tide.js';
 import { SLOTS as POOL_SLOTS, ITEMS as POOL_ITEMS, ITEM as POOL_ITEM, comfortOf, comfortBonus, found as poolFound, newlyFound, drawPool } from './pool.js';
 import { startCloud, syncNow, cloudAccount, cloudStatus, onCloudChange, signUp, logIn, logOut, recoverAccount, changePassword, deleteAccount, setClaudeSync } from './cloud.js';
-import { configureCozy, cozyActive, cozySleeping, wakeCozy, onSleep, isNightTime, cozySound } from './cozy.js';
+import { configureCozy, cozyActive, cozySleeping, wakeCozy, onSleep, isNightTime, cozySound, VIBES, VIBE } from './cozy.js';
 import * as api from './api.js';
 import { ACHIEVEMENTS, checkAchievements } from './achievements.js';
 import { $, $$, esc, fmt, showScreen, currentScreen, modal, closeModal, isModalOpen, toast, starsHtml, setBackground } from './ui.js';
@@ -100,14 +100,57 @@ async function goodNight() {
   if (r === 'wake') { wakeCozy(); toast('🌧️ The sounds are back'); }
 }
 
-/** Quick toggle from the Arcade: rain on/off (remembers 'only at night' if chosen). */
-function toggleCozy() {
-  const on = cozyActive();
-  update((d) => { d.settings.cozy = on ? 'off' : (d.settings.cozyLast === 'night' && isNightTime() ? 'night' : 'on'); });
-  applySettings();
-  sfx.tap();
-  toast(on ? '☀️ Cozy mode off' : `${({ fire: '🔥', ocean: '🌊', rainfire: '🌧️🔥' })[load().settings.cozySound] || '🌧️'} Cozy mode on – make yourself comfortable`);
-  if (currentScreen() === 'hub') showHub();
+/** The vibe picker (🌙 on the Arcade): each vibe re-themes the whole platform. */
+async function showVibePicker() {
+  const st = load().settings;
+  const cur = cozyActive() ? st.cozySound : 'off';
+  const card = (id, icon, name, desc) => `<button class="vibe-card ${cur === id ? 'on' : ''}" data-vibe="${id}"><span class="vibe-icon">${icon}</span><b>${name}</b><span class="small">${desc}</span></button>`;
+  const r = await modal(`<h2>🌙 Choose your vibe</h2>
+    <p class="small muted">Each vibe changes the whole platform – sounds, sky, colours, music and even what Pip is up to.</p>
+    <div class="vibe-grid">
+      ${card('off', '☀️', 'Sunny reef', 'Bright and bubbly – the daytime look')}
+      ${VIBES.map((v) => card(v.id, v.icon, v.name, v.desc)).join('')}
+    </div>
+    <div class="range-row"><span>🔈</span><input type="range" id="vp-vol" min="0" max="100" value="${Math.round((st.cozyVol ?? 0.6) * 100)}" aria-label="Ambience volume"><span>🔊</span></div>
+    <p class="small" style="margin:4px 0">⏲️ Sleep timer</p>
+    <div class="seg" id="vp-sleep">${[[0, 'Off'], [15, '15 min'], [30, '30 min'], [60, '1 h'], [90, '1½ h']].map(([v, l]) => `<button class="seg-btn ${Number(st.sleepTimer || 0) === v ? 'on' : ''}" data-v="${v}">${l}</button>`).join('')}</div>
+    <label class="vibe-auto"><input type="checkbox" id="vp-night" ${st.cozy === 'night' ? 'checked' : ''}> Switch on by itself at night (9 pm – 6 am)</label>`, {
+    buttons: [{ label: 'Done', value: 'done', cls: 'green' }],
+    onOpen: (sheet) => {
+      const apply = (vibe) => {
+        update((d) => {
+          if (vibe === 'off') d.settings.cozy = 'off';
+          else {
+            d.settings.cozySound = vibe;
+            d.settings.cozy = $('#vp-night', sheet).checked ? 'night' : 'on';
+            d.settings.cozyLast = d.settings.cozy;
+          }
+        });
+        applySettings();
+      };
+      for (const b of $$('[data-vibe]', sheet)) b.onclick = () => {
+        $$('[data-vibe]', sheet).forEach((x) => x.classList.toggle('on', x === b));
+        apply(b.dataset.vibe);
+        sfx.tap();
+        haptic(10);
+      };
+      $('#vp-vol', sheet).oninput = (e) => { update((d) => { d.settings.cozyVol = Number(e.target.value) / 100; }); applySettings(); };
+      for (const b of $$('#vp-sleep .seg-btn', sheet)) b.onclick = () => {
+        $$('#vp-sleep .seg-btn', sheet).forEach((x) => x.classList.toggle('on', x === b));
+        update((d) => { d.settings.sleepTimer = Number(b.dataset.v); });
+        applySettings();
+        sfx.tap();
+      };
+      $('#vp-night', sheet).onchange = (e) => {
+        update((d) => { d.settings.cozyLast = e.target.checked ? 'night' : 'on'; if (d.settings.cozy !== 'off') d.settings.cozy = d.settings.cozyLast; });
+        applySettings();
+      };
+    },
+  });
+  if (r && currentScreen() === 'hub') showHub();
+  const v = VIBE[load().settings.cozySound];
+  if (cozyActive() && v) toast(`${v.icon} ${v.name} – make yourself comfortable`);
+  else if (load().settings.cozy === 'night' && v) toast(`${v.icon} ${v.name} will start by itself at 9 pm`);
 }
 
 // One gentle suggestion, the first time someone plays late at night.
@@ -117,14 +160,12 @@ function maybeSuggestCozy() {
   update((d) => { d.cozySuggested = true; });
   setTimeout(async () => {
     if (isModalOpen() || view) return;
-    const r = await modal(`<h2>🌧️ Can't sleep?</h2><p>Turn on <b>Cozy rain</b>: soft rain and distant thunder while you play, with a sleep timer that fades it all out.</p>`, {
-      buttons: [{ label: '🌧️ Turn it on', value: 'on', cls: 'green' }, { label: 'Only at night', value: 'night', cls: 'blue' }, { label: 'Not now', value: null, cls: 'ghost' }],
+    const r = await modal(`<h2>🌙 Can't sleep?</h2><p>Pick a <b>cozy vibe</b> – rain, a crackling fire, a snowy cabin, a moonlit ocean or a forest night – with a sleep timer that fades it all out.</p>`, {
+      buttons: [{ label: '🌙 Choose a vibe', value: 'pick', cls: 'green' }, { label: 'Not now', value: null, cls: 'ghost' }],
     });
     if (r) {
-      update((d) => { d.settings.cozy = r; d.settings.cozyLast = r; if (!d.settings.sleepTimer) d.settings.sleepTimer = 30; });
-      applySettings();
-      toast('🌙 Sleep timer set to 30 min – change it in Settings');
-      if (currentScreen() === 'hub') showHub();
+      update((d) => { if (!d.settings.sleepTimer) d.settings.sleepTimer = 30; });
+      await showVibePicker();
     }
   }, 1500);
 }
@@ -413,7 +454,7 @@ function showPool(slotId = 'sky') {
     if (currentScreen() !== 'pool' || !document.body.contains(canvas)) { window.removeEventListener('resize', fit); return; }
     const r = canvas.getBoundingClientRect();
     const sound = cozySound();
-    hits = drawPool(ctx, r.width, r.height, load().pool, { night: cozyActive(), raining: cozyActive() && (sound === 'rain' || sound === 'rainfire'), highlight: selected, showEmpty: true });
+    hits = drawPool(ctx, r.width, r.height, load().pool, { night: cozyActive(), vibe: cozyActive() ? sound : null, raining: cozyActive() && (sound === 'rain' || sound === 'rainfire'), highlight: selected, showEmpty: true });
     poolRaf = requestAnimationFrame(frame);
   };
   poolRaf = requestAnimationFrame(frame);
@@ -607,9 +648,9 @@ function greetingFor(d = new Date()) {
 }
 function pipHtml(s) {
   const night = cozyActive() || isNightTime();
-  const snd = cozyActive() ? ({ fire: 'by the fire', ocean: 'by the sea', rainfire: 'by the fire, rain outside' })[cozySound()] || 'listening to the rain' : '';
+
   const petted = s.pip?.day === localDay();
-  const line = cozyActive() ? `Pip is snoozing ${snd}.` : night ? 'Pip is getting sleepy… tap 🌙 for cozy mode.' : 'Pip is waiting for you to play!';
+  const line = cozyActive() ? `Pip is ${VIBE[cozySound()]?.pip || 'snoozing'}.` : night ? 'Pip is getting sleepy… tap 🌙 to pick a cozy vibe.' : 'Pip is waiting for you to play!';
   return `<button class="pip-card ${night ? 'night' : ''}" id="u-pip" aria-label="Pet Pip the otter">
     <span class="pip"><span class="pip-otter">🦦</span>${night ? '<span class="pip-z">z<span>z</span><span>z</span></span>' : ''}</span>
     <span class="grow"><b>${greetingFor()}, ${esc(s.name)}</b><span class="small">${line}${petted ? '' : ' <b>Pet Pip 🐾</b>'}</span></span>
@@ -1337,7 +1378,7 @@ function showHub() {
       <span class="spacer"></span>
       <button class="icon-btn" id="u-lb" aria-label="Leaderboards">🏆</button>
       <button class="icon-btn ${st.canClaim ? 'badge-dot' : ''}" id="u-gift" aria-label="Daily treasure">🎁</button>
-      <button class="icon-btn ${cozyActive() ? 'on' : ''}" id="u-cozy" aria-label="Cozy rain" title="Cozy rain">${cozyActive() ? '🌧️' : '🌙'}</button>
+      <button class="icon-btn ${cozyActive() ? 'on' : ''}" id="u-cozy" aria-label="Choose your vibe" title="Choose your vibe">${cozyActive() ? VIBE[cozySound()]?.icon || '🌙' : '🌙'}</button>
       <button class="icon-btn" id="u-settings" aria-label="Settings">⚙️</button>
     </div>
     <div class="scroll">
@@ -1368,7 +1409,7 @@ function showHub() {
   const on = (id, fn) => { const b = $(id, el); if (b) b.onclick = () => { sfx.tap(); fn(); }; };
   on('#u-lb', () => showLeaderboard());
   on('#u-settings', showSettings);
-  on('#u-cozy', toggleCozy);
+  on('#u-cozy', showVibePicker);
   const pipBtn = $('#u-pip', el);
   if (pipBtn) pipBtn.onclick = () => petPip(pipBtn);
   on('#u-nudge-go', async () => { await openSignUp(); showHub(); });
@@ -2791,8 +2832,8 @@ function showSettings() {
       <h3 style="margin-top:18px">🌙 Cozy mode</h3>
       <p class="small muted">A calm night ambience for the whole game: soundscape, warm lamp light, a slow lullaby instead of the day music, and a sleep timer.</p>
       <div class="seg" data-cozy="cozy">${[['off', 'Off'], ['on', 'On'], ['night', '🌙 Only at night']].map(([v, l]) => `<button class="seg-btn ${s.settings.cozy === v ? 'on' : ''}" data-v="${v}">${l}</button>`).join('')}</div>
-      <p class="small" style="margin:10px 0 4px">Soundscape</p>
-      <div class="seg" data-cozy="cozySound">${[['rain', '🌧️ Rain'], ['fire', '🔥 Fireplace'], ['rainfire', '🌧️🔥 Rain + fire'], ['ocean', '🌊 Night ocean']].map(([v, l]) => `<button class="seg-btn ${(s.settings.cozySound || 'rain') === v ? 'on' : ''}" data-v="${v}">${l}</button>`).join('')}</div>
+      <p class="small" style="margin:10px 0 4px">Vibe</p>
+      <div class="seg" data-cozy="cozySound">${VIBES.map((v) => [v.id, `${v.icon} ${v.name}`]).map(([v, l]) => `<button class="seg-btn ${(s.settings.cozySound || 'rain') === v ? 'on' : ''}" data-v="${v}">${l}</button>`).join('')}</div>
       <div class="range-row"><span>🔈</span><input type="range" id="s-cozyvol" min="0" max="100" value="${Math.round((s.settings.cozyVol ?? 0.6) * 100)}" aria-label="Rain volume"><span>🔊</span></div>
       ${sw('thunder', '⛈️ Distant thunder', 'With rain · a soft sky glow, no flashes with Reduced motion')}
       ${sw('cozyWindow', '💧 Raindrops on the window', 'Drops trickle down the screen glass – they never block taps')}

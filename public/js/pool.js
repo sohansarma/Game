@@ -271,6 +271,42 @@ export function drawPool(ctx, W, H, pool, opts = {}) {
       ctx.beginPath(); ctx.moveTo(x, y); ctx.lineTo(x - 2, y - 10); ctx.stroke();
     }
   }
+  // the vibe outside the cove
+  if (opts.vibe === 'snow') {
+    ctx.fillStyle = 'rgba(255,255,255,0.85)';
+    for (let i = 0; i < 70; i++) {
+      const z = (i % 5) / 4;
+      const x = ((i * 61.7 + Math.sin(now / 1500 + i) * 20 + now * 0.01) % (W + 20)) - 10;
+      const y = ((i * 37.3 + now * (0.02 + z * 0.04)) % (H + 10)) - 5;
+      ctx.beginPath(); ctx.arc(x, y, 0.8 + z * 1.8, 0, Math.PI * 2); ctx.fill();
+    }
+    ctx.fillStyle = 'rgba(240,245,255,0.75)'; // snow settling on the rocks
+    ctx.beginPath(); ctx.ellipse(W * 0.13, H * 0.42, W * 0.13, H * 0.03, 0, 0, Math.PI * 2); ctx.fill();
+    ctx.beginPath(); ctx.ellipse(W * 0.87, H * 0.42, W * 0.13, H * 0.03, 0, 0, Math.PI * 2); ctx.fill();
+  } else if (opts.vibe === 'forest') {
+    ctx.globalCompositeOperation = 'lighter';
+    for (let i = 0; i < 14; i++) {
+      const b = Math.max(0, Math.sin(now / 900 + i * 2.3)) ** 3;
+      if (b < 0.05) continue;
+      const x = W * ((i * 0.137 + 0.05) % 1) + Math.sin(now / 2000 + i) * 12, y = H * (0.45 + ((i * 0.29) % 0.5)) + Math.cos(now / 1700 + i) * 8;
+      const g = ctx.createRadialGradient(x, y, 0, x, y, 10);
+      g.addColorStop(0, `rgba(230,255,150,${b})`); g.addColorStop(1, 'rgba(205,255,110,0)');
+      ctx.fillStyle = g; ctx.fillRect(x - 10, y - 10, 20, 20);
+    }
+    ctx.globalCompositeOperation = 'source-over';
+  } else if (opts.vibe === 'fire' || opts.vibe === 'rainfire') {
+    ctx.globalCompositeOperation = 'lighter';
+    for (let i = 0; i < 16; i++) {
+      const life = ((now / 1000) * (0.35 + (i % 4) * 0.1) + i * 0.17) % 1;
+      const x = W * (0.5 + Math.sin(i * 12.9) * 0.3) + Math.sin(now / 400 + i) * 8, y = H * (1 - life * 0.9);
+      ctx.fillStyle = `rgba(255,${200 - life * 120},${90 - life * 70},${(1 - life) * 0.9})`;
+      ctx.fillRect(x, y, 2, 2);
+    }
+    ctx.globalCompositeOperation = 'source-over';
+  } else if (opts.vibe === 'ocean') {
+    ctx.fillStyle = 'rgba(240,240,220,0.35)'; // moonlight on the sea
+    for (let k = 0; k < 6; k++) { const w = (14 + k * 6) * (0.6 + 0.4 * Math.sin(now / 600 + k)); ctx.fillRect(W * 0.8 - w / 2, H * (0.38 + k * 0.022), w, 1.5); }
+  }
   if (fire && night) {
     // warm wash over the whole scene from the campfire
     ctx.fillStyle = `rgba(255,140,60,${0.05 + 0.03 * Math.sin(now / 150)})`;

@@ -63,9 +63,20 @@ A Wordle-style daily ritual at the top of the Arcade: one shared flood puzzle a 
 
 Every player has their own cove (Arcade → **Your Tide Pool**): a scene drawn in code whose sky follows the real time of day, with rain, glowing lanterns and a flickering campfire in cozy mode. Shells earned in **any** game buy decor for 10 spots (sky, rocks, plants, pool, Pip's bed, light, seat, rug); 34 items, 7 of which can't be bought and are **found by playing** specific games (e.g. a chess set for playing Chess, a shell bed for trying 5 different games). Placed items add **comfort**; each comfort star adds +5 🐚 to every daily treasure. Pip the otter naps in whatever bed you choose. Owned items are merged as a union across devices, so nothing is lost in cloud sync. Code: `public/js/pool.js`.
 
-## 🌧️ Cozy rain (night mode)
+## 🌙 Vibes (cozy night modes)
 
-Settings → **Cozy rain** (or the 🌙 button on the Arcade): soft rain and distant thunder for late-night play, synthesised live with WebAudio (no audio files). Rain falls behind the game, a gentle sky glow comes a moment before each roll of thunder (no flashes with *Reduced motion*), game sounds and music get quieter, and a **sleep timer** (15 min – 1½ h) fades everything out. *Only at night* switches it on automatically between 9 pm and 6 am. Night-time players are offered it once.
+The 🌙 button on the Arcade opens a vibe picker; each vibe re-themes the whole platform: soundscape, a realistic animated scene behind the game, colour palette, frosted-glass cards that let the scene show through, lamp light, the night lullaby, Pip's activity and the Tide Pool's weather.
+
+| Vibe | Sound (synthesised live) | Scene |
+|---|---|---|
+| 🌧️ Rainy night | rain hiss, roof patter, droplets, distant thunder | storm clouds lit from inside by multi-stroke lightning, depth-layered motion-blurred rain, splashes and mist, refracting beads sliding down the window |
+| 🔥 Fireside | crackling logs and pops | pulsing hearth glow, embers rising on hot air and cooling along a blackbody colour ramp, spark bursts |
+| ⛈️ Storm & fire | both | rain outside, firelight and embers inside |
+| 🌊 Moonlit ocean | slow waves | moon with maria and halo, drifting clouds, perspective swells with sharp crests, glitter path tied to the wave slope |
+| ❄️ Snowy cabin | wind around the cabin + small fire | snow at ~1 m/s in depth layers with out-of-focus bokeh flakes, shared wind gusts, drifts, frosty screen edges |
+| 🌲 Forest night | crickets, leaves, a distant owl | three parallax spruce lines with fog, yellow-green fireflies flashing like *Photinus pyralis* (males every 5–7 s with a J-shaped lift, females answering from the grass) |
+
+Rendering is plain Canvas 2D (`public/js/scenes.js`): all glows, bokeh, clouds and trees are pre-rendered sprites, light uses additive blending, no runtime blur (Safari-safe), background resolution capped at 1.5×, paused when hidden. Also: 'only at night' auto mode, volume, a sleep timer that dims the screen and ends with a good-night card, and no flashes with *Reduced motion*.
 
 ## ☁️ Accounts & cloud save
 

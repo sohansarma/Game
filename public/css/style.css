@@ -503,3 +503,57 @@ body.cozy .tide-card { background: linear-gradient(120deg, #1d3557, #2a5d8a); bo
 .tide-bar { display: grid; grid-template-columns: 36px 1fr; align-items: center; gap: 6px; font-size: .8rem; font-weight: 800; }
 .tide-bar .tb i { display: block; font-style: normal; text-align: right; padding: 2px 6px; border-radius: 6px; background: rgba(255,255,255,.18); font-size: .75rem; }
 .tide-bar .tb i.me { background: var(--mint); color: #063; }
+
+/* ---- Vibes: each re-themes the whole platform ---- */
+body.cozy[data-vibe="fire"] #bg { background: linear-gradient(180deg, #1a0f0c 0%, #2e1a12 55%, #120906 100%); }
+body.cozy[data-vibe="fire"], body.cozy[data-vibe="rainfire"] { --panel: rgba(46, 26, 18, 0.82); --line: rgba(255, 190, 130, 0.2); --gold: #ffb86b; --muted: #e2c8ad; }
+body.cozy[data-vibe="rainfire"] #bg { background: linear-gradient(180deg, #0c1222 0%, #1d1a26 55%, #120a08 100%); }
+body.cozy[data-vibe="ocean"] #bg { background: linear-gradient(180deg, #020c1c 0%, #062544 50%, #0a3b5e 100%); }
+body.cozy[data-vibe="ocean"] { --panel: rgba(6, 32, 52, 0.82); --line: rgba(170, 220, 255, 0.18); --gold: #cfe8ff; --muted: #a9c7dd; }
+body.cozy[data-vibe="snow"] #bg { background: linear-gradient(180deg, #1a2036 0%, #2c3554 55%, #4a5576 100%); }
+body.cozy[data-vibe="snow"] { --panel: rgba(34, 40, 66, 0.80); --line: rgba(220, 230, 255, 0.22); --gold: #ffd9a8; --muted: #c9d1ea; }
+body.cozy[data-vibe="forest"] #bg { background: linear-gradient(180deg, #050d0a 0%, #0c2219 55%, #071510 100%); }
+body.cozy[data-vibe="forest"] { --panel: rgba(14, 34, 26, 0.84); --line: rgba(190, 240, 170, 0.16); --gold: #d8f59a; --muted: #b9d3b4; }
+
+/* lamp light per vibe */
+body[data-vibe="ocean"] .cozy-lamp { background: radial-gradient(90% 60% at 72% 10%, rgba(210,230,255,.22), rgba(160,200,255,.06) 45%, transparent 70%); }
+body[data-vibe="forest"] .cozy-lamp { background: radial-gradient(90% 70% at 30% 0%, rgba(190,240,190,.12), transparent 65%), radial-gradient(120% 60% at 50% 115%, rgba(200,255,120,.08), transparent 70%); }
+body[data-vibe="snow"] .cozy-vignette { background: radial-gradient(130% 100% at 50% 45%, transparent 52%, rgba(225,235,255,.22) 88%, rgba(240,246,255,.38) 100%); }
+
+/* hot card + sheets per vibe */
+body.cozy[data-vibe="ocean"] .hot-card { background: linear-gradient(90deg, #1f5f8a, #3d86a6); }
+body.cozy[data-vibe="forest"] .hot-card { background: linear-gradient(90deg, #3c6b34, #8a8a2e); }
+body.cozy[data-vibe="snow"] .hot-card { background: linear-gradient(90deg, #6a6fa6, #b38a6a); }
+body.cozy[data-vibe="ocean"] .modal .sheet { background: linear-gradient(180deg, #0b3150, #061d33); }
+body.cozy[data-vibe="forest"] .modal .sheet { background: linear-gradient(180deg, #16352a, #0b1d16); }
+body.cozy[data-vibe="snow"] .modal .sheet { background: linear-gradient(180deg, #343c62, #232945); }
+body.cozy[data-vibe="fire"] .modal .sheet, body.cozy[data-vibe="rainfire"] .modal .sheet { background: linear-gradient(180deg, #3a2218, #24140e); }
+
+/* vibe picker */
+.vibe-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin: 10px 0; }
+.vibe-card { display: flex; flex-direction: column; align-items: flex-start; gap: 2px; text-align: left; padding: 10px; border-radius: 14px; background: var(--panel-2); border: 2px solid var(--line); color: inherit; }
+.vibe-card .vibe-icon { font-size: 1.7rem; }
+.vibe-card .small { color: var(--muted); line-height: 1.25; }
+.vibe-card.on { border-color: var(--gold); box-shadow: 0 0 0 2px rgba(255,212,94,.35); background: rgba(255,212,94,.12); }
+.vibe-auto { display: flex; align-items: center; gap: 8px; margin-top: 10px; font-size: .88rem; }
+.vibe-auto input { width: 20px; height: 20px; accent-color: var(--gold); }
+
+/* Frosted glass in cozy vibes: the scene shows through every card */
+body.cozy .missions, body.cozy .game-card, body.cozy .card, body.cozy .pip-card, body.cozy .account-nudge, body.cozy .hud .box, body.cozy .tide-card, body.cozy .pool-comfort {
+  background-color: transparent;
+  background-image: linear-gradient(180deg, rgba(255,255,255,.07), rgba(255,255,255,.02)), linear-gradient(var(--panel), var(--panel));
+  -webkit-backdrop-filter: blur(7px) saturate(1.15);
+  backdrop-filter: blur(7px) saturate(1.15);
+}
+body.cozy { --panel: rgba(18, 22, 40, 0.5); }
+body.cozy[data-vibe="fire"], body.cozy[data-vibe="rainfire"] { --panel: rgba(40, 22, 14, 0.52); }
+body.cozy[data-vibe="ocean"] { --panel: rgba(4, 28, 48, 0.48); }
+body.cozy[data-vibe="snow"] { --panel: rgba(30, 36, 62, 0.46); }
+body.cozy[data-vibe="forest"] { --panel: rgba(8, 26, 18, 0.5); }
+body.cozy .home-hero { padding-top: 26px; padding-bottom: 8px; }
+/* the Tide card wears the vibe too */
+body.cozy[data-vibe="fire"] .tide-card, body.cozy[data-vibe="rainfire"] .tide-card { background-image: linear-gradient(120deg, rgba(150,70,30,.7), rgba(200,120,50,.55)); }
+body.cozy[data-vibe="ocean"] .tide-card { background-image: linear-gradient(120deg, rgba(20,80,130,.7), rgba(60,140,180,.5)); }
+body.cozy[data-vibe="snow"] .tide-card { background-image: linear-gradient(120deg, rgba(90,100,160,.65), rgba(160,170,210,.45)); }
+body.cozy[data-vibe="forest"] .tide-card { background-image: linear-gradient(120deg, rgba(30,80,50,.7), rgba(110,140,60,.5)); }
+body.cozy[data-vibe="rain"] .tide-card { background-image: linear-gradient(120deg, rgba(30,55,100,.7), rgba(70,100,150,.5)); }

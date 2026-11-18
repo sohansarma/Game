@@ -9,10 +9,11 @@
 //  • a sleep timer fades everything out and dims the screen
 //
 // settings.cozy: 'off' | 'on' | 'night' (on automatically 9pm–6am)
-// settings.cozySound: 'rain' | 'fire' | 'ocean' | 'rainfire'
+// settings.cozySound (the "vibe"): 'rain' | 'fire' | 'rainfire' | 'ocean' | 'snow' | 'forest'
 // settings.cozyVol 0..1 · thunder bool · cozyWindow bool · sleepTimer minutes (0 = off)
 
 import { onAudioReady, setNightAudio } from './audio.js';
+import { Scene } from './scenes.js';
 
 let cfg = { cozy: 'off', cozySound: 'rain', cozyVol: 0.6, thunder: true, cozyWindow: true, sleepTimer: 0, reducedMotion: false };
 let active = false;
@@ -25,8 +26,18 @@ const listeners = new Set();
 const sleepFns = new Set();
 
 export const isNightTime = (d = new Date()) => d.getHours() >= 21 || d.getHours() < 6;
+/** Each vibe re-themes the whole platform: sound, sky, particles, palette, Pip. */
+export const VIBES = [
+  { id: 'rain', icon: '🌧️', name: 'Rainy night', desc: 'Soft rain, distant thunder, drops on the window', pip: 'snoozing to the sound of the rain' },
+  { id: 'fire', icon: '🔥', name: 'Fireside', desc: 'Crackling logs, floating embers, warm amber light', pip: 'toasting marshmallows by the fire' },
+  { id: 'rainfire', icon: '⛈️', name: 'Storm & fire', desc: 'A storm outside, a crackling fire inside', pip: 'curled up by the fire while it storms' },
+  { id: 'ocean', icon: '🌊', name: 'Moonlit ocean', desc: 'Slow waves, a big moon, silver light', pip: 'watching the moon on the water' },
+  { id: 'snow', icon: '❄️', name: 'Snowy cabin', desc: 'Falling snow, howling wind, a little fire', pip: 'wrapped in a blanket, watching the snow' },
+  { id: 'forest', icon: '🌲', name: 'Forest night', desc: 'Crickets, rustling leaves, fireflies, an owl', pip: 'counting fireflies' },
+];
+export const VIBE = Object.fromEntries(VIBES.map((v) => [v.id, v]));
 const raining = () => cfg.cozySound === 'rain' || cfg.cozySound === 'rainfire';
-const fireOn = () => cfg.cozySound === 'fire' || cfg.cozySound === 'rainfire';
+const fireOn = () => ['fire', 'rainfire', 'snow'].includes(cfg.cozySound);
 
 export function cozyActive() {
   return active;
@@ -61,12 +72,15 @@ export function configureCozy(settings) {
     armSleep();
     scheduleThunder();
     syncVisuals();
+    emit();
   }
 }
 
 function emit() {
   document.body.classList.toggle('cozy', active);
   document.body.classList.toggle('cozy-fire', active && fireOn());
+  if (active) document.body.dataset.vibe = cfg.cozySound;
+  else delete document.body.dataset.vibe;
   document.body.classList.toggle('cozy-sleepy', active && sleptAt > 0);
   for (const fn of listeners) { try { fn(active); } catch { /* ignore */ } }
 }
@@ -176,9 +190,69 @@ function startAudio(ctx, out) {
     };
     drops();
   }
+  if (sound === 'snow') {
+    // wind around the cabin: noise through a band-pass whose pitch drifts slowly
+    const windSrc = ctx.createBufferSource();
+    windSrc.buffer = noiseBuffer(ctx, 6, 'pink');
+    windSrc.loop = true;
+    const bp = ctx.createBiquadFilter(); bp.type = 'bandpass'; bp.frequency.value = 520; bp.Q.value = 3.5;
+    const wg = ctx.createGain(); wg.gain.value = 0.9;
+    const lfo = ctx.createOscillator(); lfo.frequency.value = 0.06;
+    const lamt = ctx.createGain(); lamt.gain.value = 260;
+    lfo.connect(lamt); lamt.connect(bp.frequency);
+    const lfo2 = ctx.createOscillator(); lfo2.frequency.value = 0.11;
+    const l2 = ctx.createGain(); l2.gain.value = 0.45;
+    lfo2.connect(l2); l2.connect(wg.gain);
+    windSrc.connect(bp); bp.connect(wg); wg.connect(A.bus);
+    windSrc.start(); lfo.start(); lfo2.start();
+    A.nodes.push(windSrc, bp, wg, lfo, lamt, lfo2, l2);
+  }
+  if (sound === 'forest') {
+    // leaves in a light breeze
+    const leaves = layer(A, noiseBuffer(ctx, 5, 'pink'), [['highpass', 1800], ['lowpass', 6000]], 0.1);
+    const lfo = ctx.createOscillator(); lfo.frequency.value = 0.13;
+    const amt = ctx.createGain(); amt.gain.value = 0.07;
+    lfo.connect(amt); amt.connect(leaves.gain); lfo.start();
+    A.nodes.push(lfo, amt);
+    layer(A, noiseBuffer(ctx, 5, 'brown'), [['lowpass', 260]], 0.25); // the night air
+    // crickets: quick trains of high chirps from a few directions
+    const cricket = (pan, pitch) => {
+      const go = () => {
+        if (audio !== A) return;
+        const t = ctx.currentTime;
+        for (let k = 0; k < 3; k++) {
+          const o = ctx.createOscillator(); o.type = 'sine'; o.frequency.value = pitch;
+          const g = ctx.createGain();
+          const at = t + k * 0.055;
+          g.gain.setValueAtTime(0, at); g.gain.linearRampToValueAtTime(0.05, at + 0.008); g.gain.linearRampToValueAtTime(0, at + 0.04);
+          let node = g;
+          if (ctx.createStereoPanner) { const p = ctx.createStereoPanner(); p.pan.value = pan; g.connect(p); node = p; }
+          o.connect(g); node.connect(A.bus);
+          o.start(at); o.stop(at + 0.05);
+        }
+        A.timers.push(setTimeout(go, 600 + Math.random() * 900));
+      };
+      A.timers.push(setTimeout(go, Math.random() * 800));
+    };
+    cricket(-0.6, 4300); cricket(0.5, 4700); cricket(0.1, 3900);
+    // a distant owl now and then: "hoo … hoo-hoo"
+    const owl = () => {
+      if (audio !== A) return;
+      const t = ctx.currentTime;
+      [[0, 0.5], [0.9, 0.25], [1.25, 0.45]].forEach(([d, len]) => {
+        const o = ctx.createOscillator(); o.type = 'sine';
+        o.frequency.setValueAtTime(410, t + d); o.frequency.linearRampToValueAtTime(370, t + d + len);
+        const g = ctx.createGain();
+        g.gain.setValueAtTime(0, t + d); g.gain.linearRampToValueAtTime(0.09, t + d + 0.06); g.gain.setTargetAtTime(0, t + d + len * 0.7, 0.08);
+        o.connect(g); g.connect(A.bus); o.start(t + d); o.stop(t + d + len + 0.4);
+      });
+      A.timers.push(setTimeout(owl, 30000 + Math.random() * 40000));
+    };
+    A.timers.push(setTimeout(owl, 8000 + Math.random() * 10000));
+  }
   if (fireOn()) {
-    // the low roar of burning logs + crackles and the odd pop
-    layer(A, noiseBuffer(ctx, 5, 'brown'), [['lowpass', 320]], 0.9);
+    // the low roar of burning logs + crackles and the odd pop (softer in the snowy cabin)
+    layer(A, noiseBuffer(ctx, 5, 'brown'), [['lowpass', 320]], sound === 'snow' ? 0.45 : 0.9);
     layer(A, noiseBuffer(ctx, 3, 'pink'), [['bandpass', 1200, 0.7]], 0.05);
     const crackle = () => {
       if (audio !== A) return;
@@ -277,148 +351,148 @@ export function wakeCozy() {
 }
 
 // ---------------------------------------------------------------- visuals
-// Behind the game (#bg): rain or stars + sky glow.
-// Over the game (#cozy-over, pointer-events: none): lamp glow, vignette, drops on the glass.
-let sky = null, glass = null, over = null, raf = null, flash = 0, W = 0, H = 0;
-let drops = [], stars = [], beads = [];
-
-function mkCanvas(parent, id) {
-  const c = document.createElement('canvas');
-  c.id = id;
-  c.setAttribute('aria-hidden', 'true');
-  parent.appendChild(c);
-  return { el: c, ctx: c.getContext('2d') };
-}
+// Behind the game (#bg): a realistic scene per vibe (scenes.js).
+// Over the game (#cozy-over, pointer-events: none): lamp glow, vignette and,
+// when it rains, water beads on the "window" that refract the scene behind.
+let scene = null, sceneEl = null, glass = null, over = null, raf = null, W = 0, H = 0;
+let beads = [];
 
 function startVisuals() {
   const bg = document.getElementById('bg');
-  if (!bg || sky) return;
-  sky = mkCanvas(bg, 'cozy-rain');
+  if (!bg || scene) return;
+  sceneEl = document.createElement('canvas');
+  sceneEl.id = 'cozy-rain';
+  sceneEl.setAttribute('aria-hidden', 'true');
+  bg.appendChild(sceneEl);
+  scene = new Scene(sceneEl);
+  scene.vibe = cfg.cozySound;
   over = document.createElement('div');
   over.id = 'cozy-over';
   over.setAttribute('aria-hidden', 'true');
   over.innerHTML = '<div class="cozy-lamp"></div><div class="cozy-vignette"></div>';
   document.body.appendChild(over);
-  glass = mkCanvas(over, 'cozy-glass');
+  const g = document.createElement('canvas');
+  g.id = 'cozy-glass';
+  over.appendChild(g);
+  glass = { el: g, ctx: g.getContext('2d') };
   window.addEventListener('resize', size);
   size();
   let last = performance.now();
   const frame = (now) => {
+    raf = requestAnimationFrame(frame);
+    if (document.hidden) { last = now; return; } // pause in the background
     const dt = Math.min(0.05, (now - last) / 1000);
     last = now;
-    drawSky(dt, now);
+    scene.frame(dt, now, { reducedMotion: cfg.reducedMotion });
     drawGlass(dt);
     if (fireOn() && !cfg.reducedMotion) {
       // the lamp breathes with the fire
       const f = 0.82 + 0.1 * Math.sin(now / 410) + 0.06 * Math.sin(now / 133) + 0.04 * Math.sin(now / 71);
       over.style.setProperty('--flicker', f.toFixed(3));
     } else over.style.setProperty('--flicker', '0.85');
-    raf = requestAnimationFrame(frame);
   };
   raf = requestAnimationFrame(frame);
 }
 
 function size() {
-  if (!sky) return;
-  const dpr = Math.min(window.devicePixelRatio || 1, 2);
+  if (!scene) return;
   W = window.innerWidth; H = window.innerHeight;
-  for (const c of [sky, glass]) {
-    c.el.width = Math.round(W * dpr); c.el.height = Math.round(H * dpr);
-    c.ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
-  }
-  drops = Array.from({ length: Math.round((W * H) / 5200) }, () => newDrop(true));
-  stars = Array.from({ length: Math.round((W * H) / 9000) }, () => ({ x: Math.random() * W, y: Math.random() * H * 0.75, r: Math.random() * 1.3 + 0.3, p: Math.random() * 6.28, s: 0.5 + Math.random() * 1.5 }));
+  scene.vibe = cfg.cozySound;
+  scene.resize(W, H);
+  const dpr = Math.min(window.devicePixelRatio || 1, 2);
+  glass.el.width = Math.round(W * dpr); glass.el.height = Math.round(H * dpr);
+  glass.ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
   beads = [];
 }
 
 function syncVisuals() {
-  if (sky) size();
+  if (scene) { scene.setVibe(cfg.cozySound); beads = []; }
 }
 
 function stopVisuals() {
   cancelAnimationFrame(raf);
   window.removeEventListener('resize', size);
-  sky?.el.remove();
+  sceneEl?.remove();
   over?.remove();
-  sky = glass = over = null;
+  scene = sceneEl = glass = over = null;
 }
 
-function newDrop(anywhere) {
-  const z = Math.random();
-  return { x: Math.random() * (W + 80) - 40, y: anywhere ? Math.random() * H : -20 - Math.random() * 60, z, len: 8 + z * 18, v: 380 + z * 620 };
-}
-
-function drawSky(dt, now) {
-  const c = sky.ctx;
-  c.clearRect(0, 0, W, H);
-  if (flash > 0) {
-    const g = c.createRadialGradient(W * 0.7, -H * 0.1, 10, W * 0.7, -H * 0.1, H * 1.1);
-    g.addColorStop(0, `rgba(200,215,255,${0.38 * flash})`);
-    g.addColorStop(1, 'rgba(200,215,255,0)');
-    c.fillStyle = g;
-    c.fillRect(0, 0, W, H);
-    flash = Math.max(0, flash - dt * 1.4);
-  }
-  const still = cfg.reducedMotion;
-  if (!raining()) {
-    // a clear, starry night
-    for (const s of stars) {
-      const tw = still ? 0.7 : 0.45 + 0.4 * Math.sin(now / 1000 * s.s + s.p);
-      c.fillStyle = `rgba(255,248,225,${tw})`;
-      c.beginPath(); c.arc(s.x, s.y, s.r, 0, Math.PI * 2); c.fill();
-    }
-    return;
-  }
-  const wind = 0.12;
-  c.lineCap = 'round';
-  for (const d of drops) {
-    if (!still) {
-      d.y += d.v * dt;
-      d.x += d.v * wind * dt;
-      if (d.y > H + 20) Object.assign(d, newDrop(false));
-    }
-    c.strokeStyle = `rgba(190,215,255,${0.12 + d.z * 0.28})`;
-    c.lineWidth = 0.6 + d.z * 0.9;
-    c.beginPath();
-    c.moveTo(d.x, d.y);
-    c.lineTo(d.x - d.len * wind, d.y - d.len);
-    c.stroke();
-  }
-}
-
-/** Water beads on the window: they sit, swell, then trickle down leaving a trail. */
+/**
+ * Water beads on the window. Each one is a tiny lens: it shows the scene
+ * behind it flipped upside-down and shrunk, with a dark lower rim and a
+ * bright highlight. Beads sit, grow, then slide down (stick–slip), merging
+ * with drops they hit and leaving a trail of tiny droplets.
+ */
 function drawGlass(dt) {
   const c = glass.ctx;
   c.clearRect(0, 0, W, H);
   if (!raining() || !cfg.cozyWindow || cfg.reducedMotion) return;
-  const max = Math.round((W * H) / 26000);
-  if (beads.length < max && Math.random() < dt * 3) beads.push({ x: Math.random() * W, y: Math.random() * H * 0.9, r: 1.5 + Math.random() * 2.5, v: 0, trail: [] });
+  const max = Math.round((W * H) / 14000);
+  if (beads.length < max && Math.random() < dt * 4) beads.push({ x: Math.random() * W, y: Math.random() * H * 0.92, r: 1.2 + Math.random() * 2.4, v: 0, stall: 0, trail: [] });
+  const src = sceneEl, sx = src.width / W, sy = src.height / H;
   for (const b of beads) {
-    if (b.v === 0 && Math.random() < dt * 0.15) b.v = 18 + Math.random() * 40;
-    if (b.v) {
+    // grow by catching new drizzle; heavy beads slide in fits and starts
+    if (b.r < 7 && Math.random() < dt * 0.25) b.r += 0.4;
+    if (b.r > 3.2) {
+      if (b.stall > 0) b.stall -= dt;
+      else {
+        b.v = Math.min(140, b.v + 220 * dt);
+        if (Math.random() < dt * 1.5) { b.stall = Math.random() * 0.6; b.v = 0; }
+      }
       b.y += b.v * dt;
-      b.x += Math.sin(b.y / 23) * 0.3;
-      if (!b.trail.length || Math.abs(b.trail[b.trail.length - 1][1] - b.y) > 6) b.trail.push([b.x, b.y]);
-      if (b.trail.length > 30) b.trail.shift();
+      b.x += Math.sin(b.y / 19) * 0.25;
+      if (!b.trail.length || b.y - b.trail[b.trail.length - 1][1] > 7) b.trail.push([b.x, b.y, b.r * (0.18 + Math.random() * 0.12)]);
+      if (b.trail.length > 24) b.trail.shift();
     }
-    // trail of tiny droplets
-    for (const [i, [x, y]] of b.trail.entries()) {
-      c.fillStyle = `rgba(220,235,255,${0.05 + (i / b.trail.length) * 0.1})`;
-      c.beginPath(); c.arc(x, y, b.r * 0.35, 0, Math.PI * 2); c.fill();
+    // merge (area conserved)
+    for (const o of beads) {
+      if (o === b || o.dead || b.dead) continue;
+      if (Math.abs(o.x - b.x) < b.r + o.r && Math.abs(o.y - b.y) < b.r + o.r && Math.hypot(o.x - b.x, o.y - b.y) < (b.r + o.r) * 0.8) {
+        const big = b.r >= o.r ? b : o, small = big === b ? o : b;
+        big.r = Math.min(9, Math.sqrt(big.r * big.r + small.r * small.r));
+        small.dead = true;
+      }
     }
-    // the bead: dark edge, bright highlight – like light bending through water
-    const g = c.createRadialGradient(b.x - b.r * 0.3, b.y - b.r * 0.35, b.r * 0.1, b.x, b.y, b.r);
-    g.addColorStop(0, 'rgba(255,255,255,0.55)');
-    g.addColorStop(0.5, 'rgba(200,220,255,0.12)');
-    g.addColorStop(1, 'rgba(10,20,40,0.25)');
-    c.fillStyle = g;
-    c.beginPath(); c.arc(b.x, b.y, b.r, 0, Math.PI * 2); c.fill();
   }
-  beads = beads.filter((b) => b.y < H + 10);
+  beads = beads.filter((b) => !b.dead && b.y < H + 12);
+  for (const b of beads) {
+    for (const [x, y, r] of b.trail) {
+      c.fillStyle = 'rgba(220,232,255,0.22)';
+      c.beginPath(); c.arc(x, y, r, 0, Math.PI * 2); c.fill();
+    }
+    const r = b.r, ry = r * 1.12;
+    c.save();
+    c.beginPath(); c.ellipse(b.x, b.y, r, ry, 0, 0, Math.PI * 2); c.clip();
+    // the refracted, inverted view through the drop
+    const k = 3.2; // how much of the scene the drop "sees"
+    c.translate(b.x, b.y);
+    c.scale(1, -1);
+    c.drawImage(src, (b.x - r * k) * sx, (b.y - ry * k) * sy, r * k * 2 * sx, ry * k * 2 * sy, -r, -ry, r * 2, ry * 2);
+    c.restore();
+    // shading: dark lower rim, bright upper-left highlight
+    c.drawImage(beadShade(), b.x - r, b.y - ry, r * 2, ry * 2);
+  }
+}
+
+let shade = null;
+/** Drop shading, rendered once: bright upper-left highlight, dark lower rim. */
+function beadShade() {
+  if (shade) return shade;
+  shade = document.createElement('canvas');
+  shade.width = shade.height = 64;
+  const c = shade.getContext('2d');
+  const g = c.createRadialGradient(64 * 0.35, 64 * 0.3, 3, 32, 32, 35);
+  g.addColorStop(0, 'rgba(255,255,255,0.6)');
+  g.addColorStop(0.25, 'rgba(255,255,255,0.06)');
+  g.addColorStop(0.78, 'rgba(0,0,0,0)');
+  g.addColorStop(0.95, 'rgba(0,10,25,0.5)');
+  g.addColorStop(1, 'rgba(0,10,25,0)');
+  c.fillStyle = g;
+  c.beginPath(); c.arc(32, 32, 32, 0, Math.PI * 2); c.fill();
+  return shade;
 }
 
 function lightning(near) {
   if (cfg.reducedMotion) return; // no flashes for people who asked for calm motion
-  flash = 0.45 + near * 0.55;
-  setTimeout(() => { if (active) flash = Math.max(flash, 0.35 + near * 0.3); }, 140);
+  scene?.lightning(0.45 + near * 0.55);
 }
