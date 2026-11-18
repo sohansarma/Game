@@ -20,6 +20,7 @@ import { SLOTS as POOL_SLOTS, ITEMS as POOL_ITEMS, ITEM as POOL_ITEM, comfortOf,
 import { startCloud, syncNow, cloudAccount, cloudStatus, onCloudChange, signUp, logIn, logOut, recoverAccount, changePassword, deleteAccount, setClaudeSync } from './cloud.js';
 import { configureCozy, cozyActive, cozySleeping, wakeCozy, onSleep, isNightTime, cozySound, VIBES, VIBE } from './cozy.js';
 import * as api from './api.js';
+import * as live from './liveops.js';
 import { ACHIEVEMENTS, checkAchievements } from './achievements.js';
 import { $, $$, esc, fmt, showScreen, currentScreen, modal, closeModal, isModalOpen, toast, starsHtml, setBackground } from './ui.js';
 
@@ -475,7 +476,7 @@ async function endTide(run) {
     a.best = Math.max(a.best || 0, sim.score);
     a.daily = { ...(a.daily || {}), [key]: sim.score };
   });
-  noteGameEnd('tide', false);
+  noteGameEnd('tide', false, sim.solved ? 'tide' : undefined);
   const sub = submitRun({ board: 'tideDaily', key, seed: 0, log: sim.log, score: sim.score }).catch(() => null);
   leaveGame();
   showHub();
@@ -534,6 +535,7 @@ function poolState() {
 
 function showPool(slotId = 'sky') {
   leaveGame();
+  update((d) => { if (d.missions?.day !== dayKey()) d.missions = { day: dayKey(), best: 0, hot: 0, claimed: false }; d.missions.cove = 1; });
   setBackground(['#4fc3f7', '#1e88e5']);
   poolState();
   let selected = slotId;
@@ -817,7 +819,7 @@ function pipHtml(s) {
   const petted = s.pip?.day === localDay();
   const line = cozyActive() ? `Pip is ${VIBE[cozySound()]?.pip || 'snoozing'}.` : night ? 'Pip is getting sleepy… tap 🌙 to pick a cozy vibe.' : 'Pip is waiting for you to play!';
   return `<button class="pip-card ${night ? 'night' : ''}" id="u-pip" aria-label="Pet Pip the otter">
-    <span class="pip"><span class="pip-otter">🦦</span>${night ? '<span class="pip-z">z<span>z</span><span>z</span></span>' : ''}</span>
+    <span class="pip"><span class="pip-otter">🦦</span>${live.OUTFIT[s.pipOutfit] ? `<span class="pip-outfit" aria-hidden="true">${live.OUTFIT[s.pipOutfit].icon}</span>` : ''}${night ? '<span class="pip-z">z<span>z</span><span>z</span></span>' : ''}</span>
     <span class="grow"><b>${greetingFor()}, ${esc(s.name)}</b><span class="small">${line}${petted ? '' : ' <b>Pet Pip 🐾</b>'}</span></span>
   </button>`;
 }
@@ -1304,7 +1306,7 @@ async function endMatch(run) {
   if (run.kind === 'level') return endLevel(run);
   run.ended = true;
   recordMatchStats(game);
-  noteGameEnd('tidepop', run.kind === 'deep' && game.score > (load().deep[run.key] || 0));
+  noteGameEnd('tidepop', run.kind === 'deep' && game.score > (load().deep[run.key] || 0), 'level');
   const score = game.score;
   let rankLine = '<p class="muted small" id="r-rank">Checking leaderboard…</p>';
   let ranked = false;
@@ -1403,7 +1405,7 @@ async function endLevel(run) {
   }
   run.ended = true;
   recordMatchStats(game);
-  noteGameEnd('tidepop', game.score > (load().levels[n]?.best || 0));
+  noteGameEnd('tidepop', game.score > (load().levels[n]?.best || 0), 'level');
   const stars = game.stars();
   const prev = load().levels[n];
   const prevStars = prev?.stars || 0;
@@ -1499,27 +1501,43 @@ function missions() {
   const games = hubGames();
   const hot = games.find((g) => g.id === hotGameId());
   const dailies = games.filter((g) => g.played).length + (load().tide?.days?.[dayKey()] ? 1 : 0);
+  const ctx = { hot, dailies };
   return {
     claimed: m.claimed,
-    list: [
-      { text: 'Play 3 daily challenges', cur: Math.min(3, dailies), goal: 3 },
-      { text: 'Beat one of your personal bests', cur: Math.min(1, m.best), goal: 1 },
-      { text: `Play today's hot game: ${hot.icon} ${hot.title}`, cur: Math.min(1, m.hot), goal: 1 },
-    ],
+    list: live.pickMissions(dayKey()).map((t) => ({ text: t.text(ctx), cur: Math.min(t.goal, t.cur(m, ctx)), goal: t.goal })),
   };
 }
 
-/** Records a finished game for missions; returns true if it was the hot game (2x shells). */
-function noteGameEnd(id, isBest) {
+function weekly() {
+  const w = live.weekState(load(), weekKey());
+  return { claimed: w.claimed, list: live.WEEKLY.map((t) => ({ text: t.text, cur: Math.min(t.goal, t.cur(w)), goal: t.goal })) };
+}
+
+/**
+ * Records a finished game for missions, the weekly tier, Tide Pass XP and
+ * game stickers; returns true if it was the hot game (2x shells).
+ * kind: 'level' (Shell Swap), 'tide' (Tide of the Day solved), 'versus'.
+ */
+function noteGameEnd(id, isBest, kind) {
   const hot = id === hotGameId();
+  const day = dayKey();
+  const season = live.seasonAt(day);
+  const before = live.tierOfXp(live.passState(load(), season).xp);
+  let sticker = null;
   update((d) => {
-    const day = dayKey();
-    if (d.missions?.day !== day) d.missions = { day, best: 0, hot: 0, claimed: false };
-    if (isBest) d.missions.best++;
-    if (hot) d.missions.hot++;
+    live.noteMissionGame(d, day, id, { best: isBest, hot, kind });
+    live.noteWeekGame(d, weekKey(), id);
+    live.addXp(d, season, day, live.XP.game, { game: true });
+    if (kind === 'tide') live.addXp(d, season, day, live.XP.tide);
+    sticker = live.grantGameSticker(d, id);
     d.played ||= {};
     d.played[id] = (d.played[id] || 0) + 1;
   });
+  const after = live.tierOfXp(live.passState(load(), season).xp);
+  setTimeout(() => {
+    if (sticker) toast(`📒 New sticker: ${sticker.icon} ${sticker.name}`);
+    if (after > before) setTimeout(() => toast(`${season.icon} Tide Pass tier ${after} reached – claim it on the home screen!`), sticker ? 2400 : 0);
+  }, 1500);
   return hot;
 }
 
@@ -1532,6 +1550,119 @@ const hms = (ms) => {
   return `${String(Math.floor(t / 3600)).padStart(2, '0')}:${String(Math.floor((t % 3600) / 60)).padStart(2, '0')}:${String(t % 60).padStart(2, '0')}`;
 };
 let hubTimer = null;
+
+function weeklyHtml() {
+  const wk = weekly();
+  const done = wk.list.every((m) => m.cur >= m.goal);
+  return `<div class="weekly">
+    <div class="row"><b class="grow" style="white-space:nowrap">🗓️ This week</b><span class="small muted">🐚 ${live.WEEKLY_REWARD.shells} + 2 📒 · ${weekLeft()} left</span></div>
+    ${wk.list.map((m) => `<div class="mission ${m.cur >= m.goal ? 'done' : ''}"><span>${m.cur >= m.goal ? '✅' : '◻️'} ${esc(m.text)}</span><span class="small">${m.cur}/${m.goal}</span></div>`).join('')}
+    ${wk.claimed ? '<p class="small muted center">Weekly chest claimed – new goals on Monday!</p>' : done ? '<button class="btn wide green" id="u-weekly">🎁 Open the weekly chest</button>' : ''}
+  </div>`;
+}
+
+function passCardHtml() {
+  const day = dayKey(), season = live.seasonAt(day), p = live.passState(load(), season);
+  const tier = live.tierOfXp(p.xp), unclaimed = tier - p.claimed;
+  const into = tier >= live.TIERS ? live.XP_PER_TIER : p.xp - tier * live.XP_PER_TIER;
+  return `<button class="card pass-card" id="u-pass" aria-label="Tide Pass ${esc(season.name)}, tier ${tier} of ${live.TIERS}">
+    ${unclaimed > 0 ? `<span class="tag hot">${unclaimed} to claim!</span>` : ''}
+    <span class="row" style="gap:10px;width:100%"><span class="emoji" aria-hidden="true">${season.icon}</span>
+    <span class="grow" style="text-align:left"><b>Tide Pass · ${esc(season.name)}</b><span class="sub">Tier ${tier}/${live.TIERS} · ${live.seasonDaysLeft(season, day)} days left · free rewards</span></span></span>
+    <span class="pass-bar"><span style="width:${Math.round((into / live.XP_PER_TIER) * 100)}%"></span></span>
+  </button>`;
+}
+
+const albumCount = (s) => live.STICKERS.filter((x) => s.stickers?.[x.id]).length;
+
+function showRewards(title, lines) {
+  return modal(`<h2>${title}</h2><div class="reward-list">${lines.map((l) => `<div class="reward">${esc(l)}</div>`).join('')}</div>`, { buttons: [{ label: 'Lovely!', value: 'ok', cls: 'green' }] }).then(() => {
+    const pages = [];
+    update((d) => { pages.push(...live.claimPages(d)); });
+    for (const p of pages) toast(`📒 Album page complete: ${p.name}! +${p.shells} 🐚`);
+    showHub();
+  });
+}
+
+function showPass() {
+  leaveGame();
+  const day = dayKey(), season = live.seasonAt(day), p = live.passState(load(), season);
+  const tier = live.tierOfXp(p.xp);
+  const el = showScreen('pass', `
+    <div class="topbar"><button class="icon-btn" id="ps-back" aria-label="Back">←</button><h2 class="grow">${season.icon} Tide Pass</h2><span class="pill">${fmt(p.xp)} XP</span></div>
+    <div class="scroll">
+      <div class="card" style="text-align:left">
+        <b>Season: ${esc(season.name)}</b>
+        <p class="small muted">${live.seasonDaysLeft(season, day)} days left · always free – there is no paid track. Earn XP by playing anything: +${live.XP.game} per game (up to ${live.XP.gameCapPerDay} games a day), +${live.XP.tide} for solving Tide of the Day, +${live.XP.chest} for the daily mission chest, +${live.XP.weekly} for the weekly chest.</p>
+        ${tier > p.claimed ? `<button class="btn wide green" id="ps-claim">🎁 Claim ${tier - p.claimed} reward${tier - p.claimed > 1 ? 's' : ''}</button>` : ''}
+      </div>
+      <div class="pass-list">${Array.from({ length: live.TIERS }, (_, i) => {
+        const t = i + 1, r = live.tierReward(season, t);
+        const state = t <= p.claimed ? 'got' : t <= tier ? 'ready' : 'locked';
+        return `<div class="pass-tier ${state}"><b>${t}</b><span class="grow">${esc(r.label)}</span><span>${state === 'got' ? '✅' : state === 'ready' ? '🎁' : `${t * live.XP_PER_TIER} XP`}</span></div>`;
+      }).join('')}</div>
+    </div>`);
+  $('#ps-back', el).onclick = () => { sfx.tap(); showHub(); };
+  const c = $('#ps-claim', el);
+  if (c) c.onclick = () => {
+    let got = [];
+    update((d) => { got = live.claimTiers(d, season); });
+    sfx.win();
+    haptic(30);
+    showRewards(`${season.icon} Tide Pass rewards`, got.map((g) => (g.tier ? `Tier ${g.tier}: ${g.label}` : g.label))).then(() => showPass());
+  };
+}
+
+function showAlbum() {
+  leaveGame();
+  const s = load();
+  const el = showScreen('album', `
+    <div class="topbar"><button class="icon-btn" id="al-back" aria-label="Back">←</button><h2 class="grow">📒 Sticker album</h2><span class="pill">${albumCount(s)}/${live.STICKERS.length}</span></div>
+    <div class="scroll">
+      <p class="small muted">Game stickers come from playing each game. Sea-life stickers come in packs from the Tide Pass and the weekly chest. Spares turn into shells. Finish a page for a bonus!</p>
+      ${live.PAGES.map((name, pi) => {
+        const list = live.STICKERS.filter((x) => x.page === pi);
+        const have = list.filter((x) => s.stickers?.[x.id]).length;
+        return `<div class="album-page"><div class="row"><b class="grow">${esc(name)}</b><span class="small muted">${have}/${list.length} · ${s.albumPaid?.[pi] ? '✅ bonus claimed' : `bonus ${live.PAGE_REWARD[pi]} 🐚`}</span></div>
+          <div class="sticker-grid">${list.map((x) => {
+            const n = s.stickers?.[x.id] || 0;
+            return `<div class="sticker ${n ? 'have' : ''} ${x.rarity || ''}" title="${esc(x.name)}"><span aria-hidden="true">${n ? x.icon : '?'}</span><small>${n ? esc(x.name) : x.game ? 'Play it' : esc(x.rarity)}</small>${n > 1 ? `<i>×${n}</i>` : ''}</div>`;
+          }).join('')}</div></div>`;
+      }).join('')}
+    </div>`);
+  $('#al-back', el).onclick = () => { sfx.tap(); showHub(); };
+}
+
+function showWardrobe() {
+  leaveGame();
+  const s = load();
+  const cur = live.OUTFIT[s.pipOutfit];
+  const el = showScreen('wardrobe', `
+    <div class="topbar"><button class="icon-btn" id="wd-back" aria-label="Back">←</button><h2 class="grow">🦦 Pip's wardrobe</h2><span class="pill">🐚 ${fmt(s.shells)}</span></div>
+    <div class="scroll">
+      <div class="card center"><span class="pip big"><span class="pip-otter">🦦</span>${cur ? `<span class="pip-outfit">${cur.icon}</span>` : ''}</span><p class="small muted">${cur ? `Pip is wearing the ${esc(cur.name)}.` : 'Pip has nothing on (and is very happy about it).'}</p></div>
+      <div class="sticker-grid wardrobe">
+        <button class="sticker have" data-o="">🦦<small>No outfit</small></button>
+        ${live.OUTFITS.map((o) => {
+          const own = !!s.outfits?.[o.id];
+          const label = own ? (s.pipOutfit === o.id ? 'Wearing' : 'Wear') : o.price ? `🐚 ${fmt(o.price)}` : `${esc(o.season)} season`;
+          return `<button class="sticker ${own ? 'have' : ''}" data-o="${o.id}" ${!own && (!o.price || s.shells < o.price) ? 'aria-disabled="true"' : ''}><span aria-hidden="true">${o.icon}</span><small>${esc(o.name)}</small><small><b>${label}</b></small></button>`;
+        }).join('')}
+      </div>
+    </div>`);
+  $('#wd-back', el).onclick = () => { sfx.tap(); showHub(); };
+  for (const b of $$('[data-o]', el)) b.onclick = () => {
+    const id = b.dataset.o;
+    const o = live.OUTFIT[id];
+    if (!id || load().outfits?.[id]) { update((d) => { d.pipOutfit = id || null; }); sfx.tap(); showWardrobe(); return; }
+    if (!o.price) { toast(`Earn it at the end of the ${o.season} Tide Pass`); return; }
+    if (load().shells < o.price) { sfx.bad(); toast(`You need ${fmt(o.price - load().shells)} more 🐚`); return; }
+    let ok = false;
+    update((d) => { ok = live.buyOutfit(d, id); });
+    if (ok) { sfx.win(); toast(`Pip loves the ${o.name}! ${o.icon}`); }
+    showWardrobe();
+  };
+}
 
 function showHub() {
   leaveGame();
@@ -1570,12 +1701,15 @@ function showHub() {
         <div class="row"><b class="grow">🎯 Daily missions</b><span class="small muted">reward: 🐚 150 + 🧊</span></div>
         ${ms.list.map((m) => `<div class="mission ${m.cur >= m.goal ? 'done' : ''}"><span>${m.cur >= m.goal ? '✅' : '◻️'} ${esc(m.text)}</span><span class="small">${m.cur}/${m.goal}</span></div>`).join('')}
         ${ms.claimed ? '<p class="small muted center">Chest claimed – new missions at reset!</p>' : `<button class="btn wide ${allDone ? 'green' : 'ghost'}" id="u-chest" ${allDone ? '' : 'aria-disabled="true"'}>${allDone ? '🎁 Open the mission chest' : 'Complete all 3 to open the chest'}</button>`}
-        <p class="small muted center" style="margin:2px 0 0">🗓️ Weekly tournament ends in <b>${weekLeft()}</b></p>
+        ${weeklyHtml()}
       </div>
+      ${passCardHtml()}
       <div class="community-row">
         <button class="card pool-card" id="u-pool">${newlyFound(load()).length ? '<span class="tag">New find!</span>' : ''}<span class="emoji" aria-hidden="true">🏝️</span><b>Your Cozy Cove</b><span class="sub">${(() => { const c = comfortOf(load().pool); return `${'⭐'.repeat(c.level) || 'Decorate your own little cove'}${c.level ? ` · +${c.level * 5} 🐚 a day` : ''}`; })()}</span></button>
         <button class="card" id="u-community"><span class="emoji" aria-hidden="true">🌟</span><b>Community games</b><span class="sub">Made by players · play, rate & compete</span></button>
         <button class="card" id="u-studio"><span class="emoji" aria-hidden="true">🛠️</span><b>Creator Studio</b><span class="sub">Build your own game – no coding</span></button>
+        <button class="card" id="u-album"><span class="emoji" aria-hidden="true">📒</span><b>Sticker album</b><span class="sub">${albumCount(load())} / ${live.STICKERS.length} collected</span></button>
+        <button class="card" id="u-wardrobe"><span class="emoji" aria-hidden="true">${live.OUTFIT[load().pipOutfit]?.icon || '🧣'}</span><b>Pip's wardrobe</b><span class="sub">Dress up your otter</span></button>
       </div>
       <p class="center small muted" style="margin-top:14px">${games.length + 1} games · free to play · playing as <b>${esc(s.name)}</b></p>
     </div>`);
@@ -1591,13 +1725,36 @@ function showHub() {
   on('#u-community', () => showCommunity());
   on('#u-studio', () => showStudio());
   on('#u-pool', () => showPool());
+  on('#u-pass', () => showPass());
+  on('#u-album', () => showAlbum());
+  on('#u-wardrobe', () => showWardrobe());
+  on('#u-weekly', () => {
+    if (!weekly().list.every((m) => m.cur >= m.goal)) return;
+    const R = live.WEEKLY_REWARD;
+    let got = [];
+    update((d) => {
+      const w = (d.week = live.weekState(d, weekKey()));
+      if (w.claimed) return;
+      w.claimed = true;
+      d.shells += R.shells;
+      for (let i = 0; i < R.packs; i++) got.push(...live.openPack(d));
+      live.addXp(d, live.seasonAt(dayKey()), dayKey(), R.xp);
+    });
+    sfx.win();
+    showRewards('🗓️ Weekly chest', [`+${R.shells} 🐚`, `+${R.xp} Tide Pass XP`, ...got.map((g) => g.label)]);
+  });
   on('#u-tide', () => playTide());
   on('#u-chest', () => {
     if (!missions().list.every((m) => m.cur >= m.goal)) { toast('Finish all 3 missions first'); return; }
     const freeze = (load().daily.freezes || 0) < MAX_FREEZES;
-    update((d) => { d.missions = { ...missionState(), claimed: true }; d.shells += 150; d.boosters.hammer++; d.boosters.moves++; if (freeze) d.daily.freezes = (d.daily.freezes || 0) + 1; });
+    update((d) => {
+      d.missions = { ...missionState(), claimed: true }; d.shells += 150; d.boosters.hammer++; d.boosters.moves++; if (freeze) d.daily.freezes = (d.daily.freezes || 0) + 1;
+      const w = (d.week = live.weekState(d, weekKey()));
+      w.chests = (w.chests || 0) + 1;
+      live.addXp(d, live.seasonAt(dayKey()), dayKey(), live.XP.chest);
+    });
     sfx.win();
-    toast(`Mission chest: +150 🐚, 🔨 +1, ➕ +1${freeze ? ', 🧊 streak freeze' : ''}`);
+    toast(`Mission chest: +150 🐚, 🔨 +1, ➕ +1${freeze ? ', 🧊 streak freeze' : ''}, +${live.XP.chest} XP`);
     announceAchievements();
     showHub();
   });
@@ -2242,7 +2399,7 @@ async function endVersus(run) {
   run.ended = true;
   run.stopWatch?.();
   const { sim, id, online } = run;
-  noteGameEnd(id, false);
+  noteGameEnd(id, false, 'versus');
   if (online) update((d) => { if (d.versus) delete d.versus[online.code]; });
   let html;
   if (id === 'chess') {

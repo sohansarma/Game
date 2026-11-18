@@ -198,6 +198,11 @@ export function mergeSaves(a, b, { firstMerge = false } = {}) {
   if (a.tide || b.tide) m.tide = { ...(older.tide || {}), ...(newer.tide || {}), days: { ...(newer.tide?.days || {}), ...(older.tide?.days || {}) } };
   // Tide Pool: never lose an item; the layout follows the newer save
   if (a.pool || b.pool) m.pool = { ...(newer.pool || older.pool), owned: { ...(older.pool?.owned || {}), ...(newer.pool?.owned || {}) }, placed: { ...((newer.pool || older.pool)?.placed || {}) } };
+  // live-ops: stickers, outfits and album bonuses are never lost; Tide Pass keeps the most XP
+  if (a.stickers || b.stickers) m.stickers = maxPerKey(older.stickers, newer.stickers);
+  if (a.outfits || b.outfits) m.outfits = { ...(older.outfits || {}), ...(newer.outfits || {}) };
+  if (a.albumPaid || b.albumPaid) m.albumPaid = { ...(older.albumPaid || {}), ...(newer.albumPaid || {}) };
+  if (a.pass && b.pass && a.pass.season === b.pass.season) m.pass = { ...newer.pass, xp: maxNum(a.pass.xp, b.pass.xp), claimed: maxNum(a.pass.claimed, b.pass.claimed) };
   // first sync on a newly signed-in device: never lose shells or boosters to a fresh default save
   if (firstMerge) {
     m.shells = maxNum(a.shells, b.shells);

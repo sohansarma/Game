@@ -605,3 +605,30 @@ body.cozy .btn, body.cozy .game-card .tag, body.cozy .seg-btn.on { filter: none;
 .diff { font-size: .7rem; vertical-align: middle; padding: 3px 8px; border-radius: 999px; font-weight: 900; letter-spacing: .5px; }
 .diff.hard { background: #ffb4a8; color: #4a0a00; }
 .diff.super { background: #c9a0ff; color: #2a0a4a; }
+
+/* live-ops: weekly tier, Tide Pass, album, wardrobe */
+.weekly { margin-top: 6px; padding-top: 10px; border-top: 1px dashed var(--line); display: flex; flex-direction: column; gap: 6px; }
+.pass-card { margin-top: 12px; width: 100%; display: flex; flex-direction: column; align-items: stretch; gap: 8px; background: linear-gradient(135deg, rgba(77,214,255,.3), var(--panel)); position: relative; }
+.pass-card .sub { display: block; }
+.pass-bar { display: block; height: 10px; border-radius: 6px; background: rgba(255,255,255,.15); overflow: hidden; }
+.pass-bar > span { display: block; height: 100%; background: linear-gradient(90deg, #4dd6ff, #7cffb2); border-radius: 6px; }
+.pass-list { display: flex; flex-direction: column; gap: 6px; margin-top: 12px; }
+.pass-tier { display: flex; gap: 10px; align-items: center; padding: 10px 12px; border-radius: 12px; background: var(--panel); border: 2px solid var(--line); }
+.pass-tier > b { min-width: 28px; text-align: center; }
+.pass-tier.got { opacity: .65; }
+.pass-tier.ready { border-color: var(--mint); }
+.pass-tier.locked span:last-child { color: var(--muted); font-size: .85rem; }
+.album-page { margin-top: 12px; padding: 12px; border-radius: var(--radius); background: var(--panel); border: 2px solid var(--line); }
+.sticker-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(78px, 1fr)); gap: 8px; margin-top: 8px; }
+.sticker { position: relative; display: flex; flex-direction: column; align-items: center; gap: 2px; padding: 8px 4px; border-radius: 12px; background: rgba(0,0,0,.18); border: 2px dashed var(--line); color: var(--muted); font-size: 1.6rem; min-height: 78px; }
+.sticker small { font-size: .68rem; line-height: 1.15; text-align: center; }
+.sticker.have { background: rgba(255,255,255,.1); border-style: solid; color: inherit; }
+.sticker.have.rare { border-color: #4dd6ff; }
+.sticker.have.epic { border-color: #ff9ad5; box-shadow: 0 0 12px rgba(255,154,213,.35); }
+.sticker i { position: absolute; top: 4px; right: 6px; font-size: .7rem; font-style: normal; color: var(--gold, #ffd23f); }
+.sticker[aria-disabled="true"] { opacity: .55; }
+.pip-outfit { position: absolute; top: -6px; left: 50%; transform: translateX(-50%); font-size: 1.25rem; pointer-events: none; }
+.pip.big { width: 110px; height: 100px; margin: 6px auto; }
+.pip.big .pip-otter { font-size: 4.2rem; }
+.pip.big .pip-outfit { font-size: 2.4rem; top: -14px; }
+.reward-list { display: flex; flex-direction: column; gap: 6px; margin: 10px 0; }
