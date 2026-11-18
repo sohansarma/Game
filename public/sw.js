@@ -1,6 +1,6 @@
 // Offline support: cache the app shell, serve it cache-first, and never
 // cache API calls (leaderboards must be live).
-const VERSION = 'tidepop-v9';
+const VERSION = 'tidepop-v10';
 const SHELL = [
   './', 'index.html', 'config.js', 'manifest.webmanifest', 'css/style.css',
   'js/main.js', 'js/engine.js', 'js/rng.js', 'js/blocks.js', 'js/levels.js', 'js/level-tuning.js', 'js/modes.js',

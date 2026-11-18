@@ -462,6 +462,7 @@ async function pauseMenu() {
     buttons: [
       { label: '▶ Resume', value: 'resume', cls: 'green' },
       ...(run?.kind === 'level' || run?.kind === 'deep' || run?.practice || run?.kind === 'blocks' || run?.kind === 'arcade' ? [{ label: '↻ Restart', value: 'restart', cls: 'blue' }] : []),
+      ...(run?.kind === 'arcade' && run.id === 'ludo' ? [{ label: '🏳️ Leave table (save score)', value: 'leave', cls: 'blue' }] : []),
       { label: '❓ How to play', value: 'help', cls: 'ghost' },
       { label: run?.kind === 'daily' && !run.practice ? '🏠 Home (progress saved)' : '🏠 Quit to home', value: 'quit', cls: 'ghost' },
     ],
@@ -473,7 +474,8 @@ async function pauseMenu() {
     else if (run.kind === 'daily') playMatch({ kind: 'daily', key: run.key, cfg: run.cfg, practice: true });
     else if (run.kind === 'blocks') { update((d) => { d.blocksRun = null; }); playBlocks({ daily: run.daily }); }
     else if (run.kind === 'arcade') playArcade(run.id, { daily: run.daily });
-  } else if (r === 'help') { if (run?.kind === 'arcade') await arcadeHow(run.id); else await howToPlay(); pauseMenu(); }
+  } else if (r === 'leave') view?.hooks.onQuit?.();
+  else if (r === 'help') { if (run?.kind === 'arcade') await arcadeHow(run.id); else await howToPlay(); pauseMenu(); }
   else if (r === 'quit') {
     if (run?.kind === 'level') showMap(run.n);
     else if (run?.kind === 'blocks' || run?.kind === 'arcade') showHub();
@@ -887,7 +889,7 @@ async function arcadeMenu(id) {
     <div class="tip">📅 The <b>daily challenge</b> is the same for every player today. Best score of the day wins – it ends in <b>${hms(msToReset())}</b>.</div>`, {
     buttons: [
       { label: g.board ? '▶ Play the ladder' : '▶ Play', value: 'play', cls: 'green' },
-      ...(id === 'ludo' ? [{ label: '🤖 Quick game vs computer', value: 'cpu', cls: 'blue' }] : []),
+      ...(id === 'ludo' ? [{ label: '👥 Pass & play · 2–4 players (offline)', value: 'party', cls: 'blue' }, { label: '🤖 Quick game vs computer', value: 'cpu', cls: 'blue' }] : []),
       ...(id === 'chess' ? [{ label: '🤖 Play vs computer', value: 'cpu', cls: 'blue' }] : []),
       ...(g.board ? [{ label: '👥 Play a friend', value: 'friend', cls: 'blue' }] : []),
       { label: `📅 Daily challenge${today === undefined ? ' (new!)' : ''}`, value: 'daily', cls: 'blue' },
@@ -901,12 +903,14 @@ async function arcadeMenu(id) {
   else if (r === 'how') { await arcadeHow(id); arcadeMenu(id); }
   else if (r === 'friend') versusMenu(id);
   else if (r === 'cpu') (id === 'chess' ? chessSetup() : ludoVsComputer());
+  else if (r === 'party') ludoParty();
 }
 
 /** Chess & Ludo are played on a real-looking wooden table instead of the arcade frame. */
 function applyTable(el, id) {
   const on = id === 'chess' || id === 'ludo';
   el.classList.toggle('table-mode', on);
+  el.classList.toggle('ludo-clean', id === 'ludo');
   el.style.backgroundImage = on ? tableBackgroundCSS() : '';
 }
 
@@ -1043,19 +1047,77 @@ async function localVersus(id) {
     if (!opts) return versusMenu(id);
     return playVersus(id, new ChessVersus({ clock: opts.clock, autoFlip: opts.flip }), null);
   }
-  const n = await modal('<h2>🎲 Pass & play</h2><p class="muted small">Everyone plays on this phone and taps their own dice. Empty seats can be bots.</p>', {
-    buttons: [
-      { label: '2 players', value: '2' },
-      { label: '2 players + 2 bots', value: '2b', cls: 'blue' },
-      { label: '3 players', value: '3', cls: 'blue' },
-      { label: '4 players', value: '4', cls: 'blue' },
-    ],
+  return ludoParty();
+}
+
+// ---------------------------------------------------------------- ludo pass & play (offline, 2-4 players)
+const PARTY_PRESETS = {
+  2: ['human', null, 'human', null],
+  3: ['human', 'human', 'human', null],
+  4: ['human', 'human', 'human', 'human'],
+};
+
+/** One phone on the table, 2-4 people (plus optional bots). Works fully offline. */
+async function ludoParty(again) {
+  const saved = load().ludoParty || {};
+  let seats = again?.seats || saved.seats || PARTY_PRESETS[2].slice();
+  const names = [0, 1, 2, 3].map((i) => (again?.names || saved.names || [])[i] || '');
+  let bots = again?.bots ?? saved.bots ?? false;
+  const playersOf = (ss) => ss.filter((x) => x === 'human').length;
+  const conf = again || await new Promise((resolve) => {
+    const rowHtml = (i) => {
+      const [n, hex, dot] = LUDO_COLOURS[i];
+      const cap = n[0].toUpperCase() + n.slice(1);
+      return `<div class="party-row" data-i="${i}" style="--c:${hex}">
+        <span class="party-dot">${dot}</span>
+        <input class="party-name" maxlength="14" placeholder="${cap}" value="${esc(names[i])}" aria-label="${cap} player name" ${seats[i] === 'human' ? '' : 'disabled'}>
+        <div class="seg party-seat">${[['human', '🙂 Player'], ['ai', '🤖 Bot'], ['', '— Empty']].map(([v, l]) => `<button class="seg-btn ${String(seats[i] || '') === v ? 'on' : ''}" data-v="${v}">${l}</button>`).join('')}</div>
+      </div>`;
+    };
+    modal(`<h2>👥 Pass & play</h2>
+      <p class="muted small">One phone, passed around the table – no internet needed. Each player taps the dice on their turn.</p>
+      <h3>How many players?</h3>
+      <div class="seg party-count">${[2, 3, 4].map((n) => `<button class="seg-btn ${playersOf(seats) === n ? 'on' : ''}" data-n="${n}">${n} players</button>`).join('')}</div>
+      <div class="party-rows">${[0, 1, 2, 3].map(rowHtml).join('')}</div>
+      <p class="small muted party-hint"></p>`, {
+      buttons: [{ label: '▶ Start game', value: 'go', cls: 'green' }, { label: 'Back', value: null, cls: 'ghost' }],
+      onOpen: (sheet) => {
+        const sync = () => {
+          for (const row of $$('.party-row', sheet)) {
+            const i = Number(row.dataset.i);
+            $$('.seg-btn', row).forEach((b) => b.classList.toggle('on', b.dataset.v === String(seats[i] || '')));
+            const inp = $('.party-name', row);
+            inp.disabled = seats[i] !== 'human';
+            row.classList.toggle('off', !seats[i]);
+          }
+          const p = playersOf(seats);
+          $$('.party-count .seg-btn', sheet).forEach((b) => b.classList.toggle('on', Number(b.dataset.n) === p));
+          const total = seats.filter(Boolean).length;
+          const hint = $('.party-hint', sheet);
+          hint.textContent = p < 1 ? 'Add at least one player.' : total < 2 ? 'A game needs at least 2 seats.' : `${p} player${p === 1 ? '' : 's'}${total > p ? ` + ${total - p} bot${total - p === 1 ? '' : 's'}` : ''} · the first player sits bottom-left`;
+          const go = $$('.modal.open .btn', document).find((b) => /Start game/.test(b.textContent));
+          if (go) go.disabled = p < 1 || total < 2;
+        };
+        for (const b of $$('.party-count .seg-btn', sheet)) b.onclick = () => {
+          seats = PARTY_PRESETS[Number(b.dataset.n)].slice();
+          if (bots) seats = seats.map((x) => x || 'ai');
+          sfx.tap(); sync();
+        };
+        for (const row of $$('.party-row', sheet)) {
+          const i = Number(row.dataset.i);
+          for (const b of $$('.seg-btn', row)) b.onclick = () => { seats[i] = b.dataset.v || null; bots = seats.includes('ai'); sfx.tap(); sync(); };
+          $('.party-name', row).oninput = (e) => { names[i] = e.target.value.trim(); };
+        }
+        sync();
+      },
+    }).then((r) => resolve(r === 'go' ? { seats: seats.slice(), names: names.slice(), bots } : null));
   });
-  if (!n) return versusMenu(id);
-  const me = await pickLudoColour('Player 1, pick your colour');
-  if (me === null) return versusMenu(id);
-  const seats = n === '2b' ? ludoSeats(me, 3, 'ai').map((x, i) => (i === (me + 2) % 4 ? 'human' : x)) : ludoSeats(me, Number(n) - 1, 'human');
-  return playVersus(id, new LudoVersus({ seed: randSeed(), seats, first: me }), null);
+  if (!conf || playersOf(conf.seats) < 1 || conf.seats.filter(Boolean).length < 2) return arcadeMenu('ludo');
+  update((d) => { d.ludoParty = conf; });
+  const nm = {};
+  conf.seats.forEach((x, i) => { if (x === 'human' && conf.names[i]) nm[i] = conf.names[i]; });
+  const first = conf.seats.findIndex((x) => x === 'human');
+  return playVersus('ludo', new LudoVersus({ seed: randSeed(), seats: conf.seats, names: nm, first }), null, { party: conf });
 }
 
 async function createOnline(id) {
@@ -1126,7 +1188,7 @@ async function playVersus(id, sim, online, extra = {}) {
   const g = ARCADE_BY_ID[id];
   const mod = await VIEWS[id]();
   setBackground(g.color);
-  const run = { kind: 'versus', id, sim, online, casual: extra.casual };
+  const run = { kind: 'versus', id, sim, online, casual: extra.casual, party: extra.party };
   currentRun = run;
   const el = showScreen('arcade', `
     <div class="hud">
@@ -1259,7 +1321,7 @@ function shareCode(code, id) {
 }
 
 async function versusPause(run) {
-  const r = await modal('<h2>Menu</h2>', { buttons: [{ label: '▶ Resume', value: null, cls: 'green' }, { label: run.online ? '🏳️ Resign' : '🏁 End game', value: 'end', cls: 'ghost' }, { label: '🕹️ Back to arcade (match stays open)', value: 'hub', cls: 'ghost' }] });
+  const r = await modal('<h2>Menu</h2>', { buttons: [{ label: '▶ Resume', value: null, cls: 'green' }, { label: run.online ? '🏳️ Resign' : '🏁 End game', value: 'end', cls: 'ghost' }, { label: run.online ? '🕹️ Back to arcade (match stays open)' : '🕹️ Back to arcade', value: 'hub', cls: 'ghost' }] });
   if (r === 'end') view?.hooks.onQuit?.();
   else if (r === 'hub') { run.stopWatch?.(); showHub(); }
 }
@@ -1311,8 +1373,13 @@ async function endVersus(run) {
     html = `<h2>🎲 Final standings</h2><div class="list">${places.map((p) => `<div class="item"><span class="rank">${['🥇', '🥈', '🥉', '4️⃣'][p.place - 1]}</span><span class="name">${esc(p.name)}</span></div>`).join('')}</div>`;
     sfx.win();
   }
-  const r = await modal(html, { dismissable: false, buttons: [{ label: '↻ Play again', value: 'again', cls: 'green' }, { label: '🕹️ Arcade', value: 'hub', cls: 'ghost' }] });
-  if (r === 'again') versusMenu(id);
+  const r = await modal(html, { dismissable: false, buttons: [
+    ...(run.party ? [{ label: '↻ Rematch (same players)', value: 'rematch', cls: 'green' }, { label: '⚙️ Change players', value: 'setup', cls: 'blue' }] : [{ label: '↻ Play again', value: 'again', cls: 'green' }]),
+    { label: '🕹️ Arcade', value: 'hub', cls: 'ghost' },
+  ] });
+  if (r === 'rematch') ludoParty(run.party);
+  else if (r === 'setup') ludoParty();
+  else if (r === 'again') (sim.mySide !== undefined && !online ? ludoVsComputer() : versusMenu(id));
   else showHub();
 }
 

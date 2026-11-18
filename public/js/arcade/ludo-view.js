@@ -93,14 +93,16 @@ export default class LudoView {
     this.W = rect.width;
     this.H = rect.height;
     this.panelH = 54;
-    this.trayS = 62;
-    const avail = Math.min(rect.width - 10, rect.height - this.panelH * 2 - 20);
+    this.trayS = 54;
+    const avail = Math.min(rect.width - 6, rect.height - this.panelH * 2 - 20 - 60); // 60: message strip under the table
     this.frame = Math.max(8, Math.round(avail * 0.028));
-    const size = avail - this.frame * 2;
-    this.cell = size / 15;
+    // whole device pixels per square, so every grid line is crisp and even
+    const snap = (v) => Math.round(v * dpr) / dpr;
+    this.cell = Math.floor(((avail - this.frame * 2) / 15) * dpr) / dpr;
+    const size = this.cell * 15;
     this.size = size;
-    this.ox = (rect.width - size) / 2;
-    this.oy = this.panelH + 10 + this.frame + (rect.height - this.panelH * 2 - 20 - avail) / 2;
+    this.ox = snap((rect.width - size) / 2);
+    this.oy = snap(this.panelH + 10 + this.frame + Math.max(0, (rect.height - this.panelH * 2 - 20 - 60 - (size + this.frame * 2)) / 2));
   }
 
   /** Display corner (0 TL, 1 TR, 2 BR, 3 BL) of a seat after rotation. */
@@ -454,7 +456,13 @@ export default class LudoView {
       ctx.font = '600 12px system-ui, sans-serif';
       ctx.fillStyle = active ? '#ffd45e' : 'rgba(255,255,255,0.7)';
       const home = g.tokens[seat].filter((x) => x === HOME).length;
-      ctx.fillText(place >= 0 ? `🏆 ${['1st', '2nd', '3rd', '4th'][place]} place` : active ? (this.isLocal(seat) && this.sim.canRoll() && !this.busy() ? 'Your roll!' : 'playing…') : `home ${home}/4`, tx, p.y + p.h * 0.7);
+      let sub = `home ${home}/4`;
+      if (place >= 0) sub = `🏆 ${['1st', '2nd', '3rd', '4th'][place]} place`;
+      else if (active) {
+        const mine = this.isLocal(seat) && !this.busy();
+        sub = mine && this.sim.canRoll() ? '🎲 Tap the dice' : mine && this.sim.canMove() ? `Rolled ${g.roll} · move a token` : this.die.rollT0 && this.die.seat === seat && !this.anim ? 'rolling…' : 'playing…';
+      }
+      ctx.fillText(sub, tx, p.y + p.h * 0.7, p.w - 62);
       ctx.restore();
     });
     this.drawTray(now);
@@ -494,14 +502,17 @@ export default class LudoView {
       const t = (performance.now() - this.noteT) / 1600;
       ctx.globalAlpha = t > 0.75 ? (1 - t) / 0.25 : 1;
       ctx.fillStyle = 'rgba(20,12,6,0.85)';
-      const w = Math.min(this.W - 20, 300);
-      roundedRect(ctx, this.W / 2 - w / 2, this.oy + this.size / 2 - 20, w, 40, 20);
+      const w = Math.min(this.W - 20, 320);
+      // under the table row when there's room, so the board stays clear
+      const below = this.oy + this.size + this.frame + 8 + this.panelH + 12;
+      const cy = below + 40 <= this.H ? below + 20 : this.oy + this.size / 2;
+      roundedRect(ctx, this.W / 2 - w / 2, cy - 20, w, 40, 20);
       ctx.fill();
       ctx.fillStyle = '#fff';
       ctx.font = '800 14px ui-rounded, system-ui, sans-serif';
       ctx.textAlign = 'center';
       ctx.textBaseline = 'middle';
-      ctx.fillText(this.note, this.W / 2, this.oy + this.size / 2, w - 16);
+      ctx.fillText(this.note, this.W / 2, cy, w - 16);
       ctx.globalAlpha = 1;
     }
   }
@@ -554,9 +565,32 @@ export default class LudoView {
     HOMECOL.forEach((cells, i) => {
       for (const [r, c] of cells) { ctx.fillStyle = FILL[COLORS[i]]; ctx.fillRect(c * C, r * C, C, C); }
     });
-    ctx.strokeStyle = 'rgba(70,50,30,0.28)';
-    ctx.lineWidth = 1;
-    for (const [r, c] of [...TRACK, ...HOMECOL.flat()]) ctx.strokeRect(c * C + 0.5, r * C + 0.5, C - 1, C - 1);
+    // printed grid: one line per edge, shared by neighbouring squares
+    const lw = Math.max(1, Math.round(this.dpr)) / this.dpr;
+    ctx.beginPath();
+    for (let k = 0; k <= 3; k++) {
+      // vertical arms (cols 6..9) and horizontal arms (rows 6..9)
+      ctx.moveTo((6 + k) * C, 0); ctx.lineTo((6 + k) * C, 6 * C);
+      ctx.moveTo((6 + k) * C, 9 * C); ctx.lineTo((6 + k) * C, 15 * C);
+      ctx.moveTo(0, (6 + k) * C); ctx.lineTo(6 * C, (6 + k) * C);
+      ctx.moveTo(9 * C, (6 + k) * C); ctx.lineTo(15 * C, (6 + k) * C);
+    }
+    for (let k = 0; k <= 6; k++) {
+      ctx.moveTo(6 * C, k * C); ctx.lineTo(9 * C, k * C);
+      ctx.moveTo(6 * C, (9 + k) * C); ctx.lineTo(9 * C, (9 + k) * C);
+      ctx.moveTo(k * C, 6 * C); ctx.lineTo(k * C, 9 * C);
+      ctx.moveTo((9 + k) * C, 6 * C); ctx.lineTo((9 + k) * C, 9 * C);
+    }
+    ctx.strokeStyle = 'rgba(60,42,26,0.42)';
+    ctx.lineWidth = lw;
+    ctx.stroke();
+    // firmer outline around each arm and the centre
+    ctx.strokeStyle = 'rgba(50,34,20,0.6)';
+    ctx.lineWidth = lw * 1.6;
+    ctx.strokeRect(6 * C, 0, 3 * C, 6 * C);
+    ctx.strokeRect(6 * C, 9 * C, 3 * C, 6 * C);
+    ctx.strokeRect(0, 6 * C, 6 * C, 3 * C);
+    ctx.strokeRect(9 * C, 6 * C, 6 * C, 3 * C);
     // entry arrows (just before each home column)
     [[7, 0, 0], [0, 7, 1], [7, 14, 2], [14, 7, 3]].forEach(([r, c, i]) => {
       ctx.save();
