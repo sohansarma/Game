@@ -77,7 +77,7 @@ export default class TideView {
     const left = s.limit - s.moves.length;
     this.controls.innerHTML = `<div class="col" style="gap:8px;width:100%;align-items:center">
       <div class="tide-picks">${PALETTE.map((col, c) => `<button class="tide-pick ${c === s.grid[0] ? 'cur' : ''}" data-c="${c}" style="--c:${col}" aria-label="Colour ${c + 1}" ${s.over || c === s.grid[0] ? 'disabled' : ''}><span>${SYMBOLS[c]}</span></button>`).join('')}</div>
-      <div class="small center ${left <= 2 && !s.over ? 'tide-warn' : 'muted'}">${s.over ? (s.solved ? `🌊 Tide in, ${s.moves.length} moves!` : 'Out of moves') : `${left} move${left === 1 ? '' : 's'} left · par ${s.par} · ${s.covered}% flooded`}</div>
+      <div class="small center ${left <= 2 && !s.over ? 'tide-warn' : 'muted'}">${s.over ? (s.solved ? `🌊 Tide in, ${s.moves.length} moves!` : 'Out of moves') : `${left} move${left === 1 ? '' : 's'} left · par ${s.par} · 💎 ${s.perfect} · ${s.covered}% flooded`}</div>
     </div>`;
     for (const b of this.controls.querySelectorAll('[data-c]')) b.onclick = () => this.pick(Number(b.dataset.c));
   }
@@ -155,11 +155,11 @@ function roundRect(ctx, x, y, w, h, r) {
 export function hud(sim) {
   return [
     { label: 'Moves', value: `${sim.moves.length}/${sim.limit}`, big: true },
-    { label: 'Par', value: `⛳ ${sim.par}` },
+    { label: 'Par', value: `⛳ ${sim.par} · 💎 ${sim.perfect}` },
     { label: 'Flooded', value: `${sim.covered}%` },
   ];
 }
 
 export const HOW = `<div class="tip">🌊 The tide starts in the <b>top-left corner</b>. Pick a colour: the tide turns that colour and swallows every touching tile of it.</div>
-<div class="tip">🎯 Flood the <b>whole board</b> within the move limit. <b>Par</b> is what our solver needs – can you match or beat it?</div>
+<div class="tip">🎯 Flood the <b>whole board</b> within the move limit. <b>💎 Perfect</b> is the best line our solver found; <b>par</b> is one more.</div>
 <div class="tip">📅 Everyone gets the <b>same puzzle</b> each day, and only your <b>first try</b> counts. Share your result and keep your tide streak going!</div>`;

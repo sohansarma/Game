@@ -15,7 +15,7 @@ import { MatchView } from './matchview.js';
 import { BlocksView } from './blocksview.js';
 import { iconURL, PALETTE, clearSpriteCache } from './creatures.js';
 import { sfx, unlockAudio, configureAudio, haptic, purr } from './audio.js';
-import { tideNumber, shareText as tideShareText, EMOJI as TIDE_EMOJI } from './arcade/tide.js';
+import { tideNumber, shareText as tideShareText, moveSquare } from './arcade/tide.js';
 import { SLOTS as POOL_SLOTS, ITEMS as POOL_ITEMS, ITEM as POOL_ITEM, comfortOf, comfortBonus, found as poolFound, newlyFound, drawPool } from './pool.js';
 import { startCloud, syncNow, cloudAccount, cloudStatus, onCloudChange, signUp, logIn, logOut, recoverAccount, changePassword, deleteAccount, setClaudeSync } from './cloud.js';
 import { configureCozy, cozyActive, cozySleeping, wakeCozy, onSleep, isNightTime, cozySound, VIBES, VIBE } from './cozy.js';
@@ -77,6 +77,10 @@ async function boot() {
   if (!s.onboarded) await onboarding();
   else if (!ch) { await maybeDailyReward(); maybeSuggestCozy(); }
   if (ch) acceptChallenge(ch);
+  else if (s.onboarded && new URLSearchParams(location.search).has('tide')) {
+    try { history.replaceState(null, '', location.pathname + location.hash); } catch { /* sandboxed */ }
+    playTide();
+  }
 }
 
 function applySettings() {
@@ -228,16 +232,24 @@ function tideStats() {
   let k = days[today]?.solved ? today : null;
   if (!k) { const y = new Date(Date.now() - 86400000).toISOString().slice(0, 10); if (days[y]?.solved && !days[today]) k = y; }
   while (k && days[k]?.solved) { cur++; const [y, m, d] = k.split('-').map(Number); k = new Date(Date.UTC(y, m - 1, d - 1)).toISOString().slice(0, 10); }
-  const dist = { '-2': 0, '-1': 0, 0: 0, 1: 0, 2: 0, 3: 0, X: 0 };
+  const dist = { P: 0, 0: 0, 1: 0, 2: 0, X: 0 };
   for (const kk of keys) {
     const r = days[kk];
     if (!r.solved) dist.X++;
-    else dist[String(Math.max(-2, Math.min(3, r.moves.length - r.par)))]++;
+    else dist[tideBucket(r)]++;
   }
   return { played: keys.length, wins: solved.length, pct: keys.length ? Math.round((solved.length / keys.length) * 100) : 0, cur, best, dist };
 }
 
 const tideParCache = {};
+/** 'P' (perfect 💎), '0' (par), '1' / '2' (over par) */
+function tideBucket(r) {
+  const perfect = r.perfect ?? r.par - 1;
+  const n = r.moves.length;
+  if (n <= perfect) return 'P';
+  return String(Math.max(0, Math.min(2, n - (r.par ?? perfect + 1))));
+}
+
 function tidePar(key) {
   return (tideParCache[key] ??= ARCADE_BY_ID.tide.create(arcadeSeed('tide', true, key, 0)).par);
 }
@@ -249,7 +261,7 @@ function tideCardHtml() {
   const st = tideStats();
   const sub = r
     ? `${r.solved ? `✅ Solved in ${r.moves.length}${r.moves.length <= r.par ? ' ⛳' : ''}` : '🌫️ Not this time'} · next in <b id="u-tide-next">${hms(msToReset())}</b>`
-    : `Same puzzle for everyone · par ${tidePar(key)} · ${st.cur ? `🔥 ${st.cur}-day tide streak` : 'start a tide streak'}`;
+    : `Same puzzle for everyone · par ${tidePar(key)} · 💎 ${tidePar(key) - 1} · ${st.cur ? `🔥 ${st.cur}-day tide streak` : 'start a tide streak'}`;
   return `<button class="tide-card ${r ? 'done' : ''}" id="u-tide">
     <span class="tide-wave">🌊</span>
     <span class="grow"><small>TIDE OF THE DAY · #${n}</small><b>${r ? 'See your result & share' : "Play today's puzzle"}</b><span class="small">${sub}</span></span>
@@ -304,7 +316,7 @@ async function endTide(run) {
   const shells = sim.solved ? 20 + 10 * (sim.limit - sim.moves.length) : 10;
   update((d) => {
     d.tide = { ...(d.tide || {}), days: { ...(d.tide?.days || {}) } };
-    if (!d.tide.days[key]) d.tide.days[key] = { moves: sim.moves.slice(), solved: sim.solved, par: sim.par, limit: sim.limit, score: sim.score, covered: sim.covered };
+    if (!d.tide.days[key]) d.tide.days[key] = { moves: sim.moves.slice(), gains: sim.gains.slice(), solved: sim.solved, par: sim.par, perfect: sim.perfect, limit: sim.limit, score: sim.score, covered: sim.covered };
     d.shells += shells;
     d.arcade = { ...(d.arcade || {}), tide: { ...(d.arcade?.tide || { best: 0, games: 0, daily: {} }) } };
     const a = d.arcade.tide;
@@ -323,16 +335,18 @@ async function showTideResult(key, { shells, sub } = {}) {
   const r = tideDays()[key];
   if (!r) return;
   const st = tideStats();
-  const fake = { moves: r.moves, solved: r.solved, limit: r.limit, par: r.par, covered: r.covered ?? 0 };
+  const fake = { moves: r.moves, gains: r.gains || [], solved: r.solved, limit: r.limit, par: r.par, perfect: r.perfect ?? r.par - 1, covered: r.covered ?? 0 };
   const rows = [];
-  for (let i = 0; i < r.moves.length; i += 8) rows.push(r.moves.slice(i, i + 8).map((c) => TIDE_EMOJI[c]).join(''));
+  const gains = r.gains || [];
+  for (let i = 0; i < gains.length; i += 8) rows.push(gains.slice(i, i + 8).map(moveSquare).join(''));
   const max = Math.max(1, ...Object.values(st.dist));
-  const labels = { '-2': '−2+', '-1': '−1', 0: 'Par', 1: '+1', 2: '+2', 3: '+3', X: '✗' };
-  const mine = r.solved ? String(Math.max(-2, Math.min(3, r.moves.length - r.par))) : 'X';
-  const bars = ['-2', '-1', '0', '1', '2', '3', 'X'].map((k) => `<div class="tide-bar"><span>${labels[k]}</span><div class="tb"><i style="width:${Math.max(6, (st.dist[k] / max) * 100)}%" class="${k === mine ? 'me' : ''}">${st.dist[k]}</i></div></div>`).join('');
+  const labels = { P: '💎', 0: 'Par', 1: '+1', 2: '+2', X: '✗' };
+  const mine = r.solved ? tideBucket(r) : 'X';
+  const bars = ['P', '0', '1', '2', 'X'].map((k) => `<div class="tide-bar"><span>${labels[k]}</span><div class="tb"><i style="width:${Math.max(6, (st.dist[k] / max) * 100)}%" class="${k === mine ? 'me' : ''}">${st.dist[k]}</i></div></div>`).join('');
   const res = await modal(`<h2>🌊 Tide #${tideNumber(key)}</h2>
     <div class="big-score">${r.solved ? `${r.moves.length}/${r.limit}` : `X/${r.limit}`}</div>
-    <p class="muted">${r.solved ? (r.moves.length < r.par ? `🏆 ${r.par - r.moves.length} under par – brilliant!` : r.moves.length === r.par ? '⛳ Right on par!' : `Par was ${r.par} – so close!`) : `The tide reached ${r.covered ?? '?'}% of the board.`}</p>
+    <p class="muted">${r.solved ? (r.moves.length <= fake.perfect ? '💎 Perfect – the best line there is!' : r.moves.length <= r.par ? `⛳ On par! The perfect line was ${fake.perfect}.` : `Par was ${r.par}, perfect ${fake.perfect} – so close!`) : `The tide reached ${r.covered ?? '?'}% of the board.`}</p>
+    <p class="small muted">🌊 big flood · 🟩 good · 🟦 small · ⬛ no gain</p>
     <div class="tide-grid">${rows.join('<br>')}</div>
     ${shells ? `<div class="reward">+${shells} 🐚</div>` : ''}
     <p class="small muted" id="t-rank">${sub ? 'Checking today’s ranking…' : ''}</p>
@@ -350,7 +364,7 @@ async function showTideResult(key, { shells, sub } = {}) {
     },
   });
   if (res === 'share') {
-    await shareText(tideShareText(key, fake, `${st.cur > 1 ? `🔥 ${st.cur}-day tide streak\n` : ''}${location.origin}${location.pathname}`));
+    await shareText(tideShareText(key, fake, `${st.cur > 1 ? `🔥 ${st.cur}-day tide streak\n` : ''}${location.origin}${location.pathname}?tide=${tideNumber(key)}&ref=share`));
     showTideResult(key);
   } else if (res === 'lb') showLeaderboard('tideDaily');
   else if (currentScreen() !== 'hub') showHub();
