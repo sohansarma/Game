@@ -2290,6 +2290,16 @@ async function playVersus(id, sim, online, extra = {}) {
   };
   let pushed = online ? myMovesOf(sim, id, online.role, online.match).length : 0;
   let applied = online ? (online.role === 'host' ? online.match.guestMoves : online.match.hostMoves).length : 0;
+  if (online && id === 'ludo' && sim.dice) {
+    // server dice: post the roll, the server answers with the die
+    sim.onNeedDie = async (seat) => {
+      const mine = [...myMovesOf(sim, id, online.role, online.match), 'r'];
+      const res = await api.matches.push(online.code, mine);
+      if (!Array.isArray(res?.dice)) throw new Error('no die');
+      sim.dice[seat] = res.dice;
+      pushed = mine.length;
+    };
+  }
   const pushMine = () => {
     if (!online) return;
     const mine = myMovesOf(sim, id, online.role, online.match);
@@ -2360,6 +2370,7 @@ async function playVersus(id, sim, online, extra = {}) {
           const hs = Number.isInteger(m.opts.hostColour) ? m.opts.hostColour : 0;
           const seat = online.role === 'host' ? (hs + 2) % 4 : hs;
           if (sim.game.turn !== seat) break;
+          if (sim.dice) sim.dice[seat] = [...((online.role === 'host' ? m.guestDice : m.hostDice) || [])];
           res = sim.apply(seat, mv);
           if (res.ok) view.remoteEvents(res.events);
         }

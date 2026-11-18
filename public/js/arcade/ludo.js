@@ -64,10 +64,11 @@ export class LudoGame {
   }
 
   /** The current player throws the dice. */
-  doRoll() {
+  /** forced: a die value from outside (online server dice); otherwise the seeded rng. */
+  doRoll(forced) {
     if (this.over || this.phase !== 'roll') return null;
     const pl = this.turn;
-    this.roll = 1 + this.rng.int(6);
+    this.roll = Number.isInteger(forced) && forced >= 1 && forced <= 6 ? forced : 1 + this.rng.int(6);
     this.events.push({ kind: 'roll', player: pl, value: this.roll });
     this.sixes = this.roll === 6 ? this.sixes + 1 : 0; // only 6s in a row count
     if (this.sixes >= 3) {

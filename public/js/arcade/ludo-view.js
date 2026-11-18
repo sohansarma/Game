@@ -282,6 +282,12 @@ export default class LudoView {
 
   doRoll() {
     const res = this.sim.roll();
+    if (res.waiting) {
+      // online: the server is rolling – show the dice tumbling meanwhile
+      this.sim.onDieReady = () => this.doRoll();
+      this.sim.onDieFailed = () => { sfx.bad?.(); };
+      return;
+    }
     if (!res.ok) return;
     haptic(15);
     this.enqueue(res);

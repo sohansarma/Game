@@ -197,3 +197,40 @@ test('online matches: create, join, append-only moves, resign', async () => {
   assert.equal((await get('/api/match?code=K7PQX')).body.resigned, 'guest');
   assert.equal((await get('/api/match?code=NOPE2')).status, 404);
 });
+
+test('online ludo: the server rolls the dice; both players rebuild the same game', async () => {
+  const { rebuild } = await import('../public/js/versus.js');
+  const host = await register('Brave Otter 81'), guest = await register('Sunny Ray 82');
+  const call = (who, body) => post('/api/match', { ...body, playerId: who.playerId, token: who.token });
+  assert.equal((await call(host, { action: 'create', code: 'LUD2X', game: 'ludo', seed: 5, opts: { hostColour: 0 } })).status, 200);
+  assert.equal((await call(guest, { action: 'join', code: 'LUD2X' })).status, 200);
+  const view = async (who) => (await get(`/api/match?code=LUD2X&playerId=${who.playerId}`)).body;
+  // play 60 turns: whoever's turn it is rolls through the server, then moves
+  for (let i = 0; i < 400; i++) {
+    const m = await view(host);
+    const sims = { host: rebuild(m, 'host'), guest: rebuild(m, 'guest') };
+    assert.equal(sims.host.game.turn, sims.guest.game.turn, 'clients agree');
+    assert.deepEqual(sims.host.game.tokens, sims.guest.game.tokens);
+    const sim = sims.host;
+    if (sim.over || sim.game.over) break;
+    const who = sim.game.turn === 0 ? 'host' : 'guest';
+    const s = sims[who];
+    const mine = () => s.moves.filter(([x]) => x === s.game.turn).map(([, t]) => t);
+    if (s.game.phase === 'roll') {
+      assert.equal(s.roll().waiting, true, 'no die until the server rolls');
+      const res = await call(who === 'host' ? host : guest, { action: 'move', code: 'LUD2X', moves: [...mine(), 'r'] });
+      assert.equal(res.status, 200);
+      assert.ok(res.body.dice.every((d) => d >= 1 && d <= 6));
+    } else {
+      const t = s.game.legal()[0];
+      const res = await call(who === 'host' ? host : guest, { action: 'move', code: 'LUD2X', moves: [...mine(), t] });
+      assert.equal(res.status, 200);
+    }
+  }
+  const m = await view(guest);
+  assert.ok(m.hostDice.length > 5 && m.guestDice.length > 5, 'both sides rolled');
+  // re-posting the same list doesn't roll again
+  const before = m.hostDice.length;
+  await call(host, { action: 'move', code: 'LUD2X', moves: m.hostMoves });
+  assert.equal((await view(host)).hostDice.length, before);
+});

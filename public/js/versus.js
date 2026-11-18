@@ -243,8 +243,10 @@ export class ChessCasual extends ChessBase {
 // ---------------------------------------------------------------- ludo
 export class LudoVersus {
   /** seats: 4 x 'human' | 'ai' | null; mine: seats controlled here (null = every human seat is local) */
-  constructor({ seed, seats, mine = null, names = {}, first = null, rules = null, skill = 0.6 }) {
+  constructor({ seed, seats, mine = null, names = {}, first = null, rules = null, skill = 0.6, dice = null }) {
     this.rng = new Rng(seed);
+    // online (server) games: each seat's rolls come from the server, in order
+    this.dice = dice;
     this.rules = rules;
     this.skill = skill;
     this.seats = seats;
@@ -276,7 +278,20 @@ export class LudoVersus {
   }
   roll() {
     if (!this.canRoll()) return { ok: false };
-    return this.apply(this.game.turn, 'r');
+    const seat = this.game.turn;
+    if (this.dice && this.dieFor(seat) === undefined) {
+      // ask the server to roll; the view tries again when it arrives
+      if (!this.waitingDie && this.onNeedDie) {
+        this.waitingDie = true;
+        this.onNeedDie(seat).then(() => { this.waitingDie = false; this.onDieReady?.(); }, () => { this.waitingDie = false; this.onDieFailed?.(); });
+      }
+      return { ok: false, waiting: true };
+    }
+    return this.apply(seat, 'r');
+  }
+  dieFor(seat) {
+    const k = this.moves.filter(([s, a]) => s === seat && a === 'r').length;
+    return this.dice?.[seat]?.[k];
   }
   move(t) {
     if (!this.canMove()) return { ok: false };
@@ -286,7 +301,12 @@ export class LudoVersus {
     const g = this.game;
     if (g.over || g.turn !== seat) return { ok: false };
     g.events = [];
-    if (a === 'r') { if (g.phase !== 'roll' || g.doRoll() === null) return { ok: false }; }
+    if (a === 'r') {
+      if (g.phase !== 'roll') return { ok: false };
+      const forced = this.dice && this.seats[seat] === 'human' ? this.dieFor(seat) : undefined;
+      if (this.dice && this.seats[seat] === 'human' && forced === undefined) return { ok: false, waiting: true };
+      if (g.doRoll(forced) === null) return { ok: false };
+    }
     else if (g.phase !== 'move' || !g.move(a)) return { ok: false };
     this.moves.push([seat, a]);
     this.runBots();
@@ -335,7 +355,8 @@ export function rebuild(match, me) {
   const gs = (hs + 2) % 4;
   const seats = [0, 1, 2, 3].map((i) => (i === hs || i === gs ? 'human' : match.opts.bots ? 'ai' : null));
   const names = { [hs]: match.hostName || 'Host', [gs]: match.guestName || 'Guest' };
-  const v = new LudoVersus({ seed: match.seed, seats, mine: [me === 'host' ? hs : gs], names, first: hs });
+  const dice = Array.isArray(match.hostDice) ? { [hs]: [...match.hostDice], [gs]: [...(match.guestDice || [])] } : null;
+  const v = new LudoVersus({ seed: match.seed, seats, mine: [me === 'host' ? hs : gs], names, first: hs, dice });
   const lists = { [hs]: [...(match.hostMoves || [])], [gs]: [...(match.guestMoves || [])] };
   for (let guard = 0; guard < 6000 && !v.over; guard++) {
     const seat = v.game.turn;

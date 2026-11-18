@@ -2,7 +2,7 @@
 // player's action log through the shared game engine, so a modified client
 // cannot simply post a high number.
 
-import { createHash, randomBytes, randomUUID } from 'node:crypto';
+import { createHash, randomBytes, randomUUID, randomInt } from 'node:crypto';
 import { replay } from '../public/js/engine.js';
 import { replayBlocks } from '../public/js/blocks.js';
 import { getLevel, MAX_LEVEL } from '../public/js/levels.js';
@@ -216,6 +216,7 @@ export function createApi(store, { now = () => new Date(), origin = process.env.
       code: m.code, game: m.game, seed: m.seed, opts: m.opts,
       hostName: db.players[m.host.pid]?.name || 'Host', guestName: m.guest ? db.players[m.guest.pid]?.name || 'Guest' : null,
       hostMoves: m.host.moves, guestMoves: m.guest?.moves || [], joined: !!m.guest,
+      ...(m.game === 'ludo' ? { hostDice: m.host.dice || [], guestDice: m.guest?.dice || [] } : {}),
       resigned: m.resigned || null, me: playerId === m.host.pid ? 'host' : m.guest && playerId === m.guest.pid ? 'guest' : null,
     };
   }
@@ -257,10 +258,17 @@ export function createApi(store, { now = () => new Date(), origin = process.env.
         if (!Array.isArray(mv) || mv.length > MATCH_GAMES[m.game] || !mv.every(okMove)) throw fail(400, 'bad moves');
         // moves are append-only: the new list must extend the stored one
         if (mv.length < side.moves.length || side.moves.some((x, i) => x !== mv[i])) throw fail(409, 'moves out of sync');
+        // Ludo dice are rolled here, when the roll is posted – nobody can work
+        // out future rolls from the shared seed, and a posted roll can't be taken back.
+        if (m.game === 'ludo') {
+          side.dice ||= [];
+          const rolls = mv.filter((x) => x === 'r').length;
+          while (side.dice.length < rolls) side.dice.push(randomInt(1, 7));
+        }
         side.moves = mv;
         m.at = now;
         store.dirty();
-        return { ok: true };
+        return { ok: true, ...(m.game === 'ludo' ? { dice: side.dice } : {}) };
       }
       case 'resign': {
         if (!m) throw fail(404, 'No match with that code');
