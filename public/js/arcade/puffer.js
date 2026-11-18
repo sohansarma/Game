@@ -3,6 +3,8 @@
 // only input is "flap" at a given tick, so a run is just a list of ticks.
 //
 // World is 100 x 160 units. Score = 10 per coral passed + 5 per pearl.
+// After 20 corals some gaps start to sway, after 40 some are narrow
+// "squeeze" gaps worth double.
 
 import { Rng } from '../rng.js';
 
@@ -19,7 +21,9 @@ const MAX_FALL = 3.8;
 
 class PufferSim {
   constructor(seed) {
+    this.seed = seed >>> 0;
     this.rng = new Rng(seed);
+    this.added = 0;
     this.tick = 0;
     this.y = 80;
     this.vy = 0;
@@ -50,7 +54,13 @@ class PufferSim {
     const margin = 18 + gap / 2;
     const gy = margin + this.rng.next() * (FLOOR - 2 * margin);
     const pearl = this.rng.next() < 0.35;
-    this.pipes.push({ x, gy, gap, scored: false, pearl, pearlTaken: false });
+    const roll = this.rng.next();
+    const n = this.added++;
+    // variety once you've found your rhythm: swaying gaps, then squeezes
+    let kind = 'plain', amp = 0, phase = 0, g2 = gap;
+    if (n >= 20 && roll < 0.35) { kind = 'sway'; amp = Math.min(14, margin - 12); phase = this.rng.next() * 6.28; }
+    else if (n >= 40 && roll < 0.5) { kind = 'squeeze'; g2 = Math.max(34, gap - 8); }
+    this.pipes.push({ x, gy, base: gy, amp, phase, kind, gap: g2, scored: false, pearl, pearlTaken: false });
   }
 
   flap() {
@@ -76,13 +86,21 @@ class PufferSim {
     this.vy = Math.min(MAX_FALL, this.vy + GRAVITY);
     this.y += this.vy;
     this.speed = Math.min(1.9, 1.0 + this.tick * 0.00025);
-    for (const p of this.pipes) p.x -= this.speed;
+    for (const p of this.pipes) {
+      p.x -= this.speed;
+      if (p.amp) p.gy = p.base + p.amp * Math.sin(this.tick / 40 + p.phase);
+    }
     if (this.pipes[0].x < -PIPE_W) {
       this.pipes.shift();
       this.addPipe(this.pipes[this.pipes.length - 1].x + SPACING);
     }
     for (const p of this.pipes) {
-      if (!p.scored && p.x + PIPE_W < PX - R) { p.scored = true; this.passed++; this.events.push('pass'); }
+      if (!p.scored && p.x + PIPE_W < PX - R) {
+        p.scored = true;
+        this.passed++;
+        if (p.kind === 'squeeze') this.pearls += 2; // a squeeze is worth double
+        this.events.push(p.kind === 'squeeze' ? 'squeeze' : 'pass');
+      }
       if (p.pearl && !p.pearlTaken) {
         const dx = p.x + PIPE_W / 2 - PX, dy = p.gy - this.y;
         if (dx * dx + dy * dy < (R + 3) * (R + 3)) { p.pearlTaken = true; this.pearls++; this.events.push('pearl'); }

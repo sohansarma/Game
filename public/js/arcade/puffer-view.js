@@ -74,9 +74,12 @@ export default class PufferView {
     while (this.acc >= STEP) {
       this.acc -= STEP;
       const before = this.sim.score;
+      if (this.ghost === undefined) this.ghost = this.loadGhost();
+      if (!this.sim.over) this.stepGhost();
       this.sim.step();
       for (const e of this.sim.events) {
         if (e === 'pass') sfx.coin();
+        if (e === 'squeeze') { sfx.special(); haptic(20); }
         if (e === 'pearl') { sfx.star(2); haptic(15); }
         if (e === 'die') { sfx.boom(); haptic(80); }
       }
@@ -85,10 +88,43 @@ export default class PufferView {
     if (changed) this.hooks.onChange?.(this.sim);
     if (this.sim.over && !this.overSent) {
       this.overSent = true;
-      setTimeout(() => this.hooks.onOver?.(this.sim), 900);
+      this.saveGhost();
+      setTimeout(() => this.hooks.onOver?.(this.sim), 450);
     }
     this.draw(now);
     this.raf = requestAnimationFrame(this.loop);
+  }
+
+  // Your best run on this same seed swims along as a see-through ghost.
+  ghostKey() {
+    return `tidepop-puffer-ghost:${this.sim.seed}`;
+  }
+  loadGhost() {
+    try {
+      const g = JSON.parse(localStorage.getItem(this.ghostKey()) || 'null');
+      if (!g || !Array.isArray(g.flaps)) return null;
+      const sim = new this.sim.constructor(this.sim.seed);
+      return { sim, flaps: g.flaps, i: 0, score: g.score };
+    } catch { return null; }
+  }
+  saveGhost() {
+    try {
+      const old = JSON.parse(localStorage.getItem(this.ghostKey()) || 'null');
+      if (old && old.score >= this.sim.score) return;
+      const flaps = this.sim.log.filter((a) => a[0] === 'f').map((a) => a[1]);
+      if (flaps.length > 20000) return;
+      localStorage.setItem(this.ghostKey(), JSON.stringify({ score: this.sim.score, flaps }));
+      // keep only a few ghosts around
+      const keys = Object.keys(localStorage).filter((k) => k.startsWith('tidepop-puffer-ghost:'));
+      if (keys.length > 8) for (const k of keys.slice(0, keys.length - 8)) if (k !== this.ghostKey()) localStorage.removeItem(k);
+    } catch { /* storage full or blocked: no ghost */ }
+  }
+  stepGhost() {
+    const g = this.ghost;
+    if (!g || g.sim.over) return;
+    if (!g.sim.started) { if (this.sim.started) { g.sim.flap(); g.i = 1; } return; }
+    while (g.i < g.flaps.length && g.flaps[g.i] <= g.sim.tick) { g.sim.flap(); g.i++; }
+    g.sim.step();
   }
 
   draw(now) {
@@ -125,6 +161,10 @@ export default class PufferView {
     // coral pipes
     for (const p of s.pipes) {
       const top = p.gy - p.gap / 2, bottom = p.gy + p.gap / 2;
+      if (p.kind === 'squeeze' && !p.scored) {
+        ctx.fillStyle = 'rgba(255,212,94,0.18)';
+        ctx.fillRect(p.x - 2, top, PIPE_W + 4, p.gap);
+      }
       this.coral(p.x, 0, PIPE_W, top, true);
       this.coral(p.x, bottom, PIPE_W, FLOOR - bottom, false);
       if (p.pearl && !p.pearlTaken) {
@@ -142,6 +182,12 @@ export default class PufferView {
     ctx.fillRect(0, FLOOR, WORLD_W, WORLD_H - FLOOR);
     ctx.fillStyle = '#d9b26b';
     for (let x = -this.floorOff; x < WORLD_W; x += 12) ctx.fillRect(x, FLOOR + 3, 6, 1.5);
+    // ghost of your best run on this seed
+    if (this.ghost && !this.ghost.sim.over && this.sim.started) {
+      ctx.globalAlpha = 0.3;
+      this.fish(PX, this.ghost.sim.y, R, Math.max(-0.5, Math.min(1.1, this.ghost.sim.vy * 0.18)), false);
+      ctx.globalAlpha = 1;
+    }
     // puffer
     this.puff = Math.max(0, this.puff - 0.06);
     const rot = Math.max(-0.5, Math.min(1.1, s.vy * 0.18));
@@ -234,4 +280,5 @@ export function hud(sim) {
 
 export const HOW = `<div class="tip">🐡 <b>Tap</b> (or press Space) to make the puffer swim up. Let go to sink.</div>
 <div class="tip">🪸 Slip through the gaps in the coral: <b>+10</b> each. Grab glowing <b>pearls</b> for <b>+5</b>.</div>
-<div class="tip">⚡ The current speeds up and the gaps get tighter the further you go. Earn 🥉 at 10, 🥈 at 25 and 🥇 at 50 corals!</div>`;
+<div class="tip">⚡ The current speeds up and the gaps get tighter the further you go. Earn 🥉 at 10, 🥈 at 25 and 🥇 at 50 corals!</div>
+<div class="tip">🌊 After 20 corals some gaps <b>sway</b>; after 40, golden <b>squeeze</b> gaps are worth double. A see-through puffer is your <b>ghost</b> – your best run on the same course (daily challenge).</div>`;
