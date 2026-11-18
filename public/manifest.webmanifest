@@ -1,18 +1,40 @@
 {
-  "name": "Tidepop – Match & Block Puzzle",
+  "name": "Tidepop – cozy arcade & daily puzzles",
   "short_name": "Tidepop",
-  "description": "Free, ad-free match-3 and block puzzle for all ages, with daily challenges and fair leaderboards.",
+  "description": "A cozy arcade by the sea: a new shared puzzle every day, match-3, block puzzles, chess and ludo with friends. Free to play, fair leaderboards.",
   "start_url": "./",
   "scope": "./",
   "display": "standalone",
   "orientation": "portrait",
   "background_color": "#0d2a6b",
   "theme_color": "#1565c0",
-  "categories": ["games", "puzzle", "kids", "family"],
+  "categories": [
+    "games",
+    "puzzle",
+    "family"
+  ],
   "icons": [
-    { "src": "icons/icon-192.png", "sizes": "192x192", "type": "image/png" },
-    { "src": "icons/icon-512.png", "sizes": "512x512", "type": "image/png" },
-    { "src": "icons/icon-maskable-512.png", "sizes": "512x512", "type": "image/png", "purpose": "maskable" },
-    { "src": "icons/icon.svg", "sizes": "any", "type": "image/svg+xml" }
-  ]
+    {
+      "src": "icons/icon-192.png",
+      "sizes": "192x192",
+      "type": "image/png"
+    },
+    {
+      "src": "icons/icon-512.png",
+      "sizes": "512x512",
+      "type": "image/png"
+    },
+    {
+      "src": "icons/icon-maskable-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "maskable"
+    },
+    {
+      "src": "icons/icon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml"
+    }
+  ],
+  "id": "/tidepop"
 }

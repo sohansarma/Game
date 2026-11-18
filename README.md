@@ -1,12 +1,12 @@
 # 🐚 Tidepop Arcade
 
-**A free arcade of 13 games for all ages, plus a Creator Studio where players build and publish their own games.** The 13 games are Tidepop (match-3), Reef Blocks, ♟️ Chess, 🎲 Ludo, 🧊 Cube Twist, Deep Miner, Puffer Dash, Sea Serpent, Shell Merge, Reef Tower, Sort Splash, Coral Breaker and Crab Catch. Every arcade game has a daily challenge, a weekly tournament, an all-time board and challenge links you can send to friends. All scores are verified by replaying the game.
+**Tidepop is a free, cozy arcade by the sea: 14 games for all ages, a shared daily puzzle, a home to decorate, and a Creator Studio.** The games are 🌊 Tide of the Day (daily puzzle), 🐚 Shell Swap (match-3), Reef Blocks, ♟️ Chess, 🎲 Ludo, 🧊 Cube Twist, Deep Miner, Puffer Dash, Sea Serpent, Shell Merge, Reef Tower, Sort Splash, Coral Breaker and Crab Catch. Every arcade game has a daily challenge, a weekly tournament, an all-time board and challenge links you can send to friends. All scores are verified by replaying the game.
 
 The original game: Swap cute sea creatures in an **endless match-3 adventure**, take on a **Daily Dive** where everyone gets the same board, chase a **weekly endless Deep Dive**, or relax with **Reef Blocks**, a block puzzle. Each mode has a **fair leaderboard**: the server replays every submitted game, so scores can't be faked.
 
 - 💸 Free to play: no real-money purchases, no lives or timers. Boosters are bought with shells you earn by playing.
 - 📱 Installable PWA: add it to the home screen on iOS or Android and play offline.
-- 🧒 Built for all ages: colourblind-friendly shapes, reduced-motion mode, nicknames built from a word list, and no personal data collected.
+- 🧒 Built for all ages: colourblind-friendly shapes, reduced-motion mode, free-text names checked by a shared safety filter (with a 🎲 random option), and no personal data needed.
 - 🏆 End-to-end leaderboards: daily, weekly and all-time boards, each score checked by replaying the game on the server.
 
 ---
@@ -133,7 +133,7 @@ Players can make games for each other without writing code:
 - 1–3 stars per level, chosen by score thresholds that a bot tuned (see [balancing](#difficulty-balancing)).
 - 🐚 Shells are earned from levels, dives, achievements and daily treasure, and spent in the Shell Shop on 🔨 Hammer, 🔀 Shuffle and ➕ +5 Moves.
 - A 7-day daily treasure calendar builds a login streak 🔥. Missing a day just restarts the streak; you never lose anything.
-- 37 achievements, including publishing a game, playing community games, level 100 and 250, playing all 10 games, and a score milestone in each arcade game, a booster gift for each first clear of every 5th level, and a new-best celebration.
+- 37 achievements, including publishing a game, playing community games, level 100 and 250, playing every arcade game, and a score milestone in each arcade game, a booster gift for each first clear of every 5th level, and a new-best celebration.
 - If you run out of moves, you can buy +5 moves with a booster or with shells. Retries are free and unlimited.
 
 **Accessibility and quality**
@@ -146,7 +146,7 @@ Players can make games for each other without writing code:
 
 **Privacy**
 - No accounts, emails, ads, analytics or trackers.
-- Names are built from word lists, so nobody can enter free text and there's nothing to moderate.
+- Players choose their own name (3–20 characters); the same rules run on the device and the server: no links, emails or phone numbers, reserved and offensive words blocked.
 - The server stores only the nickname, a random ID, a token hash and scores. IP addresses are never written to disk.
 - Daily boards are deleted after 30 days and weekly boards after 12 weeks. "Delete my online scores" removes everything about you.
 

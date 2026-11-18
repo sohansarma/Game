@@ -852,7 +852,7 @@ function goHome() {
         <button class="card" id="h-shop"><span class="emoji">🛍️</span><b>Shell Shop</b><span class="sub">Boosters for shells – never real money</span></button>
         <button class="card" id="h-help"><span class="emoji">❓</span><b>How to play</b><span class="sub">Specials, combos & tips</span></button>
       </div>
-      <p class="center small muted" style="margin-top:16px">Playing as <b>${esc(s.name)}</b> · free & ad-free</p>
+      <p class="center small muted" style="margin-top:16px">Playing as <b>${esc(s.name)}</b> · free to play</p>
     </div>`);
   const on = (id, fn) => { $(id, el).onclick = () => { sfx.tap(); fn(); }; };
   on('#h-play', () => startLevel(next));
