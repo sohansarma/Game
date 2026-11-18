@@ -77,6 +77,7 @@ export const BOTS = {
   },
   // Corner strategy with a little randomness.
   merge(sim, rng) {
+    if (sim.undos > 0 && sim.snap && rng.next() < 0.2) { sim.undo(); return; }
     const order = rng.next() < 0.85 ? ['d', 'l', 'r', 'u'] : rng.shuffle(['d', 'l', 'r', 'u']);
     for (const d of order) if (sim.move(d).ok) return;
     sim.quit();

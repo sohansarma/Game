@@ -12,17 +12,35 @@ export default class MergeView {
     this.sim = sim;
     this.hooks = hooks;
     this.reduced = reducedMotion;
-    this.tiles = new Map(); // id -> {v, x, y, tx, ty, scale, pop}
-    for (let r = 0; r < N; r++) for (let c = 0; c < N; c++) {
-      const t = sim.grid[r][c];
-      if (t) this.tiles.set(t.id, { v: t.v, x: c, y: r, tx: c, ty: r, scale: 1, pop: 0 });
-    }
+    this.popups = [];
+    this.particles = [];
+    this.rebuild();
     this.destroyed = false;
-    controls.innerHTML = '<div class="small muted center">Swipe (or use arrow keys) to slide every tile</div>';
+    this.controls = controls;
+    this.renderControls();
     this.resize();
     this.bind();
     this.loop = this.loop.bind(this);
     this.raf = requestAnimationFrame(this.loop);
+  }
+
+  rebuild() {
+    this.tiles = new Map(); // id -> {v, x, y, tx, ty, scale, pop}
+    for (let r = 0; r < N; r++) for (let c = 0; c < N; c++) {
+      const t = this.sim.grid[r][c];
+      if (t) this.tiles.set(t.id, { v: t.v, x: c, y: r, tx: c, ty: r, scale: 1, pop: 0 });
+    }
+  }
+
+  renderControls() {
+    const s = this.sim;
+    this.controls.innerHTML = `<div class="row center" style="gap:10px;align-items:center;justify-content:center">
+      <span class="small muted">Next: <b style="font-size:1.3em">${tileEmoji(s.nextV)}</b></span>
+      <button class="btn sm ghost" data-undo ${s.undos > 0 && s.snap && !s.over ? '' : 'disabled'}>↶ Undo (${s.undos})</button>
+      <span class="small muted">Swipe or arrow keys</span></div>`;
+    this.controls.querySelector('[data-undo]').onclick = () => {
+      if (this.sim.undo()) { sfx.swap(); this.rebuild(); this.renderControls(); this.hooks.onChange?.(this.sim); }
+    };
   }
 
   destroy() {
@@ -86,6 +104,11 @@ export default class MergeView {
     let biggest = 0;
     for (const m of res.merges) {
       this.tiles.set(m.id, { v: m.v, x: m.c, y: m.r, tx: m.c, ty: m.r, scale: 1, pop: 1, born: performance.now() + 90 });
+      this.popups.push({ x: m.c + 0.5, y: m.r + 0.3, text: `+${m.v}`, t0: performance.now() + 90, color: '#fff' });
+      if (!this.reduced) for (let i = 0; i < Math.min(14, 3 + Math.log2(m.v)); i++) {
+        const a = Math.random() * Math.PI * 2, v = 0.02 + Math.random() * 0.04;
+        this.particles.push({ x: m.c + 0.5, y: m.r + 0.5, vx: Math.cos(a) * v, vy: Math.sin(a) * v, life: 1, hue: HUES[Math.min(HUES.length - 1, Math.log2(m.v) - 1)], t0: performance.now() + 90 });
+      }
       for (const old of m.from) { const t = this.tiles.get(old); if (t) t.dying = true; }
       biggest = Math.max(biggest, m.v);
     }
@@ -93,13 +116,16 @@ export default class MergeView {
       const s = res.spawned;
       this.tiles.set(s.id, { v: s.v, x: s.c, y: s.r, tx: s.c, ty: s.r, scale: 0, pop: 0, born: performance.now() + 120 });
     }
+    if (res.bonus) this.popups.push({ x: N / 2, y: N / 2, text: `Combo ×${res.merges.length}! +${res.bonus}`, t0: performance.now() + 120, color: '#ffd23f', big: true });
+    if (res.earned) { this.popups.push({ x: N / 2, y: N / 2 + 0.6, text: `New ${tileEmoji(this.sim.best)}! +1 undo`, t0: performance.now() + 200, color: '#7cffb2', big: true }); sfx.win(); }
+    this.renderControls();
     if (biggest) {
-      sfx.match(Math.min(10, Math.log2(biggest) - 1));
+      sfx.match(Math.min(10, Math.log2(biggest) - 1 + (res.merges.length > 1 ? 1 : 0)));
       if (biggest >= 128) { sfx.special(); haptic(25); }
       if (biggest === 2048) sfx.win();
     } else sfx.swap();
     this.hooks.onChange?.(this.sim);
-    if (this.sim.over) setTimeout(() => this.hooks.onOver?.(this.sim), 900);
+    if (this.sim.over) setTimeout(() => this.hooks.onOver?.(this.sim), 600);
   }
 
   loop(now) {
@@ -157,6 +183,32 @@ export default class MergeView {
       ctx.strokeText(String(t.v), cx, cy + w * 0.3);
       ctx.fillText(String(t.v), cx, cy + w * 0.3);
     }
+    // merge sparkles
+    for (const p of this.particles) {
+      if (now < p.t0) continue;
+      p.x += p.vx; p.y += p.vy; p.life -= 0.035;
+      ctx.globalAlpha = Math.max(0, p.life);
+      ctx.fillStyle = `hsl(${p.hue},90%,75%)`;
+      ctx.beginPath(); ctx.arc(p.x * C, p.y * C, C * 0.04, 0, Math.PI * 2); ctx.fill();
+    }
+    ctx.globalAlpha = 1;
+    this.particles = this.particles.filter((p) => p.life > 0);
+    // "+value" popups float up
+    this.popups = this.popups.filter((p) => now - p.t0 < 900);
+    for (const p of this.popups) {
+      const t = (now - p.t0) / 900;
+      if (t < 0) continue;
+      ctx.globalAlpha = 1 - t;
+      ctx.font = `900 ${C * (p.big ? 0.26 : 0.22)}px ui-rounded, system-ui, sans-serif`;
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+      ctx.lineWidth = 4;
+      ctx.strokeStyle = 'rgba(0,0,0,0.45)';
+      ctx.strokeText(p.text, p.x * C, (p.y - t * 0.5) * C);
+      ctx.fillStyle = p.color;
+      ctx.fillText(p.text, p.x * C, (p.y - t * 0.5) * C);
+    }
+    ctx.globalAlpha = 1;
   }
 }
 
@@ -169,5 +221,6 @@ export function hud(sim) {
 }
 
 export const HOW = `<div class="tip">🐳 <b>Swipe</b> to slide every tile. Two matching creatures that touch <b>merge</b> into the next one: 🐚 → 🦐 → 🦀 → 🐠 → 🐡 → 🐢 → 🐙 → 🦈 → 🐬 → 🐳 → 👑</div>
-<div class="tip">➕ Every merge adds the new tile's number to your score. A new 🐚 or 🦐 appears after every move.</div>
+<div class="tip">➕ Every merge adds the new tile's number to your score. Several merges in one swipe score a <b>combo bonus</b>. The <b>Next</b> creature is shown below the board.</div>
+<div class="tip">↶ Each new top creature from 🐙 128 up earns an <b>undo</b> (hold up to 2).</div>
 <div class="tip">🏁 The game ends when the board is full and nothing can merge. Reach 🐳 2048 to become <b>Ocean master</b>!</div>`;

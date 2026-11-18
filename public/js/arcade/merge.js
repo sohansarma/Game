@@ -1,6 +1,9 @@
 // Shell Merge – a 2048-style sliding merge game. Pure & deterministic:
 // new tiles come from a seeded RNG, inputs are swipe directions.
-// Score = sum of merged tile values (classic 2048 scoring).
+// Score = sum of merged tile values (classic 2048 scoring), plus a combo
+// bonus when one swipe makes several merges (+25% per extra merge).
+// The next creature is shown in advance. Making a new top tile of 128 or
+// more earns an undo (hold up to 2); ['u'] rewinds one move.
 
 import { Rng } from '../rng.js';
 
@@ -11,6 +14,11 @@ export const tileEmoji = (v) => LADDER[Math.min(LADDER.length - 1, Math.log2(v) 
 class MergeSim {
   constructor(seed) {
     this.rng = new Rng(seed);
+    this.vrng = new Rng((seed ^ 0x9e3779b9) >>> 0); // values, separate so we can preview
+    this.nextV = this.vrng.next() < 0.9 ? 2 : 4;
+    this.undos = 0;
+    this.snap = null;
+    this.lastCombo = 0;
     this.grid = Array.from({ length: N }, () => new Array(N).fill(null));
     this.nextId = 1;
     this.score = 0;
@@ -28,7 +36,8 @@ class MergeSim {
     for (let r = 0; r < N; r++) for (let c = 0; c < N; c++) if (!this.grid[r][c]) free.push([r, c]);
     if (!free.length) return null;
     const [r, c] = this.rng.pick(free);
-    const t = { id: this.nextId++, v: this.rng.next() < 0.9 ? 2 : 4 };
+    const t = { id: this.nextId++, v: this.nextV };
+    this.nextV = this.vrng.next() < 0.9 ? 2 : 4;
     this.grid[r][c] = t;
     return { ...t, r, c };
   }
@@ -40,6 +49,7 @@ class MergeSim {
     if (!vec) return { ok: false };
     const moves = [], merges = [];
     let moved = false;
+    const snap = { grid: this.grid.map((row) => row.map((t) => (t ? { ...t } : null))), score: this.score, moves: this.moves, best: this.best, s: this.rng.s, vs: this.vrng.s, nextV: this.nextV, nextId: this.nextId };
     const lines = [];
     for (let i = 0; i < N; i++) {
       const cells = [];
@@ -76,8 +86,17 @@ class MergeSim {
         }
       }
     }
-    if (!moved) return { ok: false };
+    if (!moved) { this.score = snap.score; this.best = snap.best; return { ok: false }; }
     this.log.push(['m', dir]);
+    this.snap = snap;
+    // several merges in one swipe: combo bonus
+    let bonus = 0;
+    if (merges.length >= 2) bonus = Math.round(merges.reduce((a, m) => a + m.v, 0) * 0.25 * (merges.length - 1));
+    this.score += bonus;
+    this.lastCombo = merges.length;
+    // a new top creature (128+) earns an undo
+    let earned = false;
+    if (this.best > snap.best && this.best >= 128 && this.undos < 2) { this.undos++; earned = true; }
     this.grid = next;
     this.moves++;
     const spawned = this.spawn();
@@ -85,7 +104,19 @@ class MergeSim {
       this.over = true;
       this.overReason = this.best >= 2048 ? 'Ocean master! 👑' : 'No more moves!';
     }
-    return { ok: true, moves, merges, spawned };
+    return { ok: true, moves, merges, spawned, bonus, earned };
+  }
+
+  /** Rewind the last move (costs one earned undo). */
+  undo() {
+    if (this.over || !this.snap || this.undos <= 0) return false;
+    const p = this.snap;
+    this.log.push(['u']);
+    this.grid = p.grid; this.score = p.score; this.moves = p.moves; this.best = p.best;
+    this.rng.s = p.s; this.vrng.s = p.vs; this.nextV = p.nextV; this.nextId = p.nextId;
+    this.undos--;
+    this.snap = null;
+    return true;
   }
 
   canMove() {
@@ -113,6 +144,7 @@ function replay(seed, log) {
     if (!Array.isArray(a)) return { ok: false, reason: 'bad action', sim };
     if (sim.over) return { ok: false, reason: 'input after game over', sim };
     if (a[0] === 'm') { if (!sim.move(a[1]).ok) return { ok: false, reason: 'invalid move', sim }; }
+    else if (a[0] === 'u') { if (!sim.undo()) return { ok: false, reason: 'invalid undo', sim }; }
     else if (a[0] === 'q') sim.quit();
     else return { ok: false, reason: 'unknown action', sim };
   }
