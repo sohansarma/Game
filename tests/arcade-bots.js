@@ -84,6 +84,7 @@ export const BOTS = {
   // Heads for food, avoiding walls/rocks/body; sometimes picks randomly.
   serpent(sim, rng) {
     if (!sim.started) sim.start();
+    if (sim.body.length > 8 && rng.next() < 0.003) sim.dash();
     if (sim.tick + 1 >= sim.nextMove && !sim.queue.length) {
       const [hx, hy] = sim.body[0];
       const D = { u: [0, -1], d: [0, 1], l: [-1, 0], r: [1, 0] };

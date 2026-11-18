@@ -21,7 +21,9 @@ export default class SerpentView {
       <button class="btn sm ghost" data-d="l" aria-label="Left">◀</button>
       <button class="btn sm ghost" data-d="u" aria-label="Up">▲</button>
       <button class="btn sm ghost" data-d="d" aria-label="Down">▼</button>
-      <button class="btn sm ghost" data-d="r" aria-label="Right">▶</button></div>`;
+      <button class="btn sm ghost" data-d="r" aria-label="Right">▶</button>
+      <button class="btn sm" data-dash aria-label="Dash (costs a segment)">⚡ Dash</button></div>`;
+    controls.querySelector('[data-dash]').onpointerdown = (e) => { e.preventDefault(); this.dash(); };
     for (const b of controls.querySelectorAll('[data-d]')) b.onpointerdown = (e) => { e.preventDefault(); this.turn(b.dataset.d); };
     this.resize();
     this.bind();
@@ -44,6 +46,11 @@ export default class SerpentView {
     this.cell = Math.floor(Math.min(rect.width / COLS, rect.height / ROWS));
     this.ox = Math.floor((rect.width - this.cell * COLS) / 2);
     this.oy = Math.floor((rect.height - this.cell * ROWS) / 2);
+  }
+
+  dash() {
+    if (this.sim.dash()) { sfx.special(); haptic(20); this.hooks.onChange?.(this.sim); }
+    else sfx.bad?.();
   }
 
   turn(d) {
@@ -72,6 +79,7 @@ export default class SerpentView {
       const d = { ArrowUp: 'u', ArrowDown: 'd', ArrowLeft: 'l', ArrowRight: 'r', w: 'u', s: 'd', a: 'l', d: 'r' }[e.key];
       if (d) { e.preventDefault(); this.turn(d); }
       else if (e.key === ' ' && !this.sim.started) this.sim.start();
+      else if (e.key === ' ' || e.key === 'Shift') { e.preventDefault(); this.dash(); }
     };
     const resize = () => this.resize();
     cv.addEventListener('pointerdown', down);
@@ -107,7 +115,7 @@ export default class SerpentView {
     if (changed) this.hooks.onChange?.(this.sim);
     if (this.sim.over && !this.overSent) {
       this.overSent = true;
-      setTimeout(() => this.hooks.onOver?.(this.sim), 900);
+      setTimeout(() => this.hooks.onOver?.(this.sim), 500);
     }
     this.draw(now);
     this.raf = requestAnimationFrame(this.loop);
@@ -171,21 +179,34 @@ export default class SerpentView {
       ctx.lineWidth = 2.5;
       ctx.beginPath(); ctx.arc(cx, cy, C * 0.45, -Math.PI / 2, -Math.PI / 2 + Math.PI * 2 * left); ctx.stroke();
     }
-    // serpent
+    // serpent: a smooth tube that glides between cells
     const n = s.body.length;
-    for (let i = n - 1; i >= 0; i--) {
-      const [x, y] = s.body[i];
-      const t = i / Math.max(1, n - 1);
-      const r = C * (0.46 - t * 0.14);
-      ctx.fillStyle = `hsl(${165 - t * 40}, 80%, ${55 - t * 15}%)`;
-      ctx.beginPath(); ctx.arc(x * C + C / 2, y * C + C / 2, r, 0, Math.PI * 2); ctx.fill();
-      if (i % 2 === 0 && i > 0) {
-        ctx.fillStyle = 'rgba(255,255,255,0.25)';
-        ctx.beginPath(); ctx.arc(x * C + C / 2, y * C + C / 2, r * 0.4, 0, Math.PI * 2); ctx.fill();
-      }
+    const sub = s.over || !s.started || this.reduced ? 1 : Math.min(1, (s.tick - s.lastMove + this.acc / STEP) / Math.max(1, s.moveGap));
+    const pts = s.body.map(([x, y], i) => {
+      const p = s.prev[i] || s.body[i];
+      return [(p[0] + (x - p[0]) * sub) * C + C / 2, (p[1] + (y - p[1]) * sub) * C + C / 2];
+    });
+    ctx.lineCap = 'round';
+    ctx.lineJoin = 'round';
+    if (s.dashing && !this.reduced) {
+      ctx.strokeStyle = 'rgba(255,230,120,0.35)';
+      ctx.lineWidth = C * 1.05;
+      ctx.beginPath(); pts.forEach(([x, y], i) => (i ? ctx.lineTo(x, y) : ctx.moveTo(x, y))); ctx.stroke();
     }
-    // head eyes
-    const [hx, hy] = s.body[0];
+    for (let i = n - 1; i > 0; i--) {
+      const t = i / Math.max(1, n - 1);
+      ctx.strokeStyle = `hsl(${165 - t * 40}, 80%, ${55 - t * 15}%)`;
+      ctx.lineWidth = C * (0.84 - t * 0.3);
+      ctx.beginPath(); ctx.moveTo(pts[i][0], pts[i][1]); ctx.lineTo(pts[i - 1][0], pts[i - 1][1]); ctx.stroke();
+    }
+    // shine stripe and scales
+    ctx.strokeStyle = 'rgba(255,255,255,0.22)';
+    ctx.lineWidth = C * 0.14;
+    ctx.beginPath(); pts.forEach(([x, y], i) => (i ? ctx.lineTo(x - C * 0.08, y - C * 0.08) : ctx.moveTo(x - C * 0.08, y - C * 0.08))); ctx.stroke();
+    ctx.fillStyle = `hsl(165, 80%, 55%)`;
+    ctx.beginPath(); ctx.arc(pts[0][0], pts[0][1], C * 0.46, 0, Math.PI * 2); ctx.fill();
+    // head eyes (follow the gliding head)
+    const hx = (pts[0][0] - C / 2) / C, hy = (pts[0][1] - C / 2) / C;
     const look = { u: [0, -1], d: [0, 1], l: [-1, 0], r: [1, 0] }[s.dir];
     for (const side of [-1, 1]) {
       const ex = hx * C + C / 2 + look[0] * C * 0.15 + look[1] * side * C * 0.18;
@@ -204,6 +225,12 @@ export default class SerpentView {
     }
     ctx.globalAlpha = 1;
     this.particles = this.particles.filter((p) => p.life > 0);
+    if (s.dashing) {
+      ctx.fillStyle = '#ffe082';
+      ctx.font = `800 ${C * 0.5}px ui-rounded, system-ui, sans-serif`;
+      ctx.textAlign = 'center';
+      ctx.fillText('⚡ DASH +10', (COLS * C) / 2, C * 0.8);
+    }
     if (!s.started) {
       ctx.fillStyle = 'rgba(0,0,0,0.35)';
       ctx.fillRect(0, 0, COLS * C, ROWS * C);
@@ -224,6 +251,7 @@ export function hud(sim) {
 }
 
 export const HOW = `<div class="tip">🐍 <b>Swipe</b>, use the arrow pad or arrow keys to steer the serpent.</div>
+<div class="tip">⚡ <b>Dash</b> (button or Space) spends your last segment for 2 seconds of double speed – shrimp caught while dashing are worth <b>+10</b> more.</div>
 <div class="tip">🦐 Eat shrimp to grow (<b>+10</b>, more as you get longer). You get faster as you grow!</div>
 <div class="tip">🟡 Golden pearls appear for <b>6 seconds</b> only – grab them for <b>+50</b>. A 🪨 rock drops every 5 shrimp.</div>
 <div class="tip">💥 Don't hit the walls, rocks or your own tail.</div>`;
