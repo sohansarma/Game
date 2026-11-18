@@ -142,7 +142,7 @@ The page is private until you share it from its Share menu. Players need Contrib
 
 | Option | What you get | How |
 |---|---|---|
-| **GitHub Pages** (static) | The full game, offline-capable. Leaderboards fall back to local bests. | Enable Pages → "GitHub Actions". The workflow in `.github/workflows/pages.yml` publishes `public/` on every push to `main`. |
+| **GitHub Pages** (static) | The full game, offline-capable. Leaderboards fall back to local bests. | Either Source works: **Deploy from a branch → `main` / root** (the root `index.html` forwards to `public/`, site at `https://<user>.github.io/<repo>/`), or **GitHub Actions** (the workflow in `.github/workflows/pages.yml` publishes `public/` on every push to `main`). |
 | **Render** free web service | Game and online leaderboard on one URL | "New → Blueprint" using `render.yaml`. *The free plan has no persistent disk, so boards reset on redeploy.* |
 | **Fly.io / any VPS / home server** | Game and leaderboard with permanent storage | `docker build -t tidepop . && docker run -p 8080:8080 -v tidepop-data:/data tidepop` |
 | **Split** | Static game on Pages, API anywhere | Set `window.TIDEPOP_API = 'https://your-api.example'` in `public/config.js`. CORS is open by default; restrict it with `ALLOWED_ORIGIN`. |

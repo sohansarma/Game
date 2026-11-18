@@ -890,7 +890,7 @@ async function arcadeMenu(id) {
     buttons: [
       { label: g.board ? '▶ Play the ladder' : '▶ Play', value: 'play', cls: 'green' },
       ...(id === 'ludo' ? [{ label: '👥 Pass & play · 2–4 players (offline)', value: 'party', cls: 'blue' }, { label: '🤖 Quick game vs computer', value: 'cpu', cls: 'blue' }] : []),
-      ...(id === 'chess' ? [{ label: '🤖 Play vs computer', value: 'cpu', cls: 'blue' }] : []),
+      ...(id === 'chess' ? [{ label: '👥 Pass & play · 2 players (offline)', value: 'party', cls: 'blue' }, { label: '🤖 Play vs computer', value: 'cpu', cls: 'blue' }] : []),
       ...(g.board ? [{ label: '👥 Play a friend', value: 'friend', cls: 'blue' }] : []),
       { label: `📅 Daily challenge${today === undefined ? ' (new!)' : ''}`, value: 'daily', cls: 'blue' },
       { label: '🏆 Leaderboard', value: 'lb', cls: 'ghost' },
@@ -903,7 +903,7 @@ async function arcadeMenu(id) {
   else if (r === 'how') { await arcadeHow(id); arcadeMenu(id); }
   else if (r === 'friend') versusMenu(id);
   else if (r === 'cpu') (id === 'chess' ? chessSetup() : ludoVsComputer());
-  else if (r === 'party') ludoParty();
+  else if (r === 'party') (id === 'chess' ? chessParty() : ludoParty());
 }
 
 /** Chess & Ludo are played on a real-looking wooden table instead of the arcade frame. */
@@ -1042,12 +1042,49 @@ function toPgn(sim) {
 }
 
 async function localVersus(id) {
-  if (id === 'chess') {
-    const opts = await chessOptions({ title: '📱 Pass & play', side: false, level: false, flip: true });
-    if (!opts) return versusMenu(id);
-    return playVersus(id, new ChessVersus({ clock: opts.clock, autoFlip: opts.flip }), null);
-  }
+  if (id === 'chess') return chessParty();
   return ludoParty();
+}
+
+// ---------------------------------------------------------------- chess pass & play (offline, 2 players)
+/** Two people, one phone: names, colours, clock and board orientation. */
+async function chessParty(again) {
+  const saved = { white: '', black: '', clock: 'none', flip: 'true', ...(load().chessParty || {}) };
+  const conf = again || await new Promise((resolve) => {
+    const st = { ...saved };
+    const seg = (key, items) => `<div class="seg" data-key="${key}">${items.map(([v, l]) => `<button class="seg-btn ${String(v) === String(st[key]) ? 'on' : ''}" data-v="${v}">${l}</button>`).join('')}</div>`;
+    modal(`<h2>👥 Pass & play</h2>
+      <p class="muted small">One phone between two players – no internet needed. White moves first.</p>
+      <div class="party-rows">
+        <div class="party-row chess-seat" style="--c:#f1e9da"><span class="party-dot">♔</span><input class="party-name" data-k="white" maxlength="14" placeholder="White" value="${esc(st.white)}" aria-label="White player name"></div>
+        <button class="btn sm ghost" id="cp-swap" type="button">⇅ Swap colours</button>
+        <div class="party-row chess-seat" style="--c:#2e2b33"><span class="party-dot">♚</span><input class="party-name" data-k="black" maxlength="14" placeholder="Black" value="${esc(st.black)}" aria-label="Black player name"></div>
+      </div>
+      <h3>Time control</h3>${seg('clock', TIME_CONTROLS.map((t) => [t.id, t.label]))}
+      <h3>Board</h3>${seg('flip', [['true', '🔄 Turn to the player to move'], ['false', '♔ Keep White at the bottom']])}`, {
+      buttons: [{ label: '▶ Start game', value: 'go', cls: 'green' }, { label: 'Back', value: null, cls: 'ghost' }],
+      onOpen: (sheet) => {
+        for (const inp of $$('.party-name', sheet)) inp.oninput = () => { st[inp.dataset.k] = inp.value.trim(); };
+        $('#cp-swap', sheet).onclick = () => {
+          [st.white, st.black] = [st.black, st.white];
+          $('[data-k="white"]', sheet).value = st.white;
+          $('[data-k="black"]', sheet).value = st.black;
+          sfx.tap();
+        };
+        for (const group of $$('.seg', sheet)) {
+          for (const b of $$('.seg-btn', group)) b.onclick = () => {
+            $$('.seg-btn', group).forEach((x) => x.classList.toggle('on', x === b));
+            st[group.dataset.key] = b.dataset.v;
+            sfx.tap();
+          };
+        }
+      },
+    }).then((r) => resolve(r === 'go' ? st : null));
+  });
+  if (!conf) return arcadeMenu('chess');
+  update((d) => { d.chessParty = conf; });
+  const names = { w: conf.white || 'White', b: conf.black || 'Black' };
+  return playVersus('chess', new ChessVersus({ names, clock: conf.clock, autoFlip: String(conf.flip) === 'true' }), null, { chessParty: conf });
 }
 
 // ---------------------------------------------------------------- ludo pass & play (offline, 2-4 players)
@@ -1188,7 +1225,7 @@ async function playVersus(id, sim, online, extra = {}) {
   const g = ARCADE_BY_ID[id];
   const mod = await VIEWS[id]();
   setBackground(g.color);
-  const run = { kind: 'versus', id, sim, online, casual: extra.casual, party: extra.party };
+  const run = { kind: 'versus', id, sim, online, casual: extra.casual, party: extra.party, chessParty: extra.chessParty };
   currentRun = run;
   const el = showScreen('arcade', `
     <div class="hud">
@@ -1357,14 +1394,17 @@ async function endVersus(run) {
       dismissable: false,
       buttons: [
         ...(run.casual ? [{ label: '↻ Rematch', value: 'rematch', cls: 'green' }] : []),
+        ...(run.chessParty ? [{ label: '↻ Rematch (swap colours)', value: 'prematch', cls: 'green' }, { label: '⚙️ Change players', value: 'psetup', cls: 'blue' }] : []),
         ...(run.casual && won && sim.level < 6 ? [{ label: `⬆️ Next level: ${CASUAL_LEVELS[sim.level].name}`, value: 'up', cls: 'blue' }] : []),
-        { label: run.casual ? '⚙️ New game' : '↻ Play again', value: 'again', cls: run.casual ? 'ghost' : 'green' },
+        ...(run.chessParty ? [] : [{ label: run.casual ? '⚙️ New game' : '↻ Play again', value: 'again', cls: run.casual ? 'ghost' : 'green' }]),
         { label: '📋 Copy PGN', value: 'pgn', cls: 'ghost' },
         { label: '🕹️ Arcade', value: 'hub', cls: 'ghost' },
       ],
     });
     if (out === 'pgn') { await shareText(toPgn(sim)); return showHub(); }
     if (out === 'rematch') return chessSetup(run.casual);
+    if (out === 'prematch') return chessParty({ ...run.chessParty, white: run.chessParty.black, black: run.chessParty.white });
+    if (out === 'psetup') return chessParty();
     if (out === 'up') return chessSetup({ ...run.casual, level: sim.level + 1 });
     if (out === 'again') return run.casual ? chessSetup() : versusMenu(id);
     return showHub();

@@ -366,3 +366,5 @@ body.reduced-motion *, body.reduced-motion *::before, body.reduced-motion *::aft
 .party-seat { grid-column: 1 / -1; justify-content: stretch; flex-wrap: nowrap; }
 .party-seat .seg-btn { flex: 1; padding: 6px 4px; font-size: .82rem; }
 .party-count { margin-top: 4px; }
+.chess-seat { grid-template-rows: auto; }
+#cp-swap { align-self: center; }

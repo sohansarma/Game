@@ -27,15 +27,21 @@ jobs:
         with:
           node-version: 22
       - run: npm test
+      # "Deploy from a branch" serves the repo root (index.html forwards to
+      # public/), so this workflow only deploys when the source is "GitHub Actions".
+      - id: mode
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: echo "build_type=$(gh api repos/${{ github.repository }}/pages --jq .build_type 2>/dev/null || echo none)" >> "$GITHUB_OUTPUT"
+      - if: steps.mode.outputs.build_type != 'workflow'
+        run: echo "::notice::Pages source is '${{ steps.mode.outputs.build_type }}' – the branch build serves the game via the root index.html. Choose Source 'GitHub Actions' to deploy public/ directly."
       - id: pages
+        if: steps.mode.outputs.build_type == 'workflow'
         uses: actions/configure-pages@v5
-        continue-on-error: true
-      - if: steps.pages.outcome != 'success'
-        run: echo "::notice::GitHub Pages is not enabled yet. Enable it in Settings → Pages → Source 'GitHub Actions', then re-run this workflow."
-      - if: steps.pages.outcome == 'success'
+      - if: steps.mode.outputs.build_type == 'workflow'
         uses: actions/upload-pages-artifact@v3
         with:
           path: public
       - id: deployment
-        if: steps.pages.outcome == 'success'
+        if: steps.mode.outputs.build_type == 'workflow'
         uses: actions/deploy-pages@v4
