@@ -372,6 +372,23 @@ function rootScores(g, depth, noise, max) {
   return done;
 }
 
+/** Style bonus at the root – gives each bot a personality without changing the search. */
+function styleBonus(g, m, L) {
+  if (!L || !(L.knights || L.aggro || L.safety)) return 0;
+  const p = g.board[m.from];
+  if (!p) return 0;
+  const T = p.toUpperCase();
+  let b = 0;
+  if (L.knights && T === 'N') b += L.knights;
+  if (L.aggro) {
+    const ek = g.kingSq(g.turn === 'w' ? 'b' : 'w');
+    const d = (i) => Math.max(Math.abs((i >> 3) - (ek >> 3)), Math.abs((i & 7) - (ek & 7)));
+    b += (d(m.from) - d(m.to)) * L.aggro * 0.5 + (g.board[m.to] ? L.aggro * 0.5 : 0);
+  }
+  if (L.safety && T === 'K' && Math.abs(m.to - m.from) === 2) b += L.safety * 2; // castles early
+  return b;
+}
+
 function pick(scores, noise, rng) {
   let best = null, bestV = -Infinity;
   for (const { m, v: raw } of scores) {
@@ -393,17 +410,44 @@ export const LEVELS = [
 // Levels for casual "play vs computer" (not replayed by the server, so the
 // top levels may search deeper).
 export const CASUAL_LEVELS = [
-  { name: 'Beginner', elo: '~600', depth: 0, noise: 260, budget: 4000 },
-  { name: 'Casual', elo: '~900', depth: 1, noise: 110, budget: 8000 },
-  { name: 'Club', elo: '~1200', depth: 2, noise: 45, budget: 25000 },
-  { name: 'Strong', elo: '~1500', depth: 3, noise: 15, budget: 50000 },
-  { name: 'Expert', elo: '~1700', depth: 4, noise: 8, budget: 140000 },
-  { name: 'Master', elo: '~1900', depth: 4, noise: 1, budget: 320000 },
+  { name: 'Shrimp', emoji: '🦐', elo: '~400', depth: 0, noise: 260, budget: 4000, style: 'Wiggles pieces about – happy to trade anything', lines: {
+    hi: ['Hi hi! I just learned how the horsey moves 🦐', 'Ooh, a game! Go easy on me?'], cap: ['Got one! 🦐', 'Yum, a piece!'], check: ['Check?! Is that how it works?'],
+    oops: ['Wait… was that free? Thank you! 🦐'], losing: ['Uh oh, my pieces are swimming away…'], win: ['I WON?! 🦐🎉'], lose: ['GG! You are a big fish 🐟'] } },
+  { name: 'Clownfish', emoji: '🐠', elo: '~700', depth: 1, noise: 110, budget: 8000, style: 'Plays it safe and loves pushing pawns', lines: {
+    hi: ['Let\'s keep it friendly 🐠'], cap: ['Snip!', 'That one\'s mine 🐠'], check: ['Check! Just being careful.'],
+    oops: ['Hmm, I\'ll take that, thanks.'], losing: ['You\'re pushing me into the anemone!'], win: ['Safe and sound – I win! 🐠'], lose: ['Well played, friend.'] } },
+  { name: 'Octopus', emoji: '🐙', elo: '~1000', depth: 2, noise: 45, budget: 25000, knights: 22, style: 'Eight arms, loves knight forks', lines: {
+    hi: ['Eight arms, two knights. Let\'s play 🐙'], cap: ['Grabbed it with an arm 🐙', 'Tentacle tactics!'], check: ['Check – and maybe a fork coming…'],
+    oops: ['A loose piece! My favourite snack 🐙'], losing: ['Ink cloud! I need a moment…'], win: ['Forked and finished 🐙'], lose: ['You out-tentacled me. GG!'] } },
+  { name: 'Turtle', emoji: '🐢', elo: '~1200', depth: 3, noise: 15, budget: 50000, safety: 25, style: 'Slow and solid – castles early, never rushes', lines: {
+    hi: ['Slow and steady 🐢'], cap: ['Patience pays.'], check: ['Check. No hurry.'],
+    oops: ['I\'ve been waiting for that 🐢'], losing: ['Into my shell for a bit…'], win: ['Slow and steady wins again 🐢'], lose: ['Fast fish. Well played.'] } },
+  { name: 'Shark', emoji: '🦈', elo: '~1350', depth: 4, noise: 8, budget: 140000, aggro: 18, style: 'Always attacking your king', lines: {
+    hi: ['I smell a king 🦈'], cap: ['CHOMP 🦈', 'Bite!'], check: ['Check! Swim, little king.'],
+    oops: ['Blood in the water… 🦈'], losing: ['…I\'m not hungry anyway.'], win: ['Too slow! 🦈'], lose: ['Respect. You swim fast.'] } },
+  { name: 'Kraken', emoji: '🦑', elo: '~1500', depth: 4, noise: 1, budget: 320000, style: 'Deep, patient, rarely forgives', lines: {
+    hi: ['From the deep, I accept 🦑'], cap: ['Pulled under.'], check: ['The deep tightens. Check.'],
+    oops: ['A mistake. The deep remembers 🦑'], losing: ['…Impressive.'], win: ['The tide always returns 🦑'], lose: ['You have defeated the deep. Rare. GG.'] } },
 ];
 
 /** Search the side to move's best move. Root alpha-beta; noise adds personality. */
-export function searchMove(g, { depth, noise = 0, budget = 25000 }, rng) {
-  return pick(rootScores(g, depth, noise, budget), noise, rng);
+export function searchMove(g, L, rng) {
+  const { depth, noise = 0, budget = 25000 } = L;
+  const scores = rootScores(g, depth, noise, budget);
+  if (L.knights || L.aggro || L.safety) for (const x of scores) x.v += styleBonus(g, x.m, L);
+  return pick(scores, noise, rng);
+}
+
+/** Exact scores for every legal move (best first) – used to find puzzles. */
+export function scoreAll(g, depth, budget = 60000) {
+  const c = g.clone();
+  return rootScores(c, depth, 1, budget).sort((a, b) => b.v - a.v).map((x) => ({ uci: name(x.m.from) + name(x.m.to) + (x.m.promo || ''), v: x.v }));
+}
+
+/** Casual AI move + the bot's view of the position (for its chat). */
+export function casualMoveScored(g, level, rng) {
+  const L = CASUAL_LEVELS[Math.max(1, Math.min(level, CASUAL_LEVELS.length)) - 1];
+  return searchMove(g.clone(), L, rng);
 }
 
 /** Casual AI move (uses any rng – e.g. Math.random based). */

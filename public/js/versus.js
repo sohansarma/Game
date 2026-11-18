@@ -7,6 +7,7 @@
 // Storage goes through api.matches (shared artifact database or Node server).
 
 import { Chess, LEVELS, CASUAL_LEVELS, casualMove, searchMove } from './arcade/chess.js';
+import { botMove as botMoveOffThread } from './arcade/chess-ai.js';
 import { LudoGame, aiChoose, COLORS } from './arcade/ludo.js';
 import { Rng } from './rng.js';
 
@@ -148,7 +149,11 @@ export class ChessCasual extends ChessBase {
   constructor({ mySide = 'w', level = 3, clock = 'none', name = 'You' }) {
     const bot = CASUAL_LEVELS[level - 1];
     const them = mySide === 'w' ? 'b' : 'w';
-    super({ names: { [mySide]: name, [them]: `${bot.name} bot` }, clock });
+    super({ names: { [mySide]: name, [them]: `${bot.emoji} ${bot.name}` }, clock });
+    this.bot = bot;
+    this.lastScore = 0;
+    this.saidLosing = false;
+    this.onSay = null;
     this.mySide = mySide;
     this.level = level;
     this.rng = { next: Math.random };
@@ -171,6 +176,32 @@ export class ChessCasual extends ChessBase {
     if (!this.canMove()) return { ok: false };
     return this.apply(uci);
   }
+  /** A line from the bot's personality (sometimes – bots shouldn't chatter every move). */
+  say(kind, chance = 1) {
+    const lines = this.bot?.lines?.[kind];
+    if (!lines || Math.random() > chance) return;
+    this.onSay?.(lines[Math.floor(Math.random() * lines.length)]);
+  }
+
+  /** The computer's reply, thought out off the main thread. Resolves like botMove(). */
+  async botMoveAsync() {
+    if (!this.botToMove()) return null;
+    const ucis = this.game.history.map((h) => h.uci);
+    const plyAtStart = this.game.ply;
+    const r = await botMoveOffThread(ucis, this.level);
+    if (!r?.uci || this.game.ply !== plyAtStart || !this.botToMove()) return null; // takeback/resign meanwhile
+    const res = this.apply(r.uci);
+    if (!res.ok) return null;
+    // personality: react to the position
+    if (r.score >= 300 && this.lastScore < 150) this.say('oops', 0.9);
+    else if (r.score <= -300 && !this.saidLosing) { this.saidLosing = true; this.say('losing', 0.9); }
+    else if (this.game.inCheck()) this.say('check', 0.5);
+    else if (res.human?.captured) this.say('cap', 0.35);
+    this.lastScore = r.score;
+    if (this.over && this.result?.winner) this.say(this.result.winner === this.botSide ? 'win' : 'lose');
+    return { ...res, ai: res.human };
+  }
+
   /** The computer's reply (call after the human move has been shown). */
   botMove() {
     if (!this.botToMove()) return null;

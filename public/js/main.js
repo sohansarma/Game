@@ -208,6 +208,97 @@ function wireNameField(root, onValid) {
   return check;
 }
 
+// ------------------------------------------------------------------ Chess puzzles
+function puzzleStats() {
+  const p = load().chessPuzzles || {};
+  return { rating: p.rating ?? 1000, solved: p.solved || 0, streak: p.streak || 0, best: p.best || 0, days: p.days || {} };
+}
+
+async function playChessPuzzle({ daily }) {
+  const key = dayKey();
+  if (daily && puzzleStats().days[key]) {
+    const d = puzzleStats().days[key];
+    const r = await modal(`<h2>🧩 Today's puzzle</h2><p>${d.solved ? `Solved${d.mistakes ? ` with ${d.mistakes} miss${d.mistakes > 1 ? 'es' : ''}` : ' first try 🎯'}.` : 'You gave this one up.'} A new one arrives in <b>${hms(msToReset())}</b>.</p>`, {
+      buttons: [{ label: '🧩 Practice puzzles', value: 'more', cls: 'green' }, { label: 'Back', value: null, cls: 'ghost' }],
+    });
+    if (r === 'more') return playChessPuzzle({ daily: false });
+    return arcadeMenu('chess');
+  }
+  const mod = await VIEWS.chess();
+  const { puzzleFor } = await import('./arcade/chess-ai.js');
+  const { ChessPuzzleSim } = await import('./arcade/chess-puzzles.js');
+  const seed = daily ? hashString('tidepop-chess-puzzle-' + key) : randSeed();
+  toast(daily ? '🧩 Setting up today\'s puzzle…' : '🧩 Finding a puzzle…');
+  const puzzle = await puzzleFor(seed);
+  if (!puzzle) { toast("Couldn't find a puzzle – try again"); return arcadeMenu('chess'); }
+  leaveGame();
+  try { history.pushState({ g: 1 }, ''); } catch { /* sandboxed */ }
+  const sim = new ChessPuzzleSim(puzzle, { name: load().name });
+  sim.onWrong = (n) => { sfx.bad(); toast(n === 1 ? '🔍 Not quite – look for something stronger' : n === 2 ? '💡 Tip: checks, captures, threats – in that order' : '🤔 Use 💡 Hint if you\'re stuck'); };
+  const run = { kind: 'puzzle', id: 'chess', sim };
+  currentRun = run;
+  setBackground(ARCADE_BY_ID.chess.color);
+  const el = showScreen('arcade', `
+    <div class="hud">
+      <button class="icon-btn" id="ar-pause" aria-label="Menu">⏸</button>
+      <div class="box grow arcade-hud" id="ar-hud"></div>
+    </div>
+    <div class="board-wrap"><canvas id="ar-canvas" aria-label="Chess puzzle board"></canvas></div>
+    <div id="ar-controls" class="arcade-controls"></div>
+    <div class="mode-label" id="ar-label">${daily ? '🧩 Daily puzzle · same for everyone' : '🧩 Practice puzzle'} · ${puzzle.side === 'w' ? 'White' : 'Black'} to play · ${puzzle.theme === 'Mate' ? 'find the mate' : 'win material'}</div>`);
+  applyTable(el, 'chess');
+  const refresh = () => {
+    const st = puzzleStats();
+    const box = $('#ar-hud', el);
+    if (box) box.innerHTML = [
+      { label: 'Puzzle', value: puzzle.theme === 'Mate' ? '♚ Mate' : '⚔️ Tactic', big: true },
+      { label: 'Rating', value: st.rating },
+      { label: 'Streak', value: `🔥 ${st.streak}` },
+    ].map((h) => `<div class="hstat ${h.big ? 'big' : ''}"><span class="lbl">${esc(String(h.label))}</span><b>${h.value}</b></div>`).join('');
+  };
+  const finish = async (solved) => {
+    if (run.ended) return;
+    run.ended = true;
+    const clean = solved && sim.mistakes === 0 && sim.hintsUsed === 0;
+    const delta = solved ? (clean ? 16 : sim.hintsUsed ? 4 : 8) : -12;
+    update((d) => {
+      const p = { rating: 1000, solved: 0, streak: 0, best: 0, days: {}, ...(d.chessPuzzles || {}) };
+      p.rating = Math.max(400, p.rating + delta);
+      if (solved) { p.solved++; p.streak = clean ? p.streak + 1 : p.streak; p.best = Math.max(p.best, p.streak); } else p.streak = 0;
+      if (daily) p.days = { ...p.days, [key]: { solved, mistakes: sim.mistakes, hints: sim.hintsUsed } };
+      d.chessPuzzles = p;
+      d.shells += solved ? (clean ? 20 : 10) : 0;
+    });
+    noteGameEnd('chess', false);
+    solved ? sfx.win() : sfx.lose();
+    const st = puzzleStats();
+    const r = await modal(`<h2>${solved ? (clean ? '🎯 Solved – first try!' : '✅ Solved!') : '🏳️ Here\'s the answer'}</h2>
+      <p class="muted">${solved ? (clean ? 'Clean and sharp.' : `${sim.mistakes} miss${sim.mistakes === 1 ? '' : 'es'}${sim.hintsUsed ? ` · ${sim.hintsUsed} hint` : ''}`) : `The winning move was <b>${esc(puzzle.line[0])}</b>.`}</p>
+      ${solved ? `<div class="reward">+${clean ? 20 : 10} 🐚</div>` : ''}
+      <div class="tide-stats"><div><b>${st.rating}</b><span>Rating ${delta >= 0 ? '+' : ''}${delta}</span></div><div><b>${st.streak}</b><span>Streak</span></div><div><b>${st.best}</b><span>Best streak</span></div><div><b>${st.solved}</b><span>Solved</span></div></div>`, {
+      buttons: [{ label: '🧩 Next puzzle', value: 'next', cls: 'green' }, { label: '♟️ Chess menu', value: 'menu', cls: 'ghost' }],
+    });
+    if (r === 'next') playChessPuzzle({ daily: false });
+    else arcadeMenu('chess');
+  };
+  view = new mod.default({
+    canvas: $('#ar-canvas', el), controls: $('#ar-controls', el), sim, reducedMotion: load().settings.reducedMotion,
+    hooks: {
+      onChange: refresh,
+      onOver: () => finish(sim.result?.winner === sim.mySide),
+      onRound: () => {},
+      onQuit: () => { sim.resign(); finish(false); },
+    },
+  });
+  $('#ar-pause', el).onclick = async () => {
+    sfx.tap();
+    const r = await modal('<h2>🧩 Puzzle</h2>', { buttons: [{ label: '▶ Keep thinking', value: null, cls: 'green' }, { label: '🏳️ Show me the answer', value: 'give', cls: 'ghost' }, { label: '♟️ Chess menu', value: 'menu', cls: 'ghost' }] });
+    if (r === 'give') { sim.resign(); finish(false); }
+    else if (r === 'menu') arcadeMenu('chess');
+  };
+  refresh();
+}
+
 // ------------------------------------------------------------------ Cube Twist free solve
 const ao = (times, n) => {
   if (times.length < n) return null;
@@ -1619,7 +1710,7 @@ async function arcadeMenu(id) {
     buttons: [
       { label: g.board ? '▶ Play the ladder' : '▶ Play', value: 'play', cls: 'green' },
       ...(id === 'ludo' ? [{ label: '👥 Pass & play · 2–4 players (offline)', value: 'party', cls: 'blue' }, { label: '🤖 Quick game vs computer', value: 'cpu', cls: 'blue' }] : []),
-      ...(id === 'chess' ? [{ label: '👥 Pass & play · 2 players (offline)', value: 'party', cls: 'blue' }, { label: '🤖 Play vs computer', value: 'cpu', cls: 'blue' }] : []),
+      ...(id === 'chess' ? [{ label: `🧩 Daily puzzle${load().chessPuzzles?.days?.[dayKey()] ? ' ✓' : ''}`, value: 'pz-daily', cls: 'green' }, { label: '🧩 Practice puzzles', value: 'pz-more', cls: 'blue' }, { label: '🤖 Play a sea-creature bot', value: 'cpu', cls: 'blue' }, { label: '👥 Pass & play · 2 players (offline)', value: 'party', cls: 'blue' }] : []),
       ...(id === 'cube' ? [{ label: '⏱️ Free solve · 3×3 (timer, no limit)', value: 'free3', cls: 'blue' }, { label: '⏱️ Free solve · 2×2', value: 'free2', cls: 'blue' }] : []),
       ...(g.board ? [{ label: '👥 Play a friend', value: 'friend', cls: 'blue' }] : []),
       { label: `📅 Daily challenge${today === undefined ? ' (new!)' : ''}`, value: 'daily', cls: 'blue' },
@@ -1635,6 +1726,7 @@ async function arcadeMenu(id) {
   else if (r === 'cpu') (id === 'chess' ? chessSetup() : ludoVsComputer());
   else if (r === 'party') (id === 'chess' ? chessParty() : ludoParty());
   else if (r === 'free3' || r === 'free2') playCubeFree(r === 'free3' ? 3 : 2);
+  else if (r === 'pz-daily' || r === 'pz-more') playChessPuzzle({ daily: r === 'pz-daily' });
 }
 
 /** Chess & Ludo are played on a real-looking wooden table instead of the arcade frame. */

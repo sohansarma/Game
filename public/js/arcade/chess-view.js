@@ -43,6 +43,8 @@ export default class ChessView {
     this.loop = this.loop.bind(this);
     this.raf = requestAnimationFrame(this.loop);
     // casual game where the bot moves first
+    if (sim.onSay !== undefined) sim.onSay = (text) => { this.speech = { text, t0: performance.now() }; };
+    if (sim.say) setTimeout(() => sim.say('hi'), 400);
     if (sim.botToMove?.()) this.scheduleBot(500);
   }
 
@@ -223,10 +225,15 @@ export default class ChessView {
     this.thinking = true;
     this.renderControls();
     clearTimeout(this.botTimer);
-    this.botTimer = setTimeout(() => {
+    this.botTimer = setTimeout(async () => {
       if (this.destroyed) return;
       const before = this.game.board.slice();
-      const res = this.sim.botMove();
+      const t0 = performance.now();
+      const res = this.sim.botMoveAsync ? await this.sim.botMoveAsync() : this.sim.botMove();
+      if (this.destroyed) return;
+      // a natural minimum "thinking" pause even when the answer is instant
+      const wait = Math.max(0, (this.reduced ? 0 : 250) - (performance.now() - t0));
+      if (wait) await new Promise((r) => setTimeout(r, wait));
       this.thinking = false;
       if (!res) { this.renderControls(); return; }
       this.animate(before, res.ai, this.game.board.slice(), false, () => this.afterHalfMove(res, null, true));
@@ -513,7 +520,32 @@ export default class ChessView {
     for (const [side, top] of [[this.bottomSide === 'w' ? 'b' : 'w', true], [this.bottomSide, false]]) {
       const y = top ? this.oy - this.frame - this.barH - 8 : this.oy + this.size + this.frame + 8;
       this.drawBar(side, y, capturedBy(side), side === 'w' ? diff : -diff, now);
+      if (this.speech && this.sim.botSide === side) this.drawSpeech(y, top, now);
     }
+  }
+
+  /** The bot's chat bubble next to its name tag. */
+  drawSpeech(y, top, now) {
+    const t = (now - this.speech.t0) / 3800;
+    if (t > 1) { this.speech = null; return; }
+    const ctx = this.ctx;
+    ctx.save();
+    ctx.globalAlpha = t < 0.08 ? t / 0.08 : t > 0.85 ? (1 - t) / 0.15 : 1;
+    ctx.font = '700 13px ui-rounded, system-ui, sans-serif';
+    const text = this.speech.text;
+    const w = Math.min(this.W - 30, ctx.measureText(text).width + 22), h = 30;
+    const x = Math.min(this.W - w - 8, 186), by = y + (this.barH - h) / 2;
+    ctx.fillStyle = 'rgba(255,250,238,0.96)';
+    ctx.beginPath();
+    ctx.moveTo(x + 12, by); ctx.arcTo(x + w, by, x + w, by + h, 12); ctx.arcTo(x + w, by + h, x, by + h, 12); ctx.arcTo(x, by + h, x, by, 12); ctx.arcTo(x, by, x + w, by, 12); ctx.closePath();
+    ctx.fill();
+    ctx.beginPath(); ctx.moveTo(x, by + h / 2 - 6); ctx.lineTo(x - 8, by + h / 2); ctx.lineTo(x, by + h / 2 + 6); ctx.fill();
+    ctx.fillStyle = '#3a2410';
+    ctx.textBaseline = 'middle';
+    ctx.textAlign = 'left';
+    ctx.fillText(text, x + 11, by + h / 2, w - 18);
+    ctx.restore();
+    void top;
   }
 
   /** A seat at the table: felt name tag, captured pieces lying on the wood, chess clock. */
