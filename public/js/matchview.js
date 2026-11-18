@@ -240,7 +240,7 @@ export class MatchView {
     const dur = Math.min(420, 120 + maxDist * 45);
     for (const m of step.moves) {
       const sp = this.sprites.get(m.id);
-      if (sp) anims.push(this.tween(sp, { y: m.toR }, dur * (0.6 + 0.4 * ((m.toR - m.fromR) / maxDist)), ease.inQuad));
+      if (sp) anims.push(this.tween(sp, { y: m.toR, x: m.c }, dur * (0.6 + 0.4 * ((m.toR - m.fromR) / maxDist)), ease.inQuad));
     }
     for (const s of step.spawns) {
       this.addSprite(s, s.fromR);

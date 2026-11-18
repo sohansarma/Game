@@ -686,39 +686,91 @@ export class Game {
     steps.push({ type: 'clear', cleared, upgraded, effects, hits, points, cascade, board: this.snapshot() });
   }
 
+  // Gems fall straight down; new gems only enter columns open to the sky.
+  // A crate is a real blocker: the cells under it are refilled only by gems
+  // sliding in diagonally from the neighbouring columns (so crates trap).
   gravity(steps) {
-    const moves = [];
-    const spawns = [];
-    for (let c = 0; c < this.cols; c++) {
-      let r = this.rows - 1;
-      while (r >= 0) {
-        // find segment of open cells [top..bottom]
-        while (r >= 0 && !this.isOpen(r, c)) r--;
-        if (r < 0) break;
-        const bottom = r;
-        while (r >= 0 && this.isOpen(r, c)) r--;
-        const top = r + 1;
-        // compact gems downward
-        let write = bottom;
-        for (let rr = bottom; rr >= top; rr--) {
-          const g = this.gems[rr][c];
-          if (g) {
-            if (rr !== write) {
-              this.gems[write][c] = g;
-              this.gems[rr][c] = null;
-              moves.push({ id: g.id, fromR: rr, toR: write, c });
+    const from = new Map(); // id -> { r, c } where it started this fall
+    const spawned = new Map(); // id -> spawn record
+    const moveGem = (g, r0, c0, r1, c1) => {
+      if (!from.has(g.id) && !spawned.has(g.id)) from.set(g.id, { r: r0, c: c0 });
+      this.gems[r1][c1] = g;
+      this.gems[r0][c0] = null;
+    };
+    // a segment's top is fed from the sky if nothing above it is a crate
+    const skyFed = (top, c) => {
+      for (let rr = top - 1; rr >= 0; rr--) if (this.isCell(rr, c) && !this.isOpen(rr, c)) return false;
+      return true;
+    };
+    for (let guard = 0; guard < 400; guard++) {
+      let changed = false;
+      for (let c = 0; c < this.cols; c++) {
+        let r = this.rows - 1;
+        while (r >= 0) {
+          while (r >= 0 && !this.isOpen(r, c)) r--;
+          if (r < 0) break;
+          const bottom = r;
+          while (r >= 0 && this.isOpen(r, c)) r--;
+          const top = r + 1;
+          let write = bottom;
+          for (let rr = bottom; rr >= top; rr--) {
+            const g = this.gems[rr][c];
+            if (g) {
+              if (rr !== write) { moveGem(g, rr, c, write, c); changed = true; }
+              write--;
             }
-            write--;
+          }
+          if (write >= top && skyFed(top, c)) {
+            const empty = write - top + 1;
+            for (let rr = write; rr >= top; rr--) {
+              const g = this.newGem(this.rng.int(this.colors));
+              this.gems[rr][c] = g;
+              spawned.set(g.id, { id: g.id, r: rr, c, color: g.color, special: g.special, fromR: rr - empty });
+            }
+            changed = true;
           }
         }
-        const empty = write - top + 1;
-        for (let rr = write; rr >= top; rr--) {
-          const g = this.newGem(this.rng.int(this.colors));
-          this.gems[rr][c] = g;
-          spawns.push({ id: g.id, r: rr, c, color: g.color, special: g.special, fromR: rr - empty });
+      }
+      if (changed) continue;
+      // nothing falls straight any more: one gem slides diagonally into a trapped gap
+      let slid = false;
+      for (let r = this.rows - 1; r > 0 && !slid; r--) {
+        for (let c = 0; c < this.cols && !slid; c++) {
+          if (!this.isOpen(r, c) || this.gems[r][c]) continue;
+          for (const dc of [-1, 1]) {
+            const sc = c + dc;
+            const g = this.gems[r - 1]?.[sc];
+            if (!g || !this.isOpen(r - 1, sc)) continue;
+            // only a gem that can't drop straight down slides sideways
+            if (this.isOpen(r, sc) && !this.gems[r][sc]) continue;
+            moveGem(g, r - 1, sc, r, c);
+            slid = true;
+            break;
+          }
         }
       }
+      if (!slid) break;
     }
+    // a pocket nothing can reach still gets a gem (boards never have holes in play)
+    for (let r = 0; r < this.rows; r++) for (let c = 0; c < this.cols; c++) {
+      if (this.isOpen(r, c) && !this.gems[r][c]) {
+        const g = this.newGem(this.rng.int(this.colors));
+        this.gems[r][c] = g;
+        spawned.set(g.id, { id: g.id, r, c, color: g.color, special: g.special, fromR: r });
+      }
+    }
+    // where everything ended up
+    const at = new Map();
+    for (let r = 0; r < this.rows; r++) for (let c = 0; c < this.cols; c++) if (this.gems[r][c]) at.set(this.gems[r][c].id, [r, c]);
+    const moves = [];
+    for (const [id, f] of from) {
+      const [r, c] = at.get(id) || [f.r, f.c];
+      if (r !== f.r || c !== f.c) moves.push({ id, fromR: f.r, fromC: f.c, toR: r, c });
+    }
+    const spawns = [...spawned.values()].map((s) => {
+      const [r, c] = at.get(s.id) || [s.r, s.c];
+      return { ...s, r, c };
+    });
     if (moves.length || spawns.length) steps.push({ type: 'fall', moves, spawns, board: this.snapshot() });
   }
 
