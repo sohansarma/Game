@@ -2382,6 +2382,7 @@ async function endArcade(run) {
     const a = { best: 0, games: 0, daily: {}, ...(d.arcade[run.id] || {}) };
     a.games++;
     a.best = Math.max(a.best, score);
+    if (run.id === 'stack') a.bestFloors = Math.max(a.bestFloors || 0, run.sim?.floors || 0);
     if (run.daily) a.daily = { ...a.daily, [run.key]: Math.max(a.daily[run.key] || 0, score) };
     else {
       const wk = weekKey();

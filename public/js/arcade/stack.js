@@ -7,6 +7,15 @@
 export const WORLD_W = 100;
 const START_W = 60;
 const PERFECT = 1.4;
+const NEAR = 3; // "almost perfect": snaps into place, but no streak
+// The climb has zones that change how the slab moves.
+export const ZONES = [
+  { from: 0, name: 'Reef', icon: '🪸', tip: 'Calm water' },
+  { from: 15, name: 'Currents', icon: '🌊', tip: 'The slab surges and slows' },
+  { from: 30, name: 'Windy surface', icon: '🌬️', tip: 'Fast with the wind, slow against it' },
+  { from: 45, name: 'Starlight', icon: '✨', tip: 'Smooth, fast and quiet' },
+];
+export const zoneAt = (floors) => [...ZONES].reverse().find((z) => floors >= z.from);
 
 class StackSim {
   constructor(seed) {
@@ -37,7 +46,7 @@ class StackSim {
 
   spawn() {
     const top = this.tower[this.tower.length - 1];
-    const fromLeft = this.floors % 2 === 0;
+    const fromLeft = (this.floors + (this.seed & 1)) % 2 === 0;
     this.cur = { w: top.w, x: fromLeft ? -15 : WORLD_W - top.w + 15, dir: fromLeft ? 1 : -1 };
   }
 
@@ -59,7 +68,11 @@ class StackSim {
     if (this.over || !this.started) return;
     this.tick++;
     const c = this.cur;
-    c.x += c.dir * this.speed;
+    let v = this.speed;
+    const zone = zoneAt(this.floors).name;
+    if (zone === 'Currents') v *= 1 + 0.45 * Math.sin(this.tick / 18 + (this.seed % 628) / 100);
+    else if (zone === 'Windy surface') v *= c.dir === ((((this.seed >> 3) + (this.floors >> 1)) & 1) ? 1 : -1) ? 1.35 : 0.7;
+    c.x += c.dir * v;
     const lo = -15, hi = WORLD_W - c.w + 15;
     if (c.x < lo) { c.x = lo + (lo - c.x); c.dir = 1; }
     if (c.x > hi) { c.x = hi - (c.x - hi); c.dir = -1; }
@@ -72,8 +85,15 @@ class StackSim {
     const top = this.tower[this.tower.length - 1];
     const c = this.cur;
     this.events = [];
-    let x = c.x, w = c.w, perfect = false;
-    if (Math.abs(c.x - top.x) <= PERFECT) {
+    let x = c.x, w = c.w, perfect = false, near = false;
+    const off = Math.abs(c.x - top.x);
+    if (off > PERFECT && off <= NEAR && c.w <= top.w + 0.01) {
+      // so close: snap it on, keep the width, but the perfect streak ends
+      near = true;
+      x = top.x;
+      this.streak = 0;
+      this.cut = null;
+    } else if (off <= PERFECT) {
       perfect = true;
       x = top.x;
       this.streak++;
@@ -98,9 +118,11 @@ class StackSim {
     }
     this.tower.push({ x, w });
     this.floors++;
-    this.events.push(perfect ? 'perfect' : 'place');
+    const before = zoneAt(this.floors - 1);
+    this.events.push(perfect ? 'perfect' : near ? 'near' : 'place');
     this.spawn();
-    return { ok: true, perfect };
+    const zone = zoneAt(this.floors);
+    return { ok: true, perfect, near, zone: zone !== before ? zone : null };
   }
 }
 
