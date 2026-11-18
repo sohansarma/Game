@@ -114,7 +114,7 @@ async function onboarding() {
   let name = load().name;
   const res = await modal(`
     <div class="logo">Tide<span>pop</span></div>
-    <p>Welcome to the reef! Match sea creatures, explore an endless reef of levels, take on the <b>Daily Dive</b> and build reefs in <b>Reef Blocks</b>.</p>
+    <p>Welcome to the <b>Tidepop Arcade</b>! Match-3, chess, ludo, mining and more – pick any game, climb the leaderboards and challenge your friends.</p>
     <p class="small muted">Free to play · plays offline</p>
     <div class="tip name-tip"><label for="nf-input"><b>Choose your name</b></label>${nameFieldHtml(name)}</div>
   `, {
@@ -133,7 +133,7 @@ async function onboarding() {
   if (res === 'go') {
     update((d) => { d.name = name; d.onboarded = true; });
     claimDaily(true);
-    startLevel(1);
+    showHub(); // land on the Tidepop Arcade with every game to pick from
   }
 }
 
@@ -2260,7 +2260,7 @@ function showSettings() {
     resetSave();
     applySettings();
     toast('Progress reset. Welcome back to the reef!');
-    goHome();
+    showHub();
     onboarding();
   };
   $('#s-privacy', el).onclick = () => modal(`<h2>🔒 Privacy</h2><div class="tip">
