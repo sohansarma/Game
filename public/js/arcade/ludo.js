@@ -56,7 +56,7 @@ export class LudoGame {
     const pl = this.turn;
     this.roll = 1 + this.rng.int(6);
     this.events.push({ kind: 'roll', player: pl, value: this.roll });
-    if (this.roll === 6) this.sixes++;
+    this.sixes = this.roll === 6 ? this.sixes + 1 : 0; // only 6s in a row count
     if (this.sixes >= 3) {
       this.events.push({ kind: 'three6', player: pl });
       this.passTurn();
@@ -167,7 +167,8 @@ export function aiChoose(g, skill, rng) {
         const qa = abs(op, q);
         if (qa < 0) continue;
         const dist = (a - qa + 52) % 52;
-        if (dist >= 1 && dist <= 6) d++;
+        // only a token that can still travel that far along the main track
+        if (dist >= 1 && dist <= 6 && q + dist <= 50) d++;
       }
     });
     return d;
@@ -281,7 +282,11 @@ class LudoLeague {
   finishAction() {
     const g = this.g;
     const out = { ok: true, events: g.events };
-    if (g.over || g.finished.includes(this.mySide)) out.end = this.endMatch();
+    if (g.over || g.finished.includes(this.mySide)) {
+      out.end = this.endMatch();
+      // the next table may open with bot moves: show those too
+      if (this.g !== g) out.next = this.g.events.slice();
+    }
     return out;
   }
 

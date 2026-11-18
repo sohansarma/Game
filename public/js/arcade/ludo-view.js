@@ -1,5 +1,6 @@
-// Ludo table: rotating board (your colour sits bottom-left), a player
-// panel with its own dice at every corner, tap-to-roll, token hops.
+// Ludo table: rotating board (your colour sits bottom-left), a name tag per
+// seat and ONE shared dice tray at the bottom centre. Every throw slides from
+// the thrower's tag into the tray, so the dice is always in the same place.
 //
 // sim interface: { game, mySide, canRoll(), canMove(), roll() -> {ok, events, end?},
 //                  move(t) -> {ok, events, end?}, labelOf?(seat), isLocal?(seat) }
@@ -26,7 +27,6 @@ const HOMECOL = [
 const BASE_ORIGIN = [[0, 0], [0, 9], [9, 9], [9, 0]];
 const SLOTS = [[1.5, 1.5], [1.5, 3.5], [3.5, 1.5], [3.5, 3.5]];
 const HOME_SPOT = [[7.5, 6.4], [6.4, 7.5], [7.5, 8.6], [8.6, 7.5]];
-const PIPS = { 1: [[0.5, 0.5]], 2: [[0.27, 0.27], [0.73, 0.73]], 3: [[0.25, 0.25], [0.5, 0.5], [0.75, 0.75]], 4: [[0.28, 0.28], [0.72, 0.28], [0.28, 0.72], [0.72, 0.72]], 5: [[0.25, 0.25], [0.75, 0.25], [0.5, 0.5], [0.25, 0.75], [0.75, 0.75]], 6: [[0.28, 0.22], [0.72, 0.22], [0.28, 0.5], [0.72, 0.5], [0.28, 0.78], [0.72, 0.78]] };
 
 /** Board-space centre [row, col] of a token (unrotated). */
 export function cellOf(player, p, t) {
@@ -49,7 +49,7 @@ export default class LudoView {
     this.queue = [];
     this.anim = null;
     this.wait = 0;
-    this.dice = sim.game.players.map(() => ({ value: 6, rollT0: 0 }));
+    this.die = { value: 6, rollT0: 0, seat: sim.game.turn };
     this.activeSeat = sim.game.turn;
     this.note = '';
     this.noteT = 0;
@@ -93,6 +93,7 @@ export default class LudoView {
     this.W = rect.width;
     this.H = rect.height;
     this.panelH = 54;
+    this.trayS = 62;
     const avail = Math.min(rect.width - 10, rect.height - this.panelH * 2 - 20);
     this.frame = Math.max(8, Math.round(avail * 0.028));
     const size = avail - this.frame * 2;
@@ -110,18 +111,25 @@ export default class LudoView {
   /** The name tag in front of each seat, on the table above/below the board. */
   panelRect(seat) {
     const corner = this.cornerOf(seat);
-    const gap = 92; // open table between the two tags, where the dice land
-    const w = Math.min((this.W - gap) / 2 - 8, 180), h = this.panelH;
+    const gap = this.trayS + 20; // the dice tray sits between the two bottom tags
+    const w = Math.min((this.W - gap) / 2 - 8, 172), h = this.panelH;
     const x = corner === 0 || corner === 3 ? this.W / 2 - gap / 2 - w : this.W / 2 + gap / 2;
     const y = corner < 2 ? this.oy - this.frame - h - 8 : this.oy + this.size + this.frame + 8;
     return { x, y, w, h, right: corner === 1 || corner === 2 };
   }
 
-  /** Where that seat's die rests: on the table just inside its name tag. */
-  diceRect(seat) {
-    const p = this.panelRect(seat);
-    const d = 34;
-    return { x: p.right ? p.x - d - 6 : p.x + p.w + 6, y: p.y + (p.h - d) / 2, s: d };
+  /** The one dice tray everybody throws into (bottom centre, under the board). */
+  trayRect() {
+    const S = this.trayS;
+    const y = this.oy + this.size + this.frame + 8 + (this.panelH - S) / 2;
+    return { x: this.W / 2 - S / 2, y, s: S };
+  }
+
+  /** Where the dice rests (same for every seat). */
+  diceRect() {
+    const t = this.trayRect();
+    const d = Math.round(t.s * 0.56);
+    return { x: t.x + (t.s - d) / 2, y: t.y + (t.s - d) / 2, s: d };
   }
 
   /** Rotate board-space [row, col] (0..15) into screen pixels. */
@@ -137,27 +145,19 @@ export default class LudoView {
       const r = this.canvas.getBoundingClientRect();
       const x = e.clientX - r.left, y = e.clientY - r.top;
       if (this.busy()) return;
-      // dice
       const seat = this.game.turn;
-      const d = this.diceRect(seat);
-      const pr = this.panelRect(seat);
-      const onTag = x >= pr.x && x <= pr.x + pr.w && y >= pr.y && y <= pr.y + pr.h;
-      const onDie = Math.hypot(x - (d.x + d.s / 2), y - (d.y + d.s / 2)) < d.s * 1.1;
-      if (this.sim.canRoll() && (onTag || onDie)) return this.doRoll();
-      if (!this.sim.canMove()) {
-        if (this.sim.canRoll()) this.flashNote('Tap your dice to roll 🎲');
+      if (this.sim.canRoll()) {
+        const t = this.trayRect(), pr = this.panelRect(seat), pad = 14;
+        const onTray = x >= t.x - pad && x <= t.x + t.s + pad && y >= t.y - pad && y <= t.y + t.s + pad;
+        const onTag = x >= pr.x - 6 && x <= pr.x + pr.w + 6 && y >= pr.y - 6 && y <= pr.y + pr.h + 6;
+        if (onTray || onTag) return this.doRoll();
+        this.flashNote('Tap the dice to roll 🎲');
         return;
       }
-      // token
-      const legal = this.game.legal();
-      let best = null, bestD = this.cell * 0.9;
-      for (const t of legal) {
-        const [cr, cc] = cellOf(seat, this.game.tokens[seat][t], t);
-        const [sx, sy] = this.toScreen(cr, cc);
-        const dist = Math.hypot(sx - x, sy - y);
-        if (dist < bestD) { bestD = dist; best = t; }
-      }
-      if (best !== null) this.doMove(best);
+      if (!this.sim.canMove()) return;
+      const t = this.tokenAt(x, y);
+      if (t !== null) this.doMove(t);
+      else this.flashNote('Tap a glowing token');
     };
     const key = (e) => {
       if (document.querySelector('.modal.open') || this.busy()) return;
@@ -174,6 +174,52 @@ export default class LudoView {
       window.removeEventListener('keydown', key);
       window.removeEventListener('resize', resize);
     };
+  }
+
+  /** Which of the current player's legal tokens is under (x, y)? The whole
+   *  pawn counts (base and head), with a forgiving radius. */
+  tokenAt(x, y) {
+    const g = this.game, seat = g.turn, legal = g.legal();
+    if (!legal.length) return null;
+    let best = null, bestD = Infinity;
+    for (const it of this.tokenLayout()) {
+      if (it.pl !== seat || !legal.includes(it.t)) continue;
+      const head = it.y - it.R * 0.95;
+      const d = Math.min(Math.hypot(it.x - x, it.y - y), Math.hypot(it.x - x, head - y), Math.abs(it.x - x) < it.R && y > head && y < it.y ? 0 : Infinity);
+      if (d < bestD) { bestD = d; best = it.t; }
+    }
+    return bestD <= this.cell * 1.05 ? best : null;
+  }
+
+  /** Screen position and size of every token (stacked tokens share a square). */
+  tokenLayout() {
+    const C = this.cell, g = this.game;
+    const groups = new Map();
+    const placed = [];
+    this.shown.forEach((ts, pl) => {
+      if (!g.players[pl]) return;
+      ts.forEach((p, t) => {
+        const [r, c] = cellOf(pl, p, t);
+        const k = `${r.toFixed(2)},${c.toFixed(2)}`;
+        const n = groups.get(k) || 0;
+        groups.set(k, n + 1);
+        placed.push({ pl, t, r, c, n, k });
+      });
+    });
+    const SPREAD = {
+      1: [[0, 0]],
+      2: [[-0.2, 0], [0.2, 0]],
+      3: [[-0.22, -0.1], [0.22, -0.1], [0, 0.16]],
+      4: [[-0.2, -0.16], [0.2, -0.16], [-0.2, 0.16], [0.2, 0.16]],
+    };
+    const SCALE = { 1: 1, 2: 0.78, 3: 0.68, 4: 0.62 };
+    return placed.map((tok) => {
+      const stack = Math.min(4, groups.get(tok.k));
+      let [x, y] = this.toScreen(tok.r, tok.c);
+      const [dx, dy] = SPREAD[stack][Math.min(tok.n, 3)];
+      x += dx * C; y += dy * C;
+      return { ...tok, x, y, R: C * 0.42 * SCALE[stack] };
+    });
   }
 
   busy() {
@@ -196,7 +242,8 @@ export default class LudoView {
 
   enqueue(res) {
     for (const e of res.events) this.queue.push(e);
-    if (res.end) this.queue.push({ kind: 'end', end: res.end });
+    if (res.end) this.queue.push({ kind: 'end', end: res.end, fresh: !!res.next });
+    for (const e of res.next || []) this.queue.push(e);
     this.renderControls();
   }
 
@@ -218,11 +265,12 @@ export default class LudoView {
     switch (e.kind) {
       case 'roll': {
         this.activeSeat = e.player;
-        const d = this.diceRect(e.player);
-        const top = this.cornerOf(e.player) < 2;
-        this.dice[e.player] = { value: e.value, rollT0: now, from: [d.x + d.s / 2 + (d.x < this.W / 2 ? 60 : -60), top ? -30 : this.H + 30], yaw: (now % 1000) / 1000 - 0.5 };
+        const p = this.panelRect(e.player);
+        const local = this.isLocal(e.player);
+        this.die = { value: e.value, rollT0: now, seat: e.player, dur: this.reduced ? 1 : local ? 760 : 560, from: [p.x + p.w / 2, p.y + p.h / 2], yaw: (now % 1000) / 1000 - 0.5 };
         sfx.dice ? sfx.dice() : sfx.tap();
-        this.wait = now + (this.reduced ? 250 : 950);
+        this.wait = now + (this.reduced ? 250 : local ? 1000 : 760);
+        this.renderControls();
         if (e.value === 6 && this.isLocal(e.player)) haptic(25);
         break;
       }
@@ -230,7 +278,7 @@ export default class LudoView {
         const path = [];
         if (e.from < 0) path.push(0);
         else for (let p = e.from + 1; p <= e.to; p++) path.push(p);
-        this.anim = { player: e.player, token: e.token, path, step: 0, t0: now, captured: e.captured };
+        this.anim = { player: e.player, token: e.token, path, step: 0, t0: now, captured: e.captured, ms: this.reduced ? 25 : this.isLocal(e.player) ? 160 : 120 };
         break;
       }
       case 'pass':
@@ -256,7 +304,7 @@ export default class LudoView {
         this.wait = now + 900 * slow;
         break;
       case 'end':
-        this.shown = this.game.tokens.map((ts) => ts.slice());
+        this.shown = e.fresh ? this.game.players.map(() => [-1, -1, -1, -1]) : this.game.tokens.map((ts) => ts.slice());
         this.activeSeat = this.game.turn;
         this.hooks.onRound?.(e.end, this.sim);
         break;
@@ -269,7 +317,7 @@ export default class LudoView {
     if (now >= this.wait) {
       if (this.anim) {
         const a = this.anim;
-        const stepMs = this.reduced ? 25 : 170;
+        const stepMs = a.ms;
         if (now - a.t0 >= stepMs) {
           this.shown[a.player][a.token] = a.path[a.step];
           a.step++;
@@ -319,7 +367,7 @@ export default class LudoView {
     let status;
     if (s.over || g.over) status = 'Game over';
     else if (this.busy()) status = this.isLocal(this.activeSeat) ? '🎲 Rolling…' : `${esc(this.label(this.activeSeat))} is playing…`;
-    else if (s.canRoll()) status = `<b>${this.isLocal(g.turn) && s.mySide === undefined ? `${this.label(g.turn)}'s turn – ` : 'Your turn – '}tap your dice 🎲</b>`;
+    else if (s.canRoll()) status = `<b>${this.isLocal(g.turn) && s.mySide === undefined ? `${this.label(g.turn)}'s turn – ` : 'Your turn – '}tap the dice 🎲</b>`;
     else if (s.canMove()) status = `<b>Rolled ${g.roll} – tap a glowing token</b>`;
     else status = `${this.label(g.turn)} is playing…`;
     this.controls.innerHTML = `<div class="col" style="gap:6px;width:100%">
@@ -330,34 +378,47 @@ export default class LudoView {
   }
 
   // ---------------- drawing
-  drawSeatDie(seat, now, canTap) {
-    const ctx = this.ctx;
-    const d = this.diceRect(seat);
-    const st = this.dice[seat];
-    const rx = d.x + d.s / 2, ry = d.y + d.s / 2;
-    const dur = this.reduced ? 1 : 900;
-    const t = (now - (st.rollT0 || 0)) / dur;
-    if (st.rollT0 && t < 1 && st.from) {
-      const pose = throwPose(t, st.from[0], st.from[1], rx, ry);
-      ctx.save();
-      // lifted dice look bigger and their shadow drifts away
-      drawDie3D(ctx, pose.x, pose.y - pose.z * d.s * 0.9, d.s * (1 + pose.z * 0.25), st.value, pose.spin, st.yaw || 0);
-      ctx.restore();
-      return;
-    }
+  /** The felt dice tray with the one die in it (or flying into it). */
+  drawTray(now) {
+    const ctx = this.ctx, g = this.game;
+    const t = this.trayRect(), d = this.diceRect();
+    const seat = this.die.rollT0 && now - this.die.rollT0 < (this.die.dur || 0) + 400 ? this.die.seat : this.activeSeat;
+    const col = COLORS[seat] || 'red';
+    const canTap = !g.over && this.sim.canRoll() && this.isLocal(g.turn) && !this.busy();
+    ctx.save();
+    softShadow(ctx, t.x + t.s / 2, t.y + t.s - 2, t.s * 0.55, 9, 0.5);
+    // coloured rim = whose turn it is
+    roundedRect(ctx, t.x, t.y, t.s, t.s, 14);
+    ctx.fillStyle = DARK[col];
+    ctx.fill();
+    roundedRect(ctx, t.x + 4, t.y + 4, t.s - 8, t.s - 8, 11);
+    const felt = ctx.createRadialGradient(t.x + t.s / 2, t.y + t.s * 0.4, 2, t.x + t.s / 2, t.y + t.s / 2, t.s * 0.6);
+    felt.addColorStop(0, '#1f5a3a');
+    felt.addColorStop(1, '#0f3322');
+    ctx.fillStyle = felt;
+    ctx.fill();
+    ctx.lineWidth = 2;
+    ctx.strokeStyle = 'rgba(0,0,0,0.45)';
+    ctx.stroke();
     if (canTap) {
-      const k = this.reduced ? 0.5 : 0.5 + 0.5 * Math.sin(now / 220);
-      ctx.save();
+      const k = this.reduced ? 0.6 : 0.5 + 0.5 * Math.sin(now / 220);
       ctx.shadowColor = 'rgba(255,214,94,0.95)';
-      ctx.shadowBlur = 14 + k * 14;
-      ctx.strokeStyle = `rgba(255,214,94,${0.5 + k * 0.5})`;
+      ctx.shadowBlur = 10 + k * 14;
+      ctx.strokeStyle = `rgba(255,214,94,${0.55 + k * 0.45})`;
       ctx.lineWidth = 3;
-      ctx.beginPath();
-      ctx.arc(rx, ry + 2, d.s * 0.78, 0, Math.PI * 2);
+      roundedRect(ctx, t.x - 3, t.y - 3, t.s + 6, t.s + 6, 16);
       ctx.stroke();
-      ctx.restore();
     }
-    drawDie3D(this.ctx, rx, ry - (canTap && !this.reduced ? Math.abs(Math.sin(now / 300)) * 3 : 0), d.s, st.value, 0, st.yaw || 0);
+    ctx.restore();
+    const st = this.die;
+    const cx = d.x + d.s / 2, cy = d.y + d.s / 2;
+    const tt = (now - (st.rollT0 || 0)) / (st.dur || 1);
+    if (st.rollT0 && tt < 1 && st.from) {
+      const pose = throwPose(tt, st.from[0], st.from[1], cx, cy);
+      drawDie3D(ctx, pose.x, pose.y - pose.z * d.s * 0.8, d.s * (1 + pose.z * 0.25), st.value, pose.spin, st.yaw || 0);
+    } else {
+      drawDie3D(ctx, cx, cy - (canTap && !this.reduced ? Math.abs(Math.sin(now / 300)) * 2 : 0), d.s, st.value, 0, st.yaw || 0);
+    }
   }
 
   drawPanels(now) {
@@ -389,17 +450,14 @@ export default class LudoView {
       ctx.fillStyle = '#fff';
       ctx.font = '800 14px ui-rounded, system-ui, sans-serif';
       const nm = this.label(seat);
-      ctx.fillText(nm.length > 14 ? nm.slice(0, 13) + '…' : nm, tx, p.y + p.h * 0.36);
+      ctx.fillText(nm, tx, p.y + p.h * 0.36, p.w - 62);
       ctx.font = '600 12px system-ui, sans-serif';
       ctx.fillStyle = active ? '#ffd45e' : 'rgba(255,255,255,0.7)';
       const home = g.tokens[seat].filter((x) => x === HOME).length;
       ctx.fillText(place >= 0 ? `🏆 ${['1st', '2nd', '3rd', '4th'][place]} place` : active ? (this.isLocal(seat) && this.sim.canRoll() && !this.busy() ? 'Your roll!' : 'playing…') : `home ${home}/4`, tx, p.y + p.h * 0.7);
       ctx.restore();
-      if (place < 0) {
-        const canTap = active && this.sim.canRoll() && this.isLocal(seat) && !this.busy();
-        this.drawSeatDie(seat, now, canTap);
-      }
     });
+    this.drawTray(now);
   }
 
   draw(now) {
@@ -469,19 +527,16 @@ export default class LudoView {
       ctx.fillStyle = '#fbf6ea';
       roundedRect(ctx, x + 0.75 * C, y + 0.75 * C, 4.5 * C, 4.5 * C, C * 0.7);
       ctx.fill();
-      ctx.strokeStyle = 'rgba(0,0,0,0.25)';
-      ctx.lineWidth = 1;
-      ctx.stroke();
       // four recessed wells
       for (const [sr, sc] of SLOTS) {
         const wx = x + sc * C, wy = y + sr * C;
-        const wg = ctx.createRadialGradient(wx, wy - C * 0.15, C * 0.1, wx, wy, C * 0.7);
-        wg.addColorStop(0, DARK[col]);
-        wg.addColorStop(1, FILL[col]);
+        const wg = ctx.createRadialGradient(wx, wy - C * 0.12, C * 0.1, wx, wy, C * 0.66);
+        wg.addColorStop(0, '#ffffff');
+        wg.addColorStop(1, LIGHT[col]);
         ctx.fillStyle = wg;
-        ctx.beginPath(); ctx.arc(wx, wy, C * 0.66, 0, Math.PI * 2); ctx.fill();
-        ctx.strokeStyle = 'rgba(255,255,255,0.65)';
-        ctx.lineWidth = 1.5;
+        ctx.beginPath(); ctx.arc(wx, wy, C * 0.62, 0, Math.PI * 2); ctx.fill();
+        ctx.strokeStyle = FILL[col];
+        ctx.lineWidth = 2;
         ctx.stroke();
       }
       if (!g.players[i]) { ctx.fillStyle = 'rgba(251,246,234,0.6)'; ctx.fillRect(x, y, 6 * C, 6 * C); }
@@ -499,7 +554,7 @@ export default class LudoView {
     HOMECOL.forEach((cells, i) => {
       for (const [r, c] of cells) { ctx.fillStyle = FILL[COLORS[i]]; ctx.fillRect(c * C, r * C, C, C); }
     });
-    ctx.strokeStyle = 'rgba(60,40,20,0.45)';
+    ctx.strokeStyle = 'rgba(70,50,30,0.28)';
     ctx.lineWidth = 1;
     for (const [r, c] of [...TRACK, ...HOMECOL.flat()]) ctx.strokeRect(c * C + 0.5, r * C + 0.5, C - 1, C - 1);
     // entry arrows (just before each home column)
@@ -521,10 +576,9 @@ export default class LudoView {
     ctx.beginPath(); ctx.arc(7.5 * C, 7.5 * C, C * 0.35, 0, Math.PI * 2); ctx.fill();
     // laminated gloss
     const gl = ctx.createLinearGradient(0, 0, 15 * C, 15 * C);
-    gl.addColorStop(0, 'rgba(255,255,255,0.22)');
-    gl.addColorStop(0.35, 'rgba(255,255,255,0.04)');
-    gl.addColorStop(0.36, 'rgba(255,255,255,0)');
-    gl.addColorStop(1, 'rgba(0,0,0,0.08)');
+    gl.addColorStop(0, 'rgba(255,255,255,0.12)');
+    gl.addColorStop(0.5, 'rgba(255,255,255,0)');
+    gl.addColorStop(1, 'rgba(0,0,0,0.06)');
     ctx.fillStyle = gl;
     ctx.fillRect(0, 0, 15 * C, 15 * C);
     ctx.restore();
@@ -533,35 +587,14 @@ export default class LudoView {
   drawTokens(now) {
     const C = this.cell, g = this.game;
     const legal = this.sim.canMove() && !this.busy() ? g.legal() : [];
-    const groups = new Map();
-    const placed = [];
-    this.shown.forEach((ts, pl) => {
-      if (!g.players[pl]) return;
-      ts.forEach((p, t) => {
-        const [r, c] = cellOf(pl, p, t);
-        const k = `${r.toFixed(2)},${c.toFixed(2)}`;
-        const n = groups.get(k) || 0;
-        groups.set(k, n + 1);
-        placed.push({ pl, t, r, c, n, k });
-      });
-    });
-    // the hopping token
     let hop = 0;
-    if (this.anim) {
-      const a = this.anim;
-      hop = Math.sin(Math.min(1, (now - a.t0) / (this.reduced ? 25 : 170)) * Math.PI);
-    }
-    const items = placed.map((tok) => {
-      const stack = groups.get(tok.k);
-      let [x, y] = this.toScreen(tok.r, tok.c);
-      if (stack > 1) { x += (tok.n - (stack - 1) / 2) * C * 0.3; y += tok.n * C * 0.04; }
-      const lifting = this.anim && this.anim.player === tok.pl && this.anim.token === tok.t ? hop : 0;
-      return { ...tok, x, y, lifting };
-    }).sort((a, b) => a.y - b.y || a.lifting - b.lifting);
+    if (this.anim) hop = Math.sin(Math.min(1, (now - this.anim.t0) / this.anim.ms) * Math.PI);
+    const items = this.tokenLayout().map((tok) => ({ ...tok, lifting: this.anim && this.anim.player === tok.pl && this.anim.token === tok.t ? hop : 0 }))
+      .sort((a, b) => a.lifting - b.lifting || a.y - b.y);
     for (const it of items) {
       const isLegal = it.pl === g.turn && legal.includes(it.t);
-      const bounce = isLegal && !this.reduced ? Math.abs(Math.sin(now / 200)) * C * 0.15 : 0;
-      this.drawToken(it.x, it.y, C * 0.42, COLORS[it.pl], isLegal, it.lifting * C * 0.55 + bounce);
+      const bounce = isLegal && !this.reduced ? Math.abs(Math.sin(now / 200)) * C * 0.12 : 0;
+      this.drawToken(it.x, it.y, it.R, COLORS[it.pl], isLegal, it.lifting * C * 0.55 + bounce);
     }
   }
 
@@ -643,7 +676,7 @@ export function hud(sim) {
   ];
 }
 
-export const HOW = `<div class="tip">🎲 <b>Tap your dice</b> to roll, then <b>tap a glowing token</b> to move it. If there's only one possible move, it moves by itself.</div>
+export const HOW = `<div class="tip">🎲 <b>Tap the dice</b> (bottom centre) to roll, then <b>tap a glowing token</b> to move it. If there's only one possible move, it moves by itself.</div>
 <div class="tip">6️⃣ You need a <b>6</b> to bring a token out. A 6, a capture or getting a token home gives you <b>another roll</b> – but three 6s in a row lose your turn!</div>
 <div class="tip">💥 Land on an opponent to send it back to base – except on ★ safe squares. Reach home with the exact number.</div>
 <div class="tip">🏆 <b>League:</b> pick your colour and face 3 bots. Finish 1st or 2nd to move to a tougher table; 3rd or 4th ends your run.</div>`;
