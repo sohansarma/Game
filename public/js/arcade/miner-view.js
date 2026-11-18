@@ -32,6 +32,7 @@ export default class MinerView {
     this.py = sim.y;
     this.particles = [];
     this.popups = [];
+    this.cracks = [];
     this.flash = 0;
     this.shake = 0;
     this.destroyed = false;
@@ -127,6 +128,11 @@ export default class MinerView {
     for (const e of events) {
       if (e.kind === 'dig') {
         dug = true;
+        // the block cracks apart; harder rock thumps harder
+        const hard = INFO[e.t]?.hard || 1;
+        this.cracks.push({ x: e.x, y: e.y, t0: performance.now(), hard });
+        if (hard >= 3 && !this.reduced) this.shake = Math.max(this.shake, 0.25);
+        haptic(4 + hard * 3);
         const col = GEM[e.t] || (COLORS[e.t] || COLORS[T.DIRT])[0];
         this.burst(e.x + 0.5, e.y + 0.5, e.t === T.LAVA ? '#ff6a00' : col, GEM[e.t] ? 10 : 5);
       } else if (e.kind === 'gold') {
@@ -149,11 +155,21 @@ export default class MinerView {
       } else if (e.kind === 'shop') {
         sfx.win();
         this.popup('⛺ Mine shop!', 2, this.sim.y - 1, '#ffd23f', true);
+      } else if (e.kind === 'full') {
+        this.popup(`🎒 Bag full! −${e.amount}`, e.x, e.y, '#ff8a80');
+        sfx.bad();
+      } else if (e.kind === 'bank') {
+        this.popup(`🏦 Banked ${e.amount} gold`, 2, this.sim.y - 2, '#7CFFB2', true);
+        sfx.coin();
       } else if (e.kind === 'fall') {
         sfx.swap();
       }
     }
-    if (dug) sfx.place();
+    if (dug) {
+      // pitch rises with the hardness of what you broke
+      const hardest = Math.max(...events.filter((e) => e.kind === 'dig').map((e) => INFO[e.t]?.hard || 1));
+      if (hardest >= 3) sfx.place(); else sfx.tap();
+    }
     this.renderControls();
     this.hooks.onChange?.(this.sim);
     if (this.sim.over) setTimeout(() => this.hooks.onOver?.(this.sim), 700);
@@ -245,6 +261,21 @@ export default class MinerView {
     const mx = (this.px + 0.5) * C, my = this.screenY(this.py + 0.5);
     this.drawMiner(mx, my, C);
 
+    // cracks on freshly dug blocks
+    this.cracks = this.cracks.filter((c) => now - c.t0 < 220);
+    for (const c of this.cracks) {
+      const t = (now - c.t0) / 220, x0 = c.x * C, y0 = this.screenY(c.y);
+      ctx.strokeStyle = `rgba(255,240,210,${0.8 * (1 - t)})`;
+      ctx.lineWidth = 1.5;
+      ctx.beginPath();
+      for (let i = 0; i < 3 + c.hard; i++) {
+        const a = (i / (3 + c.hard)) * Math.PI * 2 + c.x;
+        ctx.moveTo(x0 + C / 2, y0 + C / 2);
+        ctx.lineTo(x0 + C / 2 + Math.cos(a) * C * (0.2 + t * 0.45), y0 + C / 2 + Math.sin(a) * C * (0.2 + t * 0.45));
+      }
+      ctx.stroke();
+    }
+
     // darkness with lamp light (deeper = darker)
     const dark = Math.min(0.88, Math.max(0, (s.y - 3) * 0.02));
     if (dark > 0) {
@@ -254,6 +285,22 @@ export default class MinerView {
       g.addColorStop(1, `rgba(5,3,10,${dark})`);
       ctx.fillStyle = g;
       ctx.fillRect(-this.ox, 0, Wpx, this.H);
+    }
+
+    // sonar: ores glow through the dark
+    if (s.sonar) {
+      const pulse = 0.55 + 0.35 * Math.sin(now / 220);
+      for (let y = Math.max(1, top); y <= bottom; y++) for (let x = 0; x < W; x++) {
+        const t = s.get(x, y);
+        if (!GEM[t] && t !== T.CHEST && t !== T.CRYSTAL && t !== T.LAVA) continue;
+        ctx.strokeStyle = t === T.LAVA ? `rgba(255,90,0,${pulse})` : `rgba(140,255,230,${pulse})`;
+        ctx.lineWidth = 2;
+        ctx.strokeRect(x * C + 3, this.screenY(y) + 3, C - 6, C - 6);
+      }
+      ctx.fillStyle = 'rgba(140,255,230,0.9)';
+      ctx.font = `700 ${C * 0.28}px system-ui, sans-serif`;
+      ctx.textAlign = 'right';
+      ctx.fillText(`📡 ${s.sonarUntil - s.turn}`, W * C - 4, this.screenY(s.y) - C * 0.6);
     }
 
     // particles
@@ -434,11 +481,13 @@ export function hud(sim) {
     { label: 'Score', value: sim.score.toLocaleString('en-US'), big: true },
     { label: 'Energy', value: `⚡ ${sim.energy}` , warn: sim.energy < 12 },
     { label: 'Gold', value: `💰 ${sim.gold}` },
+    { label: 'Bag', value: `🎒 ${sim.cargo}/${sim.cargoCap}`, warn: sim.cargo >= sim.cargoCap * 0.85 },
     { label: 'Depth', value: `${sim.y} m` },
   ];
 }
 
 export const HOW = `<div class="tip">⛏️ <b>Swipe or tap</b> left, right or down to dig. Every block costs <b>⚡ energy</b> – harder rock costs more.</div>
 <div class="tip">💎 Ores give gold (deeper = richer: copper → silver → gold → emerald → diamond). <b>Energy crystals</b> refill you, <b>TNT</b> blasts a 3×3 area, <b>chests</b> hold surprises and <b>lava</b> burns 20 energy.</div>
-<div class="tip">⛺ Every 25 m there's a <b>mine shop</b>: buy energy, a better pickaxe (cheaper digging, brighter lamp) or bombs.</div>
+<div class="tip">🎒 Ore goes in your <b>bag</b> (holds 300 to start). With a full bag, ore you dig is lost – so push on to the next shop to <b>bank</b> it. Banked gold is what you spend.</div>
+<div class="tip">⛺ Every 25 m there's a <b>mine shop</b>: energy, a better pickaxe (cheaper digging, brighter lamp), bombs, a bigger bag, or a 📡 <b>sonar ping</b> that shows ores through the dark.</div>
 <div class="tip">🏆 Score = gold earned + 10 per metre of depth. The run ends when you can't dig anymore – or cash out any time.</div>`;

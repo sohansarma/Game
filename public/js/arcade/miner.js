@@ -5,7 +5,12 @@
 // energy crystals refill you, TNT blasts a 3x3 area, lava hurts. Every 25
 // rows there is a shop ledge where gold buys energy, pickaxe upgrades and
 // bombs. The run ends when you're out of energy (or have no affordable move).
-// Score = gold earned (spending doesn't reduce it) + 10 x deepest row.
+// Ore goes into your cargo bag, which holds only so much: ore you dig with a
+// full bag is left behind. Cargo is banked (and becomes spendable gold) at
+// each shop ledge or back at the surface. A sonar ping from the shop shows
+// ores through the dark for 40 turns.
+// Score = gold earned (banked + still in the bag; spending doesn't reduce
+// it) + 10 x deepest row.
 
 import { Rng, hashString } from '../rng.js';
 
@@ -38,7 +43,10 @@ export const SHOP_ITEMS = {
   energy: { name: 'Energy +40', price: () => 90 },
   pick: { name: 'Pickaxe upgrade', price: (sim) => 150 + sim.pick * 150 },
   bomb: { name: 'Bomb', price: () => 70 },
+  bag: { name: 'Bigger bag +250', price: (sim) => 100 + sim.bagUps * 100 },
+  sonar: { name: 'Sonar ping', price: () => 50 },
 };
+export const BAG_START = 300;
 
 const START_ENERGY = 70;
 
@@ -55,6 +63,10 @@ class MinerSim {
     this.maxDepth = 0;
     this.pick = 0; // pickaxe level
     this.bombs = 1;
+    this.cargo = 0;
+    this.cargoCap = BAG_START;
+    this.bagUps = 0;
+    this.sonarUntil = 0;
     this.over = false;
     this.log = [];
     this.events = [];
@@ -64,7 +76,18 @@ class MinerSim {
   }
 
   get score() {
-    return this.earned + this.maxDepth * 10;
+    return this.earned + this.cargo + this.maxDepth * 10;
+  }
+  get sonar() {
+    return this.turn < this.sonarUntil;
+  }
+
+  bank() {
+    if (!this.cargo) return;
+    this.gold += this.cargo;
+    this.earned += this.cargo;
+    this.events.push({ kind: 'bank', amount: this.cargo });
+    this.cargo = 0;
   }
 
   // ---- world generation (each row depends only on seed + row index) ----
@@ -154,9 +177,13 @@ class MinerSim {
   }
 
   addGold(n, x, y) {
-    this.gold += n;
-    this.earned += n;
-    this.events.push({ kind: 'gold', x, y, amount: n });
+    const room = this.cargoCap - this.cargo;
+    const take = Math.min(room, n);
+    if (take > 0) {
+      this.cargo += take;
+      this.events.push({ kind: 'gold', x, y, amount: take });
+    }
+    if (take < n) this.events.push({ kind: 'full', x, y, amount: n - take });
   }
   addEnergy(n, x, y) {
     this.energy = Math.min(this.maxEnergy + 60, this.energy + n);
@@ -185,6 +212,8 @@ class MinerSim {
     if (item === 'energy') { this.energy += 40; this.maxEnergy += 10; }
     if (item === 'pick') this.pick++;
     if (item === 'bomb') this.bombs++;
+    if (item === 'bag') { this.cargoCap += 250; this.bagUps++; }
+    if (item === 'sonar') this.sonarUntil = this.turn + 40;
     this.events.push({ kind: 'buy', item });
     return { ok: true, events: this.events };
   }
@@ -209,6 +238,7 @@ class MinerSim {
       }
       this.maxDepth = this.y;
     }
+    if (this.atShop() || this.y === 0) this.bank();
     if (this.atShop() && !this.visitedShops.has(this.y)) {
       this.visitedShops.add(this.y);
       this.events.push({ kind: 'shop' });
