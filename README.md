@@ -1,6 +1,6 @@
 # 🐚 Tidepop Arcade
 
-**A free, ad-free arcade of 12 games for all ages, plus a Creator Studio where players build and publish their own games.** The 12 games are Tidepop (match-3), Reef Blocks, ♟️ Chess, 🎲 Ludo, Deep Miner, Puffer Dash, Sea Serpent, Shell Merge, Reef Tower, Sort Splash, Coral Breaker and Crab Catch. Every arcade game has a daily challenge, a weekly tournament, an all-time board and challenge links you can send to friends. All scores are verified by replaying the game.
+**A free arcade of 13 games for all ages, plus a Creator Studio where players build and publish their own games.** The 13 games are Tidepop (match-3), Reef Blocks, ♟️ Chess, 🎲 Ludo, 🧊 Cube Twist, Deep Miner, Puffer Dash, Sea Serpent, Shell Merge, Reef Tower, Sort Splash, Coral Breaker and Crab Catch. Every arcade game has a daily challenge, a weekly tournament, an all-time board and challenge links you can send to friends. All scores are verified by replaying the game.
 
 The original game: Swap cute sea creatures in an **endless match-3 adventure**, take on a **Daily Dive** where everyone gets the same board, chase a **weekly endless Deep Dive**, or relax with **Reef Blocks**, a block puzzle. Each mode has a **fair leaderboard**: the server replays every submitted game, so scores can't be faked.
 
@@ -41,6 +41,7 @@ You open the app into the **Arcade hub**. It's built to bring you back every day
 |---|---|---|---|
 | ♟️ | **Chess Ladder** | Chess (full rules) | Beat ever-stronger sea bots (Hermit Crab → Kraken). Win = 100 × level + bonuses. A loss ends the run. Play friends on one device or online with a code |
 | 🎲 | **Ludo League** | Ludo | Finish 1st or 2nd vs 3 bots to advance to smarter bots. 2–4 player pass & play, or online with a code |
+| 🧊 | **Cube Twist** | 3D twisty cube (2×2, 3×3) | Swipe stickers to turn layers. Each cube adds a twist allowance and leftovers carry over. Runs climb from 2×2 to full 3×3 scrambles with shrinking allowances |
 | 1 | 🐚 **Tidepop** | Match-3 saga (endless levels) + Daily Dive + Deep Dive | Stars and dive scores |
 | 2 | 🧱 **Reef Blocks** | Block puzzle | Lines, multi-line clears and combos |
 | 3 | ⛏️ **Deep Miner** | Turn-based mining | Gold earned + 10 per metre. Energy, ores, TNT, lava, shops every 25 m |

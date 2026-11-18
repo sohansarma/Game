@@ -683,6 +683,7 @@ const VIEWS = {
   catch: () => import('./arcade/catch-view.js'),
   chess: () => import('./arcade/chess-view.js'),
   ludo: () => import('./arcade/ludo-view.js'),
+  cube: () => import('./arcade/cube-view.js'),
 };
 
 function arcadeStats(id) {

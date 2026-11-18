@@ -6,8 +6,15 @@ import { solve as sortSolve } from '../public/js/arcade/sort.js';
 import { name as chessSq } from '../public/js/arcade/chess.js';
 
 import { aiChoose as ludoAI } from '../public/js/arcade/ludo.js';
+import { inverse as cubeInverse } from '../public/js/arcade/cube.js';
 
 export const BOTS = {
+  // Unwinds the cube's history, with occasional wrong twists it then has to undo.
+  cube(sim, rng) {
+    const layers = sim.cube.layers;
+    if (rng.next() < 0.3) sim.twist(rng.int(3), layers[rng.int(layers.length)], rng.next() < 0.5 ? 1 : -1);
+    else sim.twist(...cubeInverse(sim.stack[sim.stack.length - 1]));
+  },
   ludo(sim, rng) {
     if (!sim.log.length) sim.setColour(rng.int(4));
     if (sim.canRoll()) sim.roll();
