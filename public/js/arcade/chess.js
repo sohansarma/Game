@@ -247,14 +247,33 @@ const PST = {
   K: [-30, -40, -40, -50, -50, -40, -40, -30, -30, -40, -40, -50, -50, -40, -40, -30, -30, -40, -40, -50, -50, -40, -40, -30, -30, -40, -40, -50, -50, -40, -40, -30, -20, -30, -30, -40, -40, -30, -30, -20, -10, -20, -20, -20, -20, -20, -20, -10, 20, 20, 0, 0, 0, 0, 20, 20, 20, 30, 10, 0, 0, 10, 30, 20],
 };
 
+// king in the endgame: walk to the centre
+const K_END = [-50, -40, -30, -20, -20, -30, -40, -50, -30, -20, -10, 0, 0, -10, -20, -30, -30, -10, 20, 30, 30, 20, -10, -30, -30, -10, 30, 40, 40, 30, -10, -30, -30, -10, 30, 40, 40, 30, -10, -30, -30, -10, 20, 30, 30, 20, -10, -30, -30, -30, 0, 0, 0, 0, -30, -30, -50, -30, -30, -30, -30, -30, -30, -50];
+
 export function evaluate(g) {
-  let s = 0;
+  let s = 0, npW = 0, npB = 0, wk = -1, bk = -1;
   for (let i = 0; i < 64; i++) {
     const p = g.board[i];
     if (!p) continue;
     const T = p.toUpperCase();
-    if (isWhite(p)) s += VAL[T] + PST[T][i];
-    else s -= VAL[T] + PST[T][(7 - Math.floor(i / 8)) * 8 + (i % 8)];
+    if (T === 'K') { if (p === 'K') wk = i; else bk = i; continue; }
+    if (isWhite(p)) { s += VAL[T] + PST[T][i]; if (T !== 'P') npW += VAL[T]; }
+    else { s -= VAL[T] + PST[T][(7 - Math.floor(i / 8)) * 8 + (i % 8)]; if (T !== 'P') npB += VAL[T]; }
+  }
+  // king safety in the middlegame, activity in the endgame (blended by material)
+  const phase = Math.min(1, (npW + npB) / 3200);
+  const kw = (k, white) => { const j = white ? k : (7 - Math.floor(k / 8)) * 8 + (k % 8); return phase * PST.K[j] + (1 - phase) * K_END[j]; };
+  if (wk >= 0) s += kw(wk, true);
+  if (bk >= 0) s -= kw(bk, false);
+  // mop-up: the side that is clearly ahead herds the enemy king to the edge
+  const diff = (npW - npB);
+  if (wk >= 0 && bk >= 0 && Math.abs(diff) >= 300 && Math.min(npW, npB) <= 330) {
+    const loser = diff > 0 ? bk : wk, winner = diff > 0 ? wk : bk;
+    const lr = Math.floor(loser / 8), lc = loser % 8;
+    const centre = Math.max(3 - lr, lr - 4) + Math.max(3 - lc, lc - 4);
+    const dist = Math.abs(lr - Math.floor(winner / 8)) + Math.abs(lc - (winner % 8));
+    const bonus = 10 * centre + 4 * (14 - dist);
+    s += diff > 0 ? bonus : -bonus;
   }
   return g.turn === 'w' ? s : -s;
 }
@@ -266,39 +285,101 @@ function ordered(g, moves) {
     .map((x) => x.m);
 }
 
-function search(g, depth, alpha, beta, budget) {
-  budget.n++;
-  if (depth === 0 || budget.n > budget.max) return quiesce(g, alpha, beta, budget, 2);
+const MATE = 100000;
+
+// A position that already happened in the game (or a 50-move draw) scores 0,
+// so a winning side avoids repetitions and a losing side looks for them.
+function isDrawn(g, ply) {
+  if (g.half >= 100) return true;
+  return ply <= 4 && g.half >= 4 && (g.positions.get(g.key()) || 0) >= 1;
+}
+
+function search(g, depth, alpha, beta, budget, ply) {
+  if (budget.stop) return 0;
+  if (++budget.n > budget.max) { budget.stop = true; return 0; }
+  if (ply > 0 && isDrawn(g, ply)) return 0;
   const me = g.turn, opp = me === 'w' ? 'b' : 'w';
+  const check = g.attacked(g.kingSq(me), opp);
+  if (check && ply < 14) depth++; // never stop looking while in check (sees mates on the horizon)
+  if (depth <= 0) return quiesce(g, alpha, beta, budget, 6);
   let legal = 0;
   for (const m of ordered(g, g.pseudoMoves())) {
     const u = g.makeRaw(m);
     if (g.attacked(g.kingSq(me), opp)) { g.unmakeRaw(u); continue; }
     legal++;
-    const v = -search(g, depth - 1, -beta, -alpha, budget);
+    const v = -search(g, depth - 1, -beta, -alpha, budget, ply + 1);
     g.unmakeRaw(u);
+    if (budget.stop) return 0;
     if (v >= beta) return beta;
     if (v > alpha) alpha = v;
   }
-  if (!legal) return g.inCheck() ? -100000 - depth : 0;
+  if (!legal) return check ? -(MATE - ply) : 0;
   return alpha;
 }
 
 function quiesce(g, alpha, beta, budget, depth) {
-  budget.n++;
+  if (budget.stop) return 0;
+  if (++budget.n > budget.max * 1.5) { budget.stop = true; return 0; }
   const stand = evaluate(g);
   if (depth === 0 || stand >= beta) return stand >= beta ? beta : stand;
   if (stand > alpha) alpha = stand;
-  const caps = g.pseudoMoves().filter((m) => g.board[m.to]);
+  const caps = g.pseudoMoves().filter((m) => g.board[m.to] || m.promo);
   for (const m of ordered(g, caps)) {
     const u = g.makeRaw(m);
     if (g.attacked(g.kingSq(g.turn === 'w' ? 'b' : 'w'), g.turn)) { g.unmakeRaw(u); continue; }
     const v = -quiesce(g, -beta, -alpha, budget, depth - 1);
     g.unmakeRaw(u);
+    if (budget.stop) return 0;
     if (v >= beta) return beta;
     if (v > alpha) alpha = v;
   }
   return alpha;
+}
+
+/**
+ * Iterative deepening at the root. Every depth is searched completely or not
+ * at all, so running out of budget never mixes deep and shallow scores.
+ * noise > 0 scores every move exactly (personality); noise 0 uses alpha-beta.
+ */
+function rootScores(g, depth, noise, max) {
+  let moves = ordered(g, g.moves());
+  if (!moves.length) return [];
+  let done = null;
+  const budget = { n: 0, max, stop: false };
+  for (let d = 0; d <= depth; d++) {
+    const scores = [];
+    let alpha = -Infinity;
+    for (const m of moves) {
+      const u = g.makeRaw(m);
+      let v;
+      if (isDrawn(g, 1)) v = 0;
+      else if (d === 0) v = -quiesce(g, -Infinity, Infinity, budget, 6);
+      else v = -search(g, d - 1, -Infinity, noise ? Infinity : -alpha, budget, 1);
+      g.unmakeRaw(u);
+      if (budget.stop && d > 0) break;
+      // without noise later moves get a bound only: a fail-low (v <= alpha) is
+      // at best equal, so rank it just below the move that set alpha
+      if (!noise && scores.length && v <= alpha) v = alpha - 1;
+      scores.push({ m, v });
+      if (!noise && v > alpha) alpha = v;
+    }
+    if (budget.stop && d > 0) break;
+    budget.stop = false;
+    done = scores;
+    if (done.some((x) => x.v >= MATE - 50)) break; // a forced mate: no need to look further
+    moves = done.slice().sort((x, y) => y.v - x.v).map((x) => x.m); // best first next time
+  }
+  return done;
+}
+
+function pick(scores, noise, rng) {
+  let best = null, bestV = -Infinity;
+  for (const { m, v: raw } of scores) {
+    const mate = Math.abs(raw) >= MATE - 100;
+    const v = raw + (noise && !mate ? (rng.next() - 0.5) * noise : rng.next() * 0.5);
+    if (v > bestV) { bestV = v; best = m; }
+  }
+  return best && { uci: name(best.from) + name(best.to) + (best.promo || ''), score: bestV };
 }
 
 export const LEVELS = [
@@ -315,26 +396,14 @@ export const CASUAL_LEVELS = [
   { name: 'Beginner', elo: '~600', depth: 0, noise: 260, budget: 4000 },
   { name: 'Casual', elo: '~900', depth: 1, noise: 110, budget: 8000 },
   { name: 'Club', elo: '~1200', depth: 2, noise: 45, budget: 25000 },
-  { name: 'Strong', elo: '~1500', depth: 2, noise: 8, budget: 40000 },
-  { name: 'Expert', elo: '~1700', depth: 3, noise: 4, budget: 90000 },
-  { name: 'Master', elo: '~1900', depth: 4, noise: 2, budget: 220000 },
+  { name: 'Strong', elo: '~1500', depth: 3, noise: 15, budget: 50000 },
+  { name: 'Expert', elo: '~1700', depth: 4, noise: 8, budget: 140000 },
+  { name: 'Master', elo: '~1900', depth: 4, noise: 1, budget: 320000 },
 ];
 
 /** Search the side to move's best move. Root alpha-beta; noise adds personality. */
 export function searchMove(g, { depth, noise = 0, budget = 25000 }, rng) {
-  const moves = g.moves();
-  if (!moves.length) return null;
-  const b = { n: 0, max: budget };
-  let best = null, bestV = -Infinity, alpha = -Infinity;
-  for (const m of ordered(g, moves)) {
-    const u = g.makeRaw(m);
-    let v = depth === 0 ? -quiesce(g, -Infinity, Infinity, b, 1) : -search(g, depth - 1, -Infinity, noise ? Infinity : -alpha, b);
-    g.unmakeRaw(u);
-    v += noise ? (rng.next() - 0.5) * noise : rng.next() * 0.5;
-    if (v > bestV) { bestV = v; best = m; }
-    if (!noise && v > alpha) alpha = v;
-  }
-  return { uci: name(best.from) + name(best.to) + (best.promo || ''), score: bestV };
+  return pick(rootScores(g, depth, noise, budget), noise, rng);
 }
 
 /** Casual AI move (uses any rng – e.g. Math.random based). */
@@ -343,21 +412,11 @@ export function casualMove(g, level, rng) {
   return searchMove(g.clone(), L, rng)?.uci || null;
 }
 
-/** Deterministic AI move for the side to move. */
+/** Deterministic AI move for the side to move (ranked ladder, replayed by the server). */
 export function aiMove(g, level, rng) {
   const L = LEVELS[Math.min(level, LEVELS.length) - 1];
-  const moves = g.moves();
-  if (!moves.length) return null;
-  const budget = { n: 0, max: 25000 };
-  let best = null, bestV = -Infinity;
-  for (const m of ordered(g, moves)) {
-    const u = g.makeRaw(m);
-    let v = L.depth === 0 ? -quiesce(g, -Infinity, Infinity, budget, 1) : -search(g, L.depth - 1, -Infinity, Infinity, budget);
-    g.unmakeRaw(u);
-    v += L.noise ? (rng.next() - 0.5) * L.noise : rng.next(); // seeded variety / tie-break
-    if (v > bestV) { bestV = v; best = m; }
-  }
-  return name(best.from) + name(best.to) + (best.promo || '');
+  const noise = L.noise || (g.ply < 6 ? 30 : 0); // a little opening variety for the strongest bots
+  return pick(rootScores(g, L.depth, noise, 25000), noise, rng)?.uci || null;
 }
 
 // ---------------------------------------------------------------- ladder sim (ranked)

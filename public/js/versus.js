@@ -200,9 +200,10 @@ export class ChessCasual extends ChessBase {
   offerDraw() {
     if (this.over || this.moves.length < 20) return false;
     const g = this.game.clone();
-    if (g.turn !== this.botSide) g.turn = this.botSide;
-    const best = searchMove(g, { depth: 1, budget: 4000 }, this.rng);
-    const accept = !best || best.score <= 60;
+    const best = searchMove(g, { depth: 2, budget: 8000 }, this.rng);
+    // score is from the side to move; turn it into the bot's point of view
+    const botScore = best ? (g.turn === this.botSide ? best.score : -best.score) : 0;
+    const accept = botScore <= 60;
     if (accept) this.agreeDraw();
     return accept;
   }
