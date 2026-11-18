@@ -8,6 +8,9 @@ import { Rng } from '../rng.js';
 
 export const HOLES = 12;
 export const GAME_TICKS = 60 * 60;
+// Burrows pop on a beat: eighth notes at 120 BPM (15 ticks) speeding to ~150 BPM (12 ticks).
+export const eighthAt = (tick) => (tick < GAME_TICKS * 0.5 ? 15 : tick < GAME_TICKS * 0.8 ? 13 : 12);
+export const FEVER_TICKS = 300;
 
 class CatchSim {
   constructor(seed) {
@@ -23,6 +26,8 @@ class CatchSim {
     this.hits = 0;
     this.misses = 0;
     this.nextSpawn = 30;
+    this.feverUntil = 0;
+    this.onBeat = 0;
     this.log = [];
     this.events = [];
   }
@@ -32,6 +37,9 @@ class CatchSim {
   }
   get combo() {
     return Math.min(5, 1 + Math.floor(this.streak / 3));
+  }
+  get fever() {
+    return this.tick < this.feverUntil;
   }
 
   start() {
@@ -68,12 +76,16 @@ class CatchSim {
       for (let n = 0; n < count && free.length; n++) {
         const idx = free.splice(this.rng.int(free.length), 1)[0];
         const roll = this.rng.next();
-        const kind = roll < 0.07 ? 'gold' : roll < 0.22 + progress * 0.08 ? 'jelly' : roll < 0.26 + progress * 0.08 ? 'clock' : 'crab';
+        let kind = roll < 0.07 ? 'gold' : roll < 0.22 + progress * 0.08 ? 'jelly' : roll < 0.26 + progress * 0.08 ? 'clock' : 'crab';
+        if (kind === 'jelly' && this.fever) kind = 'crab'; // fever: no jellyfish
         const stay = Math.round((kind === 'gold' ? 42 : 75) - progress * 30);
         this.holes[idx] = { kind, born: this.tick, until: this.tick + stay };
         this.events.push({ kind: 'spawn', hole: idx, what: kind });
       }
-      this.nextSpawn = this.tick + Math.max(12, Math.round(38 - progress * 24 + this.rng.int(10)));
+      // next spawn snaps to the beat grid
+      const e = eighthAt(this.tick);
+      const gap = Math.max(12, Math.round(38 - progress * 24 + this.rng.int(10)));
+      this.nextSpawn = Math.ceil((this.tick + gap) / e) * e;
     }
     if (this.timeLeft <= 0) {
       this.over = true;
@@ -91,9 +103,17 @@ class CatchSim {
     if (h.kind === 'crab' || h.kind === 'gold') {
       this.streak++;
       this.hits++;
-      const pts = (h.kind === 'gold' ? 50 : 10) * this.combo;
+      // on the beat (within 3 ticks of an eighth note): +5 bonus
+      const e = eighthAt(this.tick), off = Math.min(this.tick % e, e - (this.tick % e));
+      const beat = off <= 3;
+      if (beat) this.onBeat++;
+      let pts = ((h.kind === 'gold' ? 50 : 10) + (beat ? 5 : 0)) * this.combo;
+      if (this.fever) pts *= 2;
       this.points += pts;
-      return { ok: true, what: h.kind, pts };
+      // reaching x5 lights a 5-second fever (once per streak climb)
+      let feverStart = false;
+      if (this.streak === 12 && !this.fever) { this.feverUntil = this.tick + FEVER_TICKS; feverStart = true; }
+      return { ok: true, what: h.kind, pts, beat, feverStart };
     }
     if (h.kind === 'jelly') {
       this.streak = 0;

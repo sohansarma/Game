@@ -1,5 +1,6 @@
 // Crab Catch renderer + input.
 import { HOLES, GAME_TICKS } from './catch.js';
+import { eighthAt } from './catch.js';
 import { sfx, haptic } from '../audio.js';
 
 const STEP = 1000 / 60;
@@ -86,7 +87,8 @@ export default class CatchView {
     if (res.what === 'crab' || res.what === 'gold') {
       sfx.match(Math.min(8, this.sim.combo + 1));
       if (res.what === 'gold') { sfx.coin(); haptic(25); } else haptic(8);
-      this.popups.push({ x, y, text: `+${res.pts}`, color: res.what === 'gold' ? '#ffd23f' : '#fff', t0: performance.now() });
+      this.popups.push({ x, y, text: `+${res.pts}${res.beat ? ' ♪' : ''}`, color: res.what === 'gold' ? '#ffd23f' : res.beat ? '#9ef0ff' : '#fff', t0: performance.now() });
+      if (res.feverStart) { sfx.win(); haptic(40); this.banner = { text: '🔥 FEVER! Double points', t0: performance.now() }; }
       this.splats.push({ x, y, t0: performance.now() });
     } else if (res.what === 'jelly') {
       sfx.lose(); haptic(60);
@@ -107,7 +109,19 @@ export default class CatchView {
     while (this.acc >= STEP) {
       this.acc -= STEP;
       this.sim.step();
-      for (const e of this.sim.events) if (e.kind === 'escape') { /* quiet */ }
+      for (const e of this.sim.events) {
+        if (e.kind === 'escape') {
+          // an escape breaks the combo: say so
+          const [x, y] = this.center(e.hole);
+          this.puffs.push({ x, y, t0: performance.now() });
+          this.popups.push({ x, y, text: 'Escaped!', color: '#ff7b7b', t0: performance.now() });
+          sfx.bad();
+          haptic(15);
+        }
+      }
+      // a soft metronome so the beat is felt
+      const s0 = this.sim;
+      if (s0.started && !s0.over && s0.tick % (eighthAt(s0.tick) * 2) === 0) this.beatT0 = performance.now();
     }
     const sec = Math.ceil(this.sim.timeLeft / 60);
     if (sec !== this.lastSecond) {
@@ -163,6 +177,34 @@ export default class CatchView {
         ctx.restore();
       }
     }
+    // beat pulse on the sand + fever glow
+    if (this.beatT0) {
+      const bt = (now - this.beatT0) / 260;
+      if (bt < 1) { ctx.strokeStyle = `rgba(255,255,255,${0.18 * (1 - bt)})`; ctx.lineWidth = 6; ctx.strokeRect(3, 3, this.W - 6, this.H - 6); }
+    }
+    if (s.fever) {
+      ctx.strokeStyle = `rgba(255,200,60,${0.5 + 0.3 * Math.sin(now / 90)})`;
+      ctx.lineWidth = 8;
+      ctx.strokeRect(4, 4, this.W - 8, this.H - 8);
+    }
+    this.puffs = (this.puffs || []).filter((p) => now - p.t0 < 450);
+    for (const p of this.puffs) {
+      const t = (now - p.t0) / 450;
+      ctx.fillStyle = `rgba(255,90,90,${0.45 * (1 - t)})`;
+      ctx.beginPath(); ctx.arc(p.x, p.y, C * (0.2 + t * 0.35), 0, Math.PI * 2); ctx.fill();
+    }
+    if (this.banner) {
+      const bt = (now - this.banner.t0) / 1400;
+      if (bt > 1) this.banner = null;
+      else {
+        ctx.globalAlpha = bt > 0.75 ? (1 - bt) / 0.25 : 1;
+        ctx.font = `900 ${C * 0.3}px ui-rounded, system-ui, sans-serif`;
+        ctx.textAlign = 'center';
+        ctx.fillStyle = '#ffd23f';
+        ctx.fillText(this.banner.text, this.W / 2, this.H * 0.5);
+        ctx.globalAlpha = 1;
+      }
+    }
     // splats & popups
     this.splats = this.splats.filter((p) => now - p.t0 < 300);
     for (const p of this.splats) {
@@ -209,5 +251,6 @@ export function hud(sim) {
 
 export const HOW = `<div class="tip">🦀 Crabs pop out of the sand – <b>tap them</b> before they hide! <b>+10</b> each.</div>
 <div class="tip">🔥 Catch 3 in a row to raise your <b>combo</b> (up to ×5). Missing, tapping empty sand or letting a crab escape resets it.</div>
+<div class="tip">🎵 Crabs pop on the <b>beat</b> – catch them right on it for a ♪ bonus. Reach ×5 for a 5-second <b>FEVER</b>: double points, no jellyfish.</div>
 <div class="tip">✨ <b>Golden crabs</b> are worth +50 × combo. 🪼 <b>Jellyfish</b> sting: −20! ⏰ <b>Clocks</b> add 3 seconds.</div>
 <div class="tip">⏱️ You have 60 seconds and it gets faster towards the end. Go!</div>`;
