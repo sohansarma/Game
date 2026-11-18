@@ -196,7 +196,7 @@ export default class BreakerView {
       this.trail.push({ x: s.bx, y: s.by });
       for (const e of s.extra) this.trail.push({ x: e.bx, y: e.by });
     }
-    this.trail = this.trail.slice(-24);
+    this.trail = s.attached ? [] : this.trail.slice(-24);
     this.trail.forEach((t, i) => {
       ctx.globalAlpha = (i / this.trail.length) * 0.35;
       ctx.fillStyle = '#bfe9ff';
