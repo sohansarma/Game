@@ -85,3 +85,21 @@ test('server verifies arcade submissions (endless + daily)', async () => {
     assert.equal(closed.status, 422);
   }
 });
+
+test('Tide of the Day: the daily board keeps only the first try', async () => {
+  const me = (await post('/api/register', { name: 'Tidy Tester' })).body;
+  const key = dayKey();
+  const g = ARCADE.find((x) => x.id === 'tide');
+  const seed = arcadeSeed('tide', true, key, 0);
+  const lose = g.create(seed);
+  while (!lose.over) { const c = [0, 1, 2, 3, 4, 5].find((x) => x !== lose.grid[0]); lose.pick(c); } // poor play
+  const first = await post('/api/scores', { board: 'tideDaily', key, seed: 0, log: lose.log, v: ENGINE_VERSION, playerId: me.playerId, token: me.token });
+  assert.equal(first.status, 200, first.body.error);
+  const { solve } = await import('../public/js/arcade/tide.js');
+  const win = g.create(seed);
+  for (const c of solve(win.grid)) win.pick(c);
+  assert.ok(win.solved && win.score > lose.score);
+  const second = await post('/api/scores', { board: 'tideDaily', key, seed: 0, log: win.log, v: ENGINE_VERSION, playerId: me.playerId, token: me.token });
+  assert.equal(second.status, 200);
+  assert.equal(second.body.best, lose.score, 'a better second try does not replace the first');
+});

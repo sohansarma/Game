@@ -9,6 +9,11 @@ import { aiChoose as ludoAI } from '../public/js/arcade/ludo.js';
 import { inverse as cubeInverse } from '../public/js/arcade/cube.js';
 
 export const BOTS = {
+  // Picks a random colour that grows the tide (or any other colour).
+  tide(sim, rng) {
+    const opts = [0, 1, 2, 3, 4, 5].filter((c) => c !== sim.grid[0]);
+    sim.pick(opts[rng.int(opts.length)]);
+  },
   // Unwinds the cube's history, with occasional wrong twists it then has to undo.
   cube(sim, rng) {
     const layers = sim.cube.layers;

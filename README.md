@@ -55,6 +55,10 @@ You open the app into the **Arcade hub**. It's built to bring you back every day
 
 **How the games are built:** each arcade game is a pure, deterministic simulation in `public/js/arcade/<game>.js`; the drawing and input code is in `<game>-view.js`. Turn-based games log moves. Real-time games run at a fixed 60 ticks per second and log only `[tick, input]`. The server, or the shared leaderboard in the hosted copy, replays the log with the same file to get the true score. A forged log can't stall the server: input that's out of sync with the replay, or a run over one hour long, is rejected.
 
+## 🌊 Tide of the Day
+
+A Wordle-style daily ritual at the top of the Arcade: one shared flood puzzle a day (same for everyone, numbered from Tide #1 on 2026-11-18). The tide starts in the top-left corner; pick a colour to flood every touching tile of it and fill the 10×10 board within the move limit. A greedy two-move-lookahead solver sets **par** (limit = par + 3). Colours also carry symbols for colour-blind players. Only the **first try** is ranked (the daily board keeps first attempts, verified by replay). Results share as an emoji grid (*Tide #12 🌊 13/16 · on par ⛳*), with stats: played, win %, tide streak, best streak and a histogram vs par. It counts toward daily missions and pays shells. Code: `public/js/arcade/tide.js`, `tide-view.js`.
+
 ## 🏝️ Tide Pool (your cozy home)
 
 Every player has their own cove (Arcade → **Your Tide Pool**): a scene drawn in code whose sky follows the real time of day, with rain, glowing lanterns and a flickering campfire in cozy mode. Shells earned in **any** game buy decor for 10 spots (sky, rocks, plants, pool, Pip's bed, light, seat, rug); 34 items, 7 of which can't be bought and are **found by playing** specific games (e.g. a chess set for playing Chess, a shell bed for trying 5 different games). Placed items add **comfort**; each comfort star adds +5 🐚 to every daily treasure. Pip the otter naps in whatever bed you choose. Owned items are merged as a union across devices, so nothing is lost in cloud sync. Code: `public/js/pool.js`.

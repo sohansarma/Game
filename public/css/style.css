@@ -479,3 +479,27 @@ body.cozy .logo { text-shadow: 0 0 22px rgba(255,190,110,.25); }
 .pi-state.buy { background: var(--mint); color: #063; }
 .pi-state.new { background: #ff9ad5; color: #4a0030; }
 .pi-state.lock { opacity: .75; }
+
+/* ---- Tide of the Day ---- */
+.tide-card { width: 100%; display: flex; align-items: center; gap: 12px; padding: 12px 14px; margin-bottom: 10px; border-radius: var(--radius); text-align: left; color: #fff;
+  background: linear-gradient(120deg, #1565c0, #26a6d9 60%, #4dd0e1); box-shadow: 0 6px 18px rgba(21,101,192,.4); border: 2px solid rgba(255,255,255,.35); }
+.tide-card small { display: block; font-weight: 900; letter-spacing: 1px; font-size: .7rem; opacity: .85; }
+.tide-card b { font-size: 1.1rem; display: block; }
+.tide-card .small { display: block; opacity: .9; }
+.tide-card .btn { background: #fff; color: #0d47a1; box-shadow: none; }
+.tide-card.done { background: linear-gradient(120deg, #0d3c7a, #1b6fa8); }
+.tide-wave { font-size: 2rem; animation: bob 2.2s ease-in-out infinite; }
+body.cozy .tide-card { background: linear-gradient(120deg, #1d3557, #2a5d8a); box-shadow: 0 6px 18px rgba(0,0,0,.35); }
+.tide-picks { display: flex; gap: 8px; justify-content: center; flex-wrap: wrap; }
+.tide-pick { width: 50px; height: 50px; border-radius: 14px; background: var(--c); border: 3px solid rgba(255,255,255,.5); color: rgba(0,0,0,.45); font-size: 1.3rem; font-weight: 900; box-shadow: 0 4px 0 rgba(0,0,0,.25); }
+.tide-pick:active { transform: translateY(2px); box-shadow: 0 2px 0 rgba(0,0,0,.25); }
+.tide-pick.cur, .tide-pick:disabled { opacity: .35; }
+.tide-warn { color: var(--coral); font-weight: 800; }
+.tide-grid { font-size: 1.35rem; line-height: 1.35; letter-spacing: 2px; margin: 8px 0; }
+.tide-stats { display: grid; grid-template-columns: repeat(4, 1fr); gap: 6px; margin: 10px 0; text-align: center; }
+.tide-stats b { display: block; font-size: 1.4rem; }
+.tide-stats span { font-size: .72rem; color: var(--muted); }
+.tide-dist { display: flex; flex-direction: column; gap: 4px; margin: 6px 0 10px; text-align: left; }
+.tide-bar { display: grid; grid-template-columns: 36px 1fr; align-items: center; gap: 6px; font-size: .8rem; font-weight: 800; }
+.tide-bar .tb i { display: block; font-style: normal; text-align: right; padding: 2px 6px; border-radius: 6px; background: rgba(255,255,255,.18); font-size: .75rem; }
+.tide-bar .tb i.me { background: var(--mint); color: #063; }

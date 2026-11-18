@@ -18,8 +18,9 @@ import crabCatch from './catch.js';
 import chess from './chess.js';
 import ludo from './ludo.js';
 import cube from './cube.js';
+import tide from './tide.js';
 
-export const ARCADE = [chess, ludo, cube, miner, puffer, serpent, merge, stack, sort, breaker, crabCatch];
+export const ARCADE = [chess, ludo, cube, miner, puffer, serpent, merge, stack, sort, breaker, crabCatch, tide];
 
 export const ARCADE_BY_ID = Object.fromEntries(ARCADE.map((g) => [g.id, g]));
 
@@ -28,7 +29,7 @@ export function arcadeBoards() {
   const out = {};
   for (const g of ARCADE) {
     out[g.id] = { title: g.title, game: g.id, period: 'all', arcade: g.id, daily: false };
-    out[g.id + 'Daily'] = { title: `${g.title} Daily`, game: g.id, period: 'day', arcade: g.id, daily: true };
+    out[g.id + 'Daily'] = { title: `${g.title} Daily`, game: g.id, period: 'day', arcade: g.id, daily: true, firstOnly: !!g.firstTry };
     out[g.id + 'Week'] = { title: `${g.title} Weekly`, game: g.id, period: 'week', arcade: g.id, weekly: true };
   }
   return out;

@@ -15,6 +15,7 @@ import { MatchView } from './matchview.js';
 import { BlocksView } from './blocksview.js';
 import { iconURL, PALETTE, clearSpriteCache } from './creatures.js';
 import { sfx, unlockAudio, configureAudio, haptic, purr } from './audio.js';
+import { tideNumber, shareText as tideShareText, EMOJI as TIDE_EMOJI } from './arcade/tide.js';
 import { SLOTS as POOL_SLOTS, ITEMS as POOL_ITEMS, ITEM as POOL_ITEM, comfortOf, comfortBonus, found as poolFound, newlyFound, drawPool } from './pool.js';
 import { startCloud, syncNow, cloudAccount, cloudStatus, onCloudChange, signUp, logIn, logOut, recoverAccount, changePassword, deleteAccount, setClaudeSync } from './cloud.js';
 import { configureCozy, cozyActive, cozySleeping, wakeCozy, onSleep, isNightTime, cozySound } from './cozy.js';
@@ -160,6 +161,158 @@ function wireNameField(root, onValid) {
   input.oninput = check;
   $('#nf-roll', root).onclick = () => { input.value = randomNickname(); sfx.tap(); check(); };
   return check;
+}
+
+// ------------------------------------------------------------------ Tide of the Day
+function tideDays() {
+  return load().tide?.days || {};
+}
+
+/** Played, win %, current & best streak (consecutive solved days), distribution vs par. */
+function tideStats() {
+  const days = tideDays();
+  const keys = Object.keys(days).sort();
+  const solved = keys.filter((k) => days[k].solved);
+  const dayAfter = (k) => { const [y, m, d] = k.split('-').map(Number); return new Date(Date.UTC(y, m - 1, d + 1)).toISOString().slice(0, 10); };
+  let best = 0, run = 0, prev = null;
+  for (const k of keys) {
+    if (days[k].solved && prev && dayAfter(prev) === k && days[prev].solved) run++;
+    else run = days[k].solved ? 1 : 0;
+    best = Math.max(best, run);
+    prev = k;
+  }
+  // current streak: ends today or yesterday
+  let cur = 0;
+  const today = dayKey();
+  let k = days[today]?.solved ? today : null;
+  if (!k) { const y = new Date(Date.now() - 86400000).toISOString().slice(0, 10); if (days[y]?.solved && !days[today]) k = y; }
+  while (k && days[k]?.solved) { cur++; const [y, m, d] = k.split('-').map(Number); k = new Date(Date.UTC(y, m - 1, d - 1)).toISOString().slice(0, 10); }
+  const dist = { '-2': 0, '-1': 0, 0: 0, 1: 0, 2: 0, 3: 0, X: 0 };
+  for (const kk of keys) {
+    const r = days[kk];
+    if (!r.solved) dist.X++;
+    else dist[String(Math.max(-2, Math.min(3, r.moves.length - r.par)))]++;
+  }
+  return { played: keys.length, wins: solved.length, pct: keys.length ? Math.round((solved.length / keys.length) * 100) : 0, cur, best, dist };
+}
+
+const tideParCache = {};
+function tidePar(key) {
+  return (tideParCache[key] ??= ARCADE_BY_ID.tide.create(arcadeSeed('tide', true, key, 0)).par);
+}
+
+function tideCardHtml() {
+  const key = dayKey();
+  const r = tideDays()[key];
+  const n = tideNumber(key);
+  const st = tideStats();
+  const sub = r
+    ? `${r.solved ? `✅ Solved in ${r.moves.length}${r.moves.length <= r.par ? ' ⛳' : ''}` : '🌫️ Not this time'} · next in <b id="u-tide-next">${hms(msToReset())}</b>`
+    : `Same puzzle for everyone · par ${tidePar(key)} · ${st.cur ? `🔥 ${st.cur}-day tide streak` : 'start a tide streak'}`;
+  return `<button class="tide-card ${r ? 'done' : ''}" id="u-tide">
+    <span class="tide-wave">🌊</span>
+    <span class="grow"><small>TIDE OF THE DAY · #${n}</small><b>${r ? 'See your result & share' : "Play today's puzzle"}</b><span class="small">${sub}</span></span>
+    <span class="btn sm">${r ? 'Share' : 'Play'}</span></button>`;
+}
+
+async function playTide() {
+  const key = dayKey();
+  if (tideDays()[key]) return showTideResult(key);
+  leaveGame();
+  try { history.pushState({ g: 1 }, ''); } catch { /* sandboxed */ }
+  const g = ARCADE_BY_ID.tide;
+  const mod = await VIEWS.tide();
+  if (!load().tide?.seenHow) { await arcadeHow('tide'); update((d) => { d.tide = { ...(d.tide || { days: {} }), seenHow: true }; }); }
+  const playSeed = arcadeSeed('tide', true, key, 0);
+  const sim = g.create(playSeed);
+  const run = { kind: 'arcade', id: 'tide', daily: true, key, seed: 0, playSeed, sim, tide: true };
+  currentRun = run;
+  setBackground(g.color);
+  const el = showScreen('arcade', `
+    <div class="hud">
+      <button class="icon-btn" id="ar-pause" aria-label="Menu">⏸</button>
+      <div class="box grow arcade-hud" id="ar-hud"></div>
+    </div>
+    <div class="board-wrap"><canvas id="ar-canvas" aria-label="Tide of the Day board"></canvas></div>
+    <div id="ar-controls" class="arcade-controls"></div>
+    <div class="mode-label" id="ar-label">🌊 Tide #${tideNumber(key)} · only your first try counts</div>`);
+  applyTable(el, 'tide');
+  const refresh = () => {
+    const box = $('#ar-hud', el);
+    if (box) box.innerHTML = mod.hud(sim).map((h) => `<div class="hstat ${h.big ? 'big' : ''}"><span class="lbl">${esc(String(h.label))}</span><b>${h.value}</b></div>`).join('');
+  };
+  view = new mod.default({
+    canvas: $('#ar-canvas', el), controls: $('#ar-controls', el), sim, reducedMotion: load().settings.reducedMotion,
+    hooks: { onChange: refresh, onOver: () => endTide(run) },
+  });
+  $('#ar-pause', el).onclick = async () => {
+    sfx.tap();
+    const r = await modal('<h2>🌊 Tide of the Day</h2><p class="small muted">Only your first try counts, so giving up now ends today\'s tide.</p>', {
+      buttons: [{ label: '▶ Keep playing', value: null, cls: 'green' }, { label: '❓ How to play', value: 'how', cls: 'ghost' }, { label: '🏳️ Give up for today', value: 'quit', cls: 'ghost' }],
+    });
+    if (r === 'how') arcadeHow('tide');
+    if (r === 'quit') { sim.quit(); endTide(run); }
+  };
+  refresh();
+}
+
+async function endTide(run) {
+  if (run.ended) return;
+  run.ended = true;
+  const { sim, key } = run;
+  const shells = sim.solved ? 20 + 10 * (sim.limit - sim.moves.length) : 10;
+  update((d) => {
+    d.tide = { ...(d.tide || {}), days: { ...(d.tide?.days || {}) } };
+    if (!d.tide.days[key]) d.tide.days[key] = { moves: sim.moves.slice(), solved: sim.solved, par: sim.par, limit: sim.limit, score: sim.score, covered: sim.covered };
+    d.shells += shells;
+    d.arcade = { ...(d.arcade || {}), tide: { ...(d.arcade?.tide || { best: 0, games: 0, daily: {} }) } };
+    const a = d.arcade.tide;
+    a.games = (a.games || 0) + 1;
+    a.best = Math.max(a.best || 0, sim.score);
+    a.daily = { ...(a.daily || {}), [key]: sim.score };
+  });
+  noteGameEnd('tide', false);
+  const sub = submitRun({ board: 'tideDaily', key, seed: 0, log: sim.log, score: sim.score }).catch(() => null);
+  leaveGame();
+  showHub();
+  await showTideResult(key, { shells, sub });
+}
+
+async function showTideResult(key, { shells, sub } = {}) {
+  const r = tideDays()[key];
+  if (!r) return;
+  const st = tideStats();
+  const fake = { moves: r.moves, solved: r.solved, limit: r.limit, par: r.par, covered: r.covered ?? 0 };
+  const rows = [];
+  for (let i = 0; i < r.moves.length; i += 8) rows.push(r.moves.slice(i, i + 8).map((c) => TIDE_EMOJI[c]).join(''));
+  const max = Math.max(1, ...Object.values(st.dist));
+  const labels = { '-2': '−2+', '-1': '−1', 0: 'Par', 1: '+1', 2: '+2', 3: '+3', X: '✗' };
+  const mine = r.solved ? String(Math.max(-2, Math.min(3, r.moves.length - r.par))) : 'X';
+  const bars = ['-2', '-1', '0', '1', '2', '3', 'X'].map((k) => `<div class="tide-bar"><span>${labels[k]}</span><div class="tb"><i style="width:${Math.max(6, (st.dist[k] / max) * 100)}%" class="${k === mine ? 'me' : ''}">${st.dist[k]}</i></div></div>`).join('');
+  const res = await modal(`<h2>🌊 Tide #${tideNumber(key)}</h2>
+    <div class="big-score">${r.solved ? `${r.moves.length}/${r.limit}` : `X/${r.limit}`}</div>
+    <p class="muted">${r.solved ? (r.moves.length < r.par ? `🏆 ${r.par - r.moves.length} under par – brilliant!` : r.moves.length === r.par ? '⛳ Right on par!' : `Par was ${r.par} – so close!`) : `The tide reached ${r.covered ?? '?'}% of the board.`}</p>
+    <div class="tide-grid">${rows.join('<br>')}</div>
+    ${shells ? `<div class="reward">+${shells} 🐚</div>` : ''}
+    <p class="small muted" id="t-rank">${sub ? 'Checking today’s ranking…' : ''}</p>
+    <div class="tide-stats"><div><b>${st.played}</b><span>Played</span></div><div><b>${st.pct}</b><span>Win %</span></div><div><b>${st.cur}</b><span>Streak</span></div><div><b>${st.best}</b><span>Best</span></div></div>
+    <div class="tide-dist">${bars}</div>
+    <p class="small center">Next tide in <b id="t-next">${hms(msToReset())}</b></p>`, {
+    buttons: [{ label: '📤 Share result', value: 'share', cls: 'green' }, { label: '🏆 Today’s ranking', value: 'lb', cls: 'blue' }, { label: '🕹️ Arcade', value: null, cls: 'ghost' }],
+    onOpen: (sheet) => {
+      const t = setInterval(() => { const el = $('#t-next', sheet); if (!el) return clearInterval(t); el.textContent = hms(msToReset()); }, 1000);
+      sub?.then((x) => {
+        const el = $('#t-rank', sheet);
+        if (!el) return;
+        el.innerHTML = x?.rank ? `Today's rank: <b>#${x.rank}</b> of everyone's first tries` : x?.queued ? "Offline – we'll submit it later" : x?.skipped ? 'Leaderboard is off in settings' : esc(x?.error || '');
+      });
+    },
+  });
+  if (res === 'share') {
+    await shareText(tideShareText(key, fake, `${st.cur > 1 ? `🔥 ${st.cur}-day tide streak\n` : ''}${location.origin}${location.pathname}`));
+    showTideResult(key);
+  } else if (res === 'lb') showLeaderboard('tideDaily');
+  else if (currentScreen() !== 'hub') showHub();
 }
 
 // ------------------------------------------------------------------ Tide Pool home
@@ -1095,6 +1248,7 @@ const VIEWS = {
   catch: () => import('./arcade/catch-view.js'),
   chess: () => import('./arcade/chess-view.js'),
   ludo: () => import('./arcade/ludo-view.js'),
+  tide: () => import('./arcade/tide-view.js'),
   cube: () => import('./arcade/cube-view.js'),
 };
 
@@ -1108,7 +1262,7 @@ function hubGames() {
   return [
     { id: 'tidepop', title: 'Tidepop', icon: '🐚', tagline: 'Match-3 adventure · endless levels', best: `⭐ ${totalStars(s)}`, played: s.dailyDive[dayKey()]?.best !== undefined, dailyBoard: 'daily', open: goHome },
     { id: 'reef', title: 'Reef Blocks', icon: '🧱', tagline: 'Drag blocks, clear lines, chain combos', best: fmt(s.blocks.best), played: s.blocksDaily[dayKey()] !== undefined, dailyBoard: 'blocksDaily', open: blocksMenu },
-    ...ARCADE.map((g) => {
+    ...ARCADE.filter((g) => !g.special).map((g) => {
       const st = arcadeStats(g.id);
       const t = tierOf(g, st.best).tier;
       return { id: g.id, title: g.title, icon: g.icon, tagline: g.tagline, best: `${fmt(st.best)}${t ? ` · ${t.icon}` : ''}`, played: st.daily[dayKey()] !== undefined, dailyBoard: g.id + 'Daily', open: () => arcadeMenu(g.id) };
@@ -1131,7 +1285,7 @@ function missions() {
   const m = missionState();
   const games = hubGames();
   const hot = games.find((g) => g.id === hotGameId());
-  const dailies = games.filter((g) => g.played).length;
+  const dailies = games.filter((g) => g.played).length + (load().tide?.days?.[dayKey()] ? 1 : 0);
   return {
     claimed: m.claimed,
     list: [
@@ -1189,6 +1343,7 @@ function showHub() {
     <div class="scroll">
       <div class="home-hero"><div class="logo">Tide<span>pop</span> <small class="arcade-word">Arcade</small></div></div>
       <div class="hub-timer" role="timer">⏳ Today's challenges end in <b id="u-timer">${hms(msToReset())}</b><br><span class="small">🗓️ Weekly tournament ends in <b>${weekLeft()}</b> · top 10 win shells</span></div>
+      ${tideCardHtml()}
       ${pipHtml(load())}
       ${accountNudgeHtml(load())}
       <button class="hot-card" id="u-hot"><span class="hot-flame">🔥</span><span class="grow"><small>HOT TODAY · 2× SHELLS</small><b>${hot.icon} ${esc(hot.title)}</b></span><span class="btn sm">Play</span></button>
@@ -1223,6 +1378,7 @@ function showHub() {
   on('#u-community', () => showCommunity());
   on('#u-studio', () => showStudio());
   on('#u-pool', () => showPool());
+  on('#u-tide', () => playTide());
   on('#u-chest', () => {
     const freeze = (load().daily.freezes || 0) < MAX_FREEZES;
     update((d) => { d.missions = { ...missionState(), claimed: true }; d.shells += 150; d.boosters.hammer++; d.boosters.moves++; if (freeze) d.daily.freezes = (d.daily.freezes || 0) + 1; });
@@ -1238,6 +1394,8 @@ function showHub() {
     if (!t || currentScreen() !== 'hub') { clearInterval(hubTimer); return; }
     const left = msToReset();
     t.textContent = hms(left);
+    const tt = $('#u-tide-next');
+    if (tt) tt.textContent = hms(left);
     if (left < 3600000 && !(cozyActive() && isNightTime())) t.parentElement.classList.add('urgent');
   }, 1000);
   checkRankAlerts(games);
@@ -1262,7 +1420,7 @@ async function claimWeeklyPrizes() {
   const lastWeek = weekKey(new Date(Date.now() - 7 * 86400000));
   const s = load();
   if (s.weeklyClaimed === lastWeek) return;
-  const played = ARCADE.filter((g) => arcadeStats(g.id).week?.[lastWeek] !== undefined);
+  const played = ARCADE.filter((g) => !g.special && arcadeStats(g.id).week?.[lastWeek] !== undefined);
   if (!played.length) { update((d) => { d.weeklyClaimed = lastWeek; }); return; }
   const wins = [];
   try {
@@ -2466,7 +2624,7 @@ async function endBlocks(run) {
 const LB_GAMES = () => [
   { id: 'tidepop', label: '🐚 Tidepop', boards: [['daily', '📅 Daily Dive'], ['deep', '🐋 Deep Dive'], ['stars', '⭐ Adventure']] },
   { id: 'reef', label: '🧱 Reef Blocks', boards: [['blocksDaily', '📅 Today'], ['blocks', '🏆 All-time']] },
-  ...ARCADE.map((g) => ({ id: g.id, label: `${g.icon} ${g.title}`, boards: [[g.id + 'Daily', '📅 Today'], [g.id + 'Week', '🗓️ This week'], [g.id, '🏆 All-time']] })),
+  ...ARCADE.map((g) => ({ id: g.id, label: `${g.icon} ${g.title}`, boards: g.special ? [[g.id + 'Daily', '📅 Today']] : [[g.id + 'Daily', '📅 Today'], [g.id + 'Week', '🗓️ This week'], [g.id, '🏆 All-time']] })),
 ];
 const boardKey = (board) => (BOARDS[board].period === 'day' ? dayKey() : BOARDS[board].period === 'week' ? weekKey() : 'all');
 

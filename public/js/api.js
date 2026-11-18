@@ -92,7 +92,7 @@ async function sharedSubmit(sh, entry) {
     score = v.score;
   }
   const prev = doc.scores[id];
-  const keepFirst = entry.board === 'daily';
+  const keepFirst = entry.board === 'daily' || !!BOARDS[entry.board]?.firstOnly;
   if (!prev || (!keepFirst && score > prev.s)) {
     doc.scores[id] = { s: score, t: now, ...(entry.board === 'daily' || entry.board === 'deep' ? { log: entry.log } : {}) };
   }

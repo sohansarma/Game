@@ -9,7 +9,7 @@ import { getLevel, MAX_LEVEL } from '../public/js/levels.js';
 import { BOARDS, acceptableKeys, dayKey, weekKey, dailyConfig, deepConfig, blocksSeed, ENGINE_VERSION } from '../public/js/modes.js';
 import { cleanName, nameProblem } from '../public/js/storage.js';
 import { createAccounts, MAX_SAVE_BYTES } from './accounts.js';
-import { verifyArcade } from '../public/js/arcade/index.js';
+import { verifyArcade, gameForBoard } from '../public/js/arcade/index.js';
 import { sanitize as ugcSanitize, replay as ugcReplay } from '../public/js/maker/engine.js';
 
 const MAX_BODY = 64 * 1024;
@@ -326,9 +326,9 @@ export function createApi(store, { now = () => new Date(), origin = process.env.
     }
     if (typeof body.score === 'number' && body.score !== score) throw fail(422, 'score mismatch');
     // Daily Dive: only the first finished attempt of the day is ranked.
-    const res = record(boardId(board, key), body.playerId, score, { keepFirst: board === 'daily' });
+    const res = record(boardId(board, key), body.playerId, score, { keepFirst: board === 'daily' || !!BOARDS[board].firstOnly });
     // endless arcade runs also count towards this week's tournament
-    if (BOARDS[board].arcade && !BOARDS[board].daily) {
+    if (BOARDS[board].arcade && !BOARDS[board].daily && !BOARDS[board].firstOnly && !gameForBoard(board)?.special) {
       const wk = record(boardId(board + 'Week', weekKey(now())), body.playerId, score);
       res.weekRank = wk.rank;
     }
