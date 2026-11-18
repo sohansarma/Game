@@ -14,9 +14,9 @@ import { load, update, save, totalStars, highestUnlocked, exportSave, importSave
 import { MatchView } from './matchview.js';
 import { BlocksView } from './blocksview.js';
 import { iconURL, PALETTE, clearSpriteCache } from './creatures.js';
-import { sfx, unlockAudio, configureAudio, haptic } from './audio.js';
+import { sfx, unlockAudio, configureAudio, haptic, purr } from './audio.js';
 import { startCloud, syncNow, cloudAccount, cloudStatus, onCloudChange, signUp, logIn, logOut, recoverAccount, changePassword, deleteAccount, setClaudeSync } from './cloud.js';
-import { configureCozy, cozyActive, cozySleeping, wakeCozy, onSleep, isNightTime } from './cozy.js';
+import { configureCozy, cozyActive, cozySleeping, wakeCozy, onSleep, isNightTime, cozySound } from './cozy.js';
 import * as api from './api.js';
 import { ACHIEVEMENTS, checkAchievements } from './achievements.js';
 import { $, $$, esc, fmt, showScreen, currentScreen, modal, closeModal, isModalOpen, toast, starsHtml, setBackground } from './ui.js';
@@ -64,7 +64,7 @@ async function boot() {
 
   api.checkServer().then((ok) => { if (ok) api.flushPending().catch(() => {}); });
 
-  onSleep(() => toast('🌙 Sleep timer – the rain has faded. Sweet dreams'));
+  onSleep(goodNight);
   onCloudChange((st, merged) => {
     if (merged && !view && !isModalOpen() && currentScreen() === 'hub') showHub();
     if (currentScreen() === 'settings') renderAccountBox();
@@ -84,13 +84,27 @@ function applySettings() {
   configureCozy(s.settings);
 }
 
+/** Sleep timer finished: dim, then a gentle good-night card with a reason to come back tomorrow. */
+async function goodNight() {
+  if (isModalOpen()) return;
+  const s = load();
+  const st = dailyStatus();
+  const tomorrowDay = Math.min(7, (s.daily.streak || 0) + 1);
+  const r = await modal(`<div class="goodnight"><div class="gn-moon">🌙</div><h2>Sweet dreams, ${esc(s.name)}</h2>
+    <p>The sounds have faded. Pip is curled up asleep 🦦💤</p>
+    <div class="tip">🌅 <b>Tomorrow:</b> fresh daily challenges, new missions and your <b>day ${tomorrowDay} streak gift</b>${st.canClaim ? '' : ' – keep the streak going'}.</div></div>`, {
+    buttons: [{ label: '😴 Good night', value: 'sleep', cls: 'blue' }, { label: "I'm still awake", value: 'wake', cls: 'ghost' }],
+  });
+  if (r === 'wake') { wakeCozy(); toast('🌧️ The sounds are back'); }
+}
+
 /** Quick toggle from the Arcade: rain on/off (remembers 'only at night' if chosen). */
 function toggleCozy() {
   const on = cozyActive();
   update((d) => { d.settings.cozy = on ? 'off' : (d.settings.cozyLast === 'night' && isNightTime() ? 'night' : 'on'); });
   applySettings();
   sfx.tap();
-  toast(on ? '☀️ Cozy rain off' : '🌧️ Cozy rain on – sleep well');
+  toast(on ? '☀️ Cozy mode off' : `${({ fire: '🔥', ocean: '🌊', rainfire: '🌧️🔥' })[load().settings.cozySound] || '🌧️'} Cozy mode on – make yourself comfortable`);
   if (currentScreen() === 'hub') showHub();
 }
 
@@ -323,6 +337,38 @@ async function accountAction(a) {
   if (currentScreen() === 'settings') renderAccountBox();
 }
 
+/** Pip, the Arcade's sleepy otter, and a greeting for the time of day. */
+function greetingFor(d = new Date()) {
+  const h = d.getHours();
+  return h < 5 ? 'Up late' : h < 12 ? 'Good morning' : h < 17 ? 'Good afternoon' : h < 21 ? 'Good evening' : 'Cozy night';
+}
+function pipHtml(s) {
+  const night = cozyActive() || isNightTime();
+  const snd = cozyActive() ? ({ fire: 'by the fire', ocean: 'by the sea', rainfire: 'by the fire, rain outside' })[cozySound()] || 'listening to the rain' : '';
+  const petted = s.pip?.day === localDay();
+  const line = cozyActive() ? `Pip is snoozing ${snd}.` : night ? 'Pip is getting sleepy… tap 🌙 for cozy mode.' : 'Pip is waiting for you to play!';
+  return `<button class="pip-card ${night ? 'night' : ''}" id="u-pip" aria-label="Pet Pip the otter">
+    <span class="pip"><span class="pip-otter">🦦</span>${night ? '<span class="pip-z">z<span>z</span><span>z</span></span>' : ''}</span>
+    <span class="grow"><b>${greetingFor()}, ${esc(s.name)}</b><span class="small">${line}${petted ? '' : ' <b>Pet Pip 🐾</b>'}</span></span>
+  </button>`;
+}
+async function petPip(btn) {
+  haptic(12);
+  purr();
+  const heart = document.createElement('span');
+  heart.className = 'pip-heart';
+  heart.textContent = ['💛', '💙', '🩷', '✨'][Math.floor(Math.random() * 4)];
+  btn.querySelector('.pip')?.appendChild(heart);
+  setTimeout(() => heart.remove(), 1200);
+  const today = localDay();
+  if (load().pip?.day !== today) {
+    // once a day Pip has a little present – a reason to say hello tomorrow too
+    const gift = 5 + Math.floor(Math.random() * 11);
+    update((d) => { d.pip = { day: today, pets: (d.pip?.pets || 0) + 1 }; d.shells += gift; });
+    setTimeout(() => { toast(`🦦 Pip found ${gift} 🐚 for you!`); showHub(); }, 900);
+  } else update((d) => { d.pip.pets = (d.pip.pets || 0) + 1; });
+}
+
 /** A gentle nudge on the Arcade once someone has played a bit. */
 function accountNudgeHtml(s) {
   if (cloudAccount() || api.inArtifact() || !api.isOnline()) return '';
@@ -373,27 +419,41 @@ async function onboarding() {
 }
 
 // ------------------------------------------------------------------ daily reward
+const MAX_FREEZES = 2;
+/** Days between two local day keys. */
+function daysBetween(a, b) {
+  const [y1, m1, d1] = a.split('-').map(Number), [y2, m2, d2] = b.split('-').map(Number);
+  return Math.round((Date.UTC(y2, m2 - 1, d2) - Date.UTC(y1, m1 - 1, d1)) / 86400000);
+}
+
 function dailyStatus() {
   const s = load();
   const today = localDay();
-  if (s.daily.lastClaim === today) return { canClaim: false, streak: s.daily.streak };
-  const yesterday = localDay(new Date(Date.now() - 86400000));
-  const streak = s.daily.lastClaim === yesterday ? s.daily.streak + 1 : 1;
-  return { canClaim: true, streak };
+  const freezes = s.daily.freezes || 0;
+  if (s.daily.lastClaim === today) return { canClaim: false, streak: s.daily.streak, freezes };
+  if (!s.daily.lastClaim) return { canClaim: true, streak: 1, freezes };
+  const gap = daysBetween(s.daily.lastClaim, today);
+  const missed = gap - 1;
+  // missed days are covered by streak freezes, if you have enough
+  if (missed <= 0) return { canClaim: true, streak: s.daily.streak + 1, freezes };
+  if (missed <= freezes) return { canClaim: true, streak: s.daily.streak + 1, freezes, usedFreezes: missed };
+  return { canClaim: true, streak: 1, freezes, lostStreak: s.daily.streak, away: gap };
 }
 
 function claimDaily(silent) {
   const st = dailyStatus();
   if (!st.canClaim) return null;
   const reward = DAILY_REWARDS[(st.streak - 1) % 7];
+  const welcome = st.away >= 3 ? 40 + Math.min(10, st.away) * 10 : 0; // welcome back after a break
   update((d) => {
     d.daily.lastClaim = localDay();
     d.daily.streak = st.streak;
-    d.shells += reward.shells || 0;
+    if (st.usedFreezes) d.daily.freezes = Math.max(0, (d.daily.freezes || 0) - st.usedFreezes);
+    d.shells += (reward.shells || 0) + welcome;
     for (const k of ['hammer', 'shuffle', 'moves']) d.boosters[k] += reward[k] || 0;
   });
   if (!silent) sfx.coin();
-  return reward;
+  return { ...reward, welcome };
 }
 
 function rewardText(r) {
@@ -408,13 +468,18 @@ async function maybeDailyReward() {
   if (!st.canClaim) return;
   const day = (st.streak - 1) % 7;
   const cal = DAILY_REWARDS.map((r, i) => `<div class="day ${i < day ? 'claimed' : ''} ${i === day ? 'today' : ''}">Day ${i + 1}<span class="r">${i < day ? '✅' : r.shells && !r.hammer ? '🐚' : r.hammer && r.shells ? '🎁' : BOOSTER_ICON[Object.keys(r)[0]]}</span>${rewardText(r)}</div>`).join('');
+  const note = st.usedFreezes
+    ? `<div class="tip">🧊 You missed ${st.usedFreezes === 1 ? 'a day' : `${st.usedFreezes} days`} – ${st.usedFreezes === 1 ? 'a streak freeze' : 'streak freezes'} kept your streak safe!</div>`
+    : st.away >= 3 ? `<div class="tip">🌊 <b>Welcome back!</b> The tide brought you a gift: <b>+${40 + Math.min(10, st.away) * 10} 🐚</b>. Your streak starts fresh – no worries.</div>` : '';
   const res = await modal(`
     <h2>Daily Treasure</h2>
-    <p class="muted">Streak: <b>🔥 ${st.streak} day${st.streak > 1 ? 's' : ''}</b>. Come back tomorrow for more!</p>
-    <div class="calendar">${cal}</div>`, { buttons: [{ label: 'Claim!', value: 'claim', cls: 'green' }] });
+    <p class="muted">Streak: <b>🔥 ${st.streak} day${st.streak > 1 ? 's' : ''}</b>${st.freezes ? ` · 🧊 ${st.freezes} freeze${st.freezes > 1 ? 's' : ''}` : ''}. Come back tomorrow for more!</p>
+    ${note}
+    <div class="calendar">${cal}</div>
+    <p class="small muted">🧊 Open the daily mission chest to earn streak freezes (hold up to ${MAX_FREEZES}). They protect your streak if you miss a day.</p>`, { buttons: [{ label: 'Claim!', value: 'claim', cls: 'green' }] });
   if (res === 'claim') {
     const r = claimDaily();
-    toast(`Got ${rewardText(r)}`);
+    toast(`Got ${rewardText(r)}${r.welcome ? ` + 🐚 ${r.welcome} welcome gift` : ''}`);
     announceAchievements();
     if (currentScreen() === 'home') goHome();
     if (currentScreen() === 'hub') showHub();
@@ -1012,6 +1077,7 @@ function showHub() {
     <div class="scroll">
       <div class="home-hero"><div class="logo">Tide<span>pop</span> <small class="arcade-word">Arcade</small></div></div>
       <div class="hub-timer" role="timer">⏳ Today's challenges end in <b id="u-timer">${hms(msToReset())}</b><br><span class="small">🗓️ Weekly tournament ends in <b>${weekLeft()}</b> · top 10 win shells</span></div>
+      ${pipHtml(load())}
       ${accountNudgeHtml(load())}
       <button class="hot-card" id="u-hot"><span class="hot-flame">🔥</span><span class="grow"><small>HOT TODAY · 2× SHELLS</small><b>${hot.icon} ${esc(hot.title)}</b></span><span class="btn sm">Play</span></button>
       <div class="missions">
@@ -1035,6 +1101,8 @@ function showHub() {
   on('#u-lb', () => showLeaderboard());
   on('#u-settings', showSettings);
   on('#u-cozy', toggleCozy);
+  const pipBtn = $('#u-pip', el);
+  if (pipBtn) pipBtn.onclick = () => petPip(pipBtn);
   on('#u-nudge-go', async () => { await openSignUp(); showHub(); });
   on('#u-nudge-x', () => { update((d) => { d.nudgeHiddenUntil = Date.now() + 3 * 86400000; }); showHub(); });
   on('#u-gift', () => (dailyStatus().canClaim ? maybeDailyReward() : toast('Already claimed today – see you tomorrow! 🔥')));
@@ -1042,9 +1110,10 @@ function showHub() {
   on('#u-community', () => showCommunity());
   on('#u-studio', () => showStudio());
   on('#u-chest', () => {
-    update((d) => { d.missions = { ...missionState(), claimed: true }; d.shells += 150; d.boosters.hammer++; d.boosters.moves++; });
+    const freeze = (load().daily.freezes || 0) < MAX_FREEZES;
+    update((d) => { d.missions = { ...missionState(), claimed: true }; d.shells += 150; d.boosters.hammer++; d.boosters.moves++; if (freeze) d.daily.freezes = (d.daily.freezes || 0) + 1; });
     sfx.win();
-    toast('Mission chest: +150 🐚, 🔨 +1, ➕ +1');
+    toast(`Mission chest: +150 🐚, 🔨 +1, ➕ +1${freeze ? ', 🧊 streak freeze' : ''}`);
     announceAchievements();
     showHub();
   });
@@ -1055,7 +1124,7 @@ function showHub() {
     if (!t || currentScreen() !== 'hub') { clearInterval(hubTimer); return; }
     const left = msToReset();
     t.textContent = hms(left);
-    if (left < 3600000) t.parentElement.classList.add('urgent');
+    if (left < 3600000 && !(cozyActive() && isNightTime())) t.parentElement.classList.add('urgent');
   }, 1000);
   checkRankAlerts(games);
   claimWeeklyPrizes();
@@ -1799,6 +1868,7 @@ async function endArcade(run) {
       { label: '⚔️ Challenge a friend', value: 'challenge', cls: 'blue' },
       ...(run.daily ? [{ label: '📤 Share', value: 'share', cls: 'ghost' }] : []),
       { label: '🏆 Leaderboard', value: 'lb', cls: 'ghost' },
+      ...(cozyActive() && isNightTime() ? [{ label: '🌙 Tuck in for the night', value: 'tuck', cls: 'ghost' }] : []),
       { label: '🕹️ Arcade', value: 'hub', cls: 'ghost' },
     ],
   });
@@ -1810,7 +1880,7 @@ async function endArcade(run) {
     if (!el) return;
     if (res?.queued) el.textContent = "Offline – we'll submit your score later.";
     else if (res?.skipped) el.textContent = 'Leaderboard is turned off in settings.';
-    else if (res?.rank) el.innerHTML = `${run.daily ? "Today's" : 'All-time'} rank: <b>#${res.rank}</b>${res.weekRank ? ` · this week: <b>#${res.weekRank}</b>` : ''}${res.rank > 1 ? ' – one more try?' : ' 👑'}`;
+    else if (res?.rank) el.innerHTML = `${run.daily ? "Today's" : 'All-time'} rank: <b>#${res.rank}</b>${res.weekRank ? ` · this week: <b>#${res.weekRank}</b>` : ''}${res.rank > 1 ? (cozyActive() && isNightTime() ? ' – lovely run' : ' – one more try?') : ' 👑'}`;
     else el.textContent = res?.error || '';
   });
   const r = await p;
@@ -1823,6 +1893,7 @@ async function endArcade(run) {
   }
   else if (r === 'share') { await shareText(`${g.icon} Tidepop ${g.title} daily ${run.key}\nScore: ${fmt(score)}${rank ? ` · Rank #${rank}` : ''}\nBeat me: ${location.origin}${location.pathname}`); showHub(); }
   else if (r === 'lb') showLeaderboard(board);
+  else if (r === 'tuck') { showHub(); goodNight(); }
   else showHub();
 }
 
@@ -2445,11 +2516,14 @@ function showSettings() {
       <h3 style="margin-top:18px">Sound & feel</h3>
       ${sw('sfx', '🔊 Sound effects')}${sw('music', '🎵 Music')}${sw('haptics', '📳 Vibration')}
       ${sw('reducedMotion', '🧘 Reduced motion', 'Calmer animations, no screen shake')}
-      <h3 style="margin-top:18px">🌧️ Cozy rain</h3>
-      <p class="small muted">Soft rain and distant thunder for late-night play. Game sounds get quieter under the rain.</p>
+      <h3 style="margin-top:18px">🌙 Cozy mode</h3>
+      <p class="small muted">A calm night ambience for the whole game: soundscape, warm lamp light, a slow lullaby instead of the day music, and a sleep timer.</p>
       <div class="seg" data-cozy="cozy">${[['off', 'Off'], ['on', 'On'], ['night', '🌙 Only at night']].map(([v, l]) => `<button class="seg-btn ${s.settings.cozy === v ? 'on' : ''}" data-v="${v}">${l}</button>`).join('')}</div>
+      <p class="small" style="margin:10px 0 4px">Soundscape</p>
+      <div class="seg" data-cozy="cozySound">${[['rain', '🌧️ Rain'], ['fire', '🔥 Fireplace'], ['rainfire', '🌧️🔥 Rain + fire'], ['ocean', '🌊 Night ocean']].map(([v, l]) => `<button class="seg-btn ${(s.settings.cozySound || 'rain') === v ? 'on' : ''}" data-v="${v}">${l}</button>`).join('')}</div>
       <div class="range-row"><span>🔈</span><input type="range" id="s-cozyvol" min="0" max="100" value="${Math.round((s.settings.cozyVol ?? 0.6) * 100)}" aria-label="Rain volume"><span>🔊</span></div>
-      ${sw('thunder', '⛈️ Distant thunder', 'With a soft lightning glow (no flashes with Reduced motion)')}
+      ${sw('thunder', '⛈️ Distant thunder', 'With rain · a soft sky glow, no flashes with Reduced motion')}
+      ${sw('cozyWindow', '💧 Raindrops on the window', 'Drops trickle down the screen glass – they never block taps')}
       <p class="small" style="margin:8px 0 4px">⏲️ Sleep timer – fade the rain out after</p>
       <div class="seg" data-cozy="sleepTimer">${[[0, 'Off'], [15, '15 min'], [30, '30 min'], [60, '1 hour'], [90, '1½ h']].map(([v, l]) => `<button class="seg-btn ${Number(s.settings.sleepTimer || 0) === v ? 'on' : ''}" data-v="${v}">${l}</button>`).join('')}</div>
       ${cozySleeping() ? '<button class="btn sm blue" id="s-wake" style="margin-top:8px">🌧️ Bring the rain back</button>' : ''}

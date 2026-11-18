@@ -24,6 +24,8 @@ export function unlockAudio() {
   }
   const AC = window.AudioContext || window.webkitAudioContext;
   if (!AC) return;
+  // Play alongside the player's own music/podcast instead of pausing it
+  try { if (navigator.audioSession) navigator.audioSession.type = 'ambient'; } catch { /* unsupported */ }
   ctx = new AC();
   out = ctx.createDynamicsCompressor();
   out.threshold.value = -14;
@@ -68,14 +70,16 @@ export function onAudioReady(fn) {
 }
 /** Night mode: softer game sounds and music under the rain. */
 export function setNightAudio(on) {
+  const was = night;
   night = !!on;
   applyNight();
+  if (was !== night) step = Math.ceil(step / 8) * 8; // the other style picks up at the next bar – the music never stops
 }
 function applyNight() {
   if (!ctx) return;
   const t = ctx.currentTime;
-  sfxBus.gain.setTargetAtTime(night ? 0.3 : 0.55, t, 0.4);
-  musicBus.gain.setTargetAtTime(night ? 0.08 : 0.16, t, 0.6);
+  sfxBus.gain.setTargetAtTime(night ? 0.45 : 0.55, t, 0.4); // game sounds keep playing, just a touch softer
+  musicBus.gain.setTargetAtTime(night ? 0.11 : 0.16, t, 0.6);
 }
 
 // Exponentially decaying stereo noise = a small, soft "room".
@@ -335,16 +339,72 @@ function scheduleStep(t) {
   step++;
 }
 
+// Night lullaby (cozy mode): slow lo-fi seventh chords, a warm electric-piano
+// pad, a soft bass and a sparse, sleepy melody. Same clock as the day tune.
+const NIGHT_BPM = 62;
+const NIGHT_CHORDS = [
+  { root: 174.61, notes: [0, 4, 7, 11] }, // Fmaj7
+  { root: 164.81, notes: [0, 3, 7, 10] }, // Em7
+  { root: 146.83, notes: [0, 3, 7, 10] }, // Dm7
+  { root: 130.81, notes: [0, 4, 7, 11] }, // Cmaj7
+];
+const NIGHT_MELODY = [[2, 2], [5, 3], [3, 1], [6, 2], [1, 3], [4, 2], [6, 0], [2, 1]]; // [eighth in bar, chord tone]
+function scheduleNightStep(t) {
+  const eighth = 60 / NIGHT_BPM / 2;
+  const bar = Math.floor(step / 8) % NIGHT_CHORDS.length;
+  const pos = step % 8;
+  const ch = NIGHT_CHORDS[bar];
+  const semis = (x) => Math.pow(2, x / 12);
+  const when = t - ctx.currentTime;
+  if (pos === 0) {
+    tone(ch.root / 2, eighth * 7.5, { type: 'sine', vol: 0.5, when, attack: 0.08, verb: 0.2, bus: musicBus });
+    ch.notes.forEach((n, i) => tone(ch.root * semis(n), eighth * 8.5, { type: i % 2 ? 'sine' : 'triangle', vol: 0.07, when: when + i * 0.03, attack: 0.6, verb: 0.9, bus: musicBus, pan: i % 2 ? 0.25 : -0.25 }));
+  }
+  const lap = Math.floor(step / 32);
+  for (const [p, k] of NIGHT_MELODY.slice((lap % 2) * 4, (lap % 2) * 4 + 4)) {
+    if (p !== pos) continue;
+    const f = ch.root * 2 * semis(ch.notes[k % ch.notes.length]);
+    tone(f, eighth * 3, { type: 'sine', vol: 0.16, when, attack: 0.03, verb: 0.85, bus: musicBus, pan: (k - 1.5) * 0.2 });
+    tone(f * 2, eighth * 1.2, { type: 'sine', vol: 0.025, when, attack: 0.01, verb: 0.9, bus: musicBus }); // soft "tine"
+  }
+  step++;
+}
+
 function startMusic() {
   if (!ctx || musicTimer) return;
   nextTime = ctx.currentTime + 0.1;
   musicTimer = setInterval(() => {
-    const eighth = 60 / BPM / 2;
+    const eighth = 60 / (night ? NIGHT_BPM : BPM) / 2;
     while (nextTime < ctx.currentTime + 0.25) {
-      scheduleStep(nextTime);
+      if (night) scheduleNightStep(nextTime);
+      else scheduleStep(nextTime);
       nextTime += eighth;
     }
   }, 60);
+}
+
+/** A sleepy otter's purr: low, rumbly, amplitude-wobbling noise. */
+export function purr(seconds = 1.4) {
+  if (!ctx || !settings.sfx) return;
+  const t = ctx.currentTime;
+  const len = Math.floor(ctx.sampleRate * seconds);
+  const buf = ctx.createBuffer(1, len, ctx.sampleRate);
+  const d = buf.getChannelData(0);
+  let last = 0;
+  for (let i = 0; i < len; i++) { last = (last + 0.04 * (Math.random() * 2 - 1)) / 1.04; d[i] = last * 4; }
+  const src = ctx.createBufferSource();
+  src.buffer = buf;
+  const lp = ctx.createBiquadFilter(); lp.type = 'lowpass'; lp.frequency.value = 380;
+  const am = ctx.createGain(); am.gain.value = 0.5;
+  const lfo = ctx.createOscillator(); lfo.frequency.value = 24;
+  const lfoAmt = ctx.createGain(); lfoAmt.gain.value = 0.45;
+  lfo.connect(lfoAmt); lfoAmt.connect(am.gain);
+  const g = ctx.createGain();
+  g.gain.setValueAtTime(0.0001, t);
+  g.gain.exponentialRampToValueAtTime(0.9, t + 0.15);
+  g.gain.setTargetAtTime(0.0001, t + seconds - 0.4, 0.15);
+  src.connect(lp); lp.connect(am); am.connect(g); g.connect(sfxBus);
+  src.start(t); lfo.start(t); src.stop(t + seconds); lfo.stop(t + seconds);
 }
 
 export function stopMusic() {

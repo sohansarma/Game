@@ -25,7 +25,7 @@ const HOMECOL = [
   [[13, 7], [12, 7], [11, 7], [10, 7], [9, 7]],
 ];
 const BASE_ORIGIN = [[0, 0], [0, 9], [9, 9], [9, 0]];
-const SLOTS = [[1.5, 1.5], [1.5, 3.5], [3.5, 1.5], [3.5, 3.5]];
+const SLOTS = [[2, 2], [2, 4], [4, 2], [4, 4]]; // centred in the 6x6 base (its white box spans 0.75..5.25)
 const HOME_SPOT = [[7.5, 6.4], [6.4, 7.5], [7.5, 8.6], [8.6, 7.5]];
 
 /** Board-space centre [row, col] of a token (unrotated). */

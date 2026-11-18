@@ -77,7 +77,7 @@ export function defaultSave() {
     blocksRun: null, // in-progress endless run { seed, log }
     achievements: {},
     stats: { matches: 0, specials: 0, rainbows: 0, bestCascade: 0, levelsWon: 0, gamesPlayed: 0, lines: 0, perfectClears: 0, bestCombo: 0 },
-    settings: { sfx: true, music: true, haptics: true, reducedMotion: false, leaderboard: true, cozy: 'off', cozyVol: 0.6, thunder: true, sleepTimer: 0 },
+    settings: { sfx: true, music: true, haptics: true, reducedMotion: false, leaderboard: true, cozy: 'off', cozySound: 'rain', cozyVol: 0.6, thunder: true, cozyWindow: true, sleepTimer: 0 },
     pending: [], // unsent leaderboard submissions
   };
 }
