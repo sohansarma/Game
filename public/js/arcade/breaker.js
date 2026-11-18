@@ -2,7 +2,9 @@
 // Inputs: ['x', tick, target] moves the paddle toward target x (the paddle
 // has a max speed, so it can't teleport), ['l', tick] launches the ball.
 // World 100 x 150. Bricks: 10 columns; tougher bricks take more hits.
-// Power-ups: W = wide paddle, + = extra life, P = bonus pearl.
+// Power-ups: W = wide paddle, + = extra life, P = bonus pearl,
+// M = multiball (two more pearls), S = sticky paddle (catch, aim, relaunch).
+// The coral creeps down one row every 30 s you take on a wall.
 // Score: brick hit 5, break 10 x level, pearl 50, level clear 100 x level.
 
 import { Rng, hashString } from '../rng.js';
@@ -30,6 +32,9 @@ class BreakerSim {
     this.px = 50;
     this.target = 50;
     this.wideUntil = 0;
+    this.stickyUntil = 0;
+    this.extra = []; // multiball pearls: {bx, by, vx, vy}
+    this.chain = 0; // breaks since the pearl last touched the paddle
     this.drops = [];
     this.nextLevel();
   }
@@ -56,13 +61,16 @@ class BreakerSim {
         if (!on) continue;
         const hp = Math.min(3, 1 + Math.floor((rows - 1 - r + this.level - 1) / 3) - (rng.next() < 0.3 ? 1 : 0)) || 1;
         const roll = rng.next();
-        const drop = roll < 0.06 ? 'W' : roll < 0.09 ? '+' : roll < 0.2 ? 'P' : null;
+        const drop = roll < 0.06 ? 'W' : roll < 0.09 ? '+' : roll < 0.13 ? 'M' : roll < 0.16 ? 'S' : roll < 0.24 ? 'P' : null;
         this.bricks.push({ r, c, hp, max: hp, drop });
       }
+    this.levelTick = 0;
     this.resetBall();
   }
 
   resetBall() {
+    this.extra = [];
+    this.stickOff = 0;
     this.attached = true;
     this.speed = Math.min(2.6, 1.35 + this.level * 0.12);
     this.bx = this.px;
@@ -84,8 +92,11 @@ class BreakerSim {
     if (this.over || !this.attached) return false;
     this.log.push(['l', this.tick]);
     this.attached = false;
-    this.vx = this.speed * 0.35;
+    // caught on a sticky paddle: launch at the angle where it sits
+    const off = Math.max(-1, Math.min(1, this.stickOff / (this.paddleW / 2)));
+    this.vx = this.stickOff ? this.speed * off * 0.8 : this.speed * 0.35;
     this.vy = -Math.sqrt(this.speed * this.speed - this.vx * this.vx);
+    this.stickOff = 0;
     this.events.push('launch');
     return true;
   }
@@ -114,14 +125,42 @@ class BreakerSim {
         if (p.kind === 'W') this.wideUntil = this.tick + 60 * 12;
         if (p.kind === '+') this.lives = Math.min(5, this.lives + 1);
         if (p.kind === 'P') this.points += 50;
+        if (p.kind === 'S') this.stickyUntil = this.tick + 60 * 10;
+        if (p.kind === 'M') {
+          const src = this.attached ? { bx: this.px, by: PADDLE_Y - 8 } : { bx: this.bx, by: this.by };
+          for (const a of [-0.6, 0.6]) if (this.extra.length < 4) this.extra.push({ bx: src.bx, by: src.by, vx: this.speed * a, vy: -Math.sqrt(this.speed * this.speed * (1 - a * a)) });
+        }
         this.events.push('power:' + p.kind);
       }
     }
     this.drops = this.drops.filter((p) => !p.taken && p.y < WH);
-    if (this.attached) { this.bx = this.px; return; }
-    // ball, in substeps
+    // the coral creeps down a row every 30 s (never closer than row 17)
+    if (!this.attached) {
+      this.levelTick++;
+      if (this.levelTick % 1800 === 0 && this.bricks.length && Math.max(...this.bricks.map((b) => b.r)) < 17) {
+        for (const b of this.bricks) b.r++;
+        this.events.push('creep');
+      }
+    }
+    // extra pearls move first (they never cost a life)
     const steps = Math.ceil(this.speed / 1.2);
-    for (let i = 0; i < steps && !this.over; i++) this.moveBall(1 / steps);
+    if (this.extra.length) {
+      const main = { bx: this.bx, by: this.by, vx: this.vx, vy: this.vy, attached: this.attached, lost: this.lostFlag };
+      const lvl = this.level;
+      for (const e of this.extra) {
+        if (this.level !== lvl) break;
+        Object.assign(this, { bx: e.bx, by: e.by, vx: e.vx, vy: e.vy, attached: false, lostFlag: false, extraBall: true });
+        for (let i = 0; i < steps && !this.lostFlag && this.level === lvl; i++) this.moveBall(1 / steps);
+        Object.assign(e, { bx: this.bx, by: this.by, vx: this.vx, vy: this.vy, gone: this.lostFlag });
+      }
+      this.extraBall = false;
+      if (this.level !== lvl) return; // the wall was cleared by an extra pearl: fresh serve
+      Object.assign(this, { bx: main.bx, by: main.by, vx: main.vx, vy: main.vy, attached: main.attached, lostFlag: false });
+      this.extra = this.extra.filter((e) => !e.gone);
+    }
+    if (this.attached) { this.bx = this.px + this.stickOff; this.by = PADDLE_Y - BALL_R - 1; return; }
+    // ball, in substeps
+    for (let i = 0; i < steps && !this.over && !this.attached; i++) this.moveBall(1 / steps);
   }
 
   brickAt(x, y) {
@@ -137,7 +176,8 @@ class BreakerSim {
     this.events.push('hit');
     if (b.hp <= 0) {
       this.bricks.splice(this.bricks.indexOf(b), 1);
-      this.points += 10 * this.level;
+      this.chain++;
+      this.points += 10 * this.level + Math.min(20, (this.chain - 1) * 2);
       this.events.push('break');
       if (b.drop) this.drops.push({ kind: b.drop, x: (b.c + 0.5) * (WW / COLS), y: BRICK_TOP + (b.r + 0.5) * BRICK_H });
       this.speed = Math.min(3.2, this.speed + 0.01);
@@ -168,9 +208,26 @@ class BreakerSim {
       this.vx = this.speed * off * 0.8;
       this.vy = -Math.sqrt(this.speed * this.speed - this.vx * this.vx);
       this.by = PADDLE_Y - BALL_R;
+      this.chain = 0;
       this.events.push('paddle');
+      // sticky paddle: the main pearl rests where it landed until you tap
+      if (!this.extraBall && this.tick < this.stickyUntil) {
+        this.attached = true;
+        this.stickOff = this.bx - this.px;
+        this.vx = 0; this.vy = 0;
+        this.events.push('stick');
+        return;
+      }
     }
     if (this.by > WH + 4) {
+      if (this.extraBall) { this.lostFlag = true; return; }
+      // the main pearl fell but an extra one is still in play: it takes over
+      if (this.extra.length) {
+        const e = this.extra.shift();
+        Object.assign(this, { bx: e.bx, by: e.by, vx: e.vx, vy: e.vy });
+        this.events.push('drop-extra');
+        return;
+      }
       this.lives--;
       this.events.push('lost');
       if (this.lives <= 0) {

@@ -15,6 +15,8 @@ export default class BreakerView {
     this.acc = 0;
     this.last = performance.now();
     this.particles = [];
+    this.trail = [];
+    this.shake = 0;
     this.keys = { l: false, r: false };
     this.destroyed = false;
     this.overSent = false;
@@ -96,21 +98,32 @@ export default class BreakerView {
       this.sim.step();
       for (const e of this.sim.events) {
         if (e === 'hit') { sfx.tap(); }
-        if (e === 'break') { sfx.match(1 + (this.sim.level % 6)); changed = true; this.burst(this.sim.bx, this.sim.by); }
+        // each break in a chain rings a little higher
+        if (e === 'break') { sfx.match(Math.min(10, this.sim.chain)); changed = true; this.burst(this.sim.bx, this.sim.by); }
         if (e === 'paddle') sfx.place();
-        if (e === 'lost') { sfx.lose(); haptic(60); changed = true; }
+        if (e === 'stick') { sfx.tap(); }
+        if (e === 'creep') { sfx.bad(); haptic(20); if (!this.reduced) this.shake = 0.6; this.note('The coral creeps closer!'); }
+        if (e === 'lost') { sfx.lose(); haptic(60); changed = true; if (!this.reduced) this.shake = 1; }
         if (e === 'clear') { sfx.win(); haptic(40); changed = true; }
-        if (e.startsWith('power:')) { sfx.coin(); haptic(15); changed = true; }
+        if (e.startsWith('power:')) {
+          sfx.coin(); haptic(15); changed = true;
+          const k = e.slice(6);
+          this.note({ W: 'Wide clam!', '+': 'Extra pearl life!', P: '+50 pearl', M: 'Multiball!', S: 'Sticky clam: catch & aim' }[k] || '');
+        }
       }
       if (this.sim.level !== lvl) changed = true;
     }
     if (changed) this.hooks.onChange?.(this.sim);
     if (this.sim.over && !this.overSent) {
       this.overSent = true;
-      setTimeout(() => this.hooks.onOver?.(this.sim), 900);
+      setTimeout(() => this.hooks.onOver?.(this.sim), 500);
     }
     this.draw(now);
     this.raf = requestAnimationFrame(this.loop);
+  }
+
+  note(text) {
+    if (text) this.banner = { text, t0: performance.now() };
   }
 
   burst(x, y) {
@@ -125,6 +138,10 @@ export default class BreakerView {
     ctx.setTransform(this.dpr, 0, 0, this.dpr, 0, 0);
     ctx.clearRect(0, 0, this.canvas.width, this.canvas.height);
     ctx.translate(this.ox, this.oy);
+    if (this.shake > 0) {
+      ctx.translate((Math.random() - 0.5) * 10 * this.shake, (Math.random() - 0.5) * 10 * this.shake);
+      this.shake = Math.max(0, this.shake - 0.05);
+    }
     ctx.scale(k, k);
     const g = ctx.createLinearGradient(0, 0, 0, WH);
     g.addColorStop(0, '#1a3a6b');
@@ -144,7 +161,7 @@ export default class BreakerView {
     }
     // drops
     for (const p of s.drops) {
-      const col = p.kind === 'W' ? '#4dd6ff' : p.kind === '+' ? '#ff6fb5' : '#ffffff';
+      const col = { W: '#4dd6ff', '+': '#ff6fb5', M: '#b388ff', S: '#7cffb2' }[p.kind] || '#ffffff';
       ctx.fillStyle = col;
       ctx.beginPath(); ctx.arc(p.x, p.y, 2.2, 0, Math.PI * 2); ctx.fill();
       ctx.fillStyle = '#0b1a33';
@@ -155,17 +172,64 @@ export default class BreakerView {
     }
     // paddle (a clam shell)
     const pw = s.paddleW;
-    ctx.fillStyle = s.tick < s.wideUntil ? '#4dd6ff' : '#ffb627';
+    ctx.fillStyle = s.tick < s.stickyUntil ? '#7cffb2' : s.tick < s.wideUntil ? '#4dd6ff' : '#ffb627';
     roundRect(ctx, s.px - pw / 2, PADDLE_Y, pw, 3.2, 1.6);
     ctx.fill();
     ctx.fillStyle = 'rgba(255,255,255,0.4)';
     ctx.fillRect(s.px - pw / 2 + 1.5, PADDLE_Y + 0.5, pw - 3, 0.8);
-    // ball (pearl)
+    // aim line while the pearl waits on the paddle
+    if (s.attached && !s.over) {
+      const off = s.stickOff ? Math.max(-1, Math.min(1, s.stickOff / (pw / 2))) * 0.8 : 0.35;
+      let x = s.bx, y = s.by, vx = off, vy = -Math.sqrt(1 - off * off);
+      ctx.fillStyle = 'rgba(255,255,255,0.55)';
+      for (let i = 0; i < 26; i++) {
+        x += vx * 3.2; y += vy * 3.2;
+        if (x < BALL_R || x > WW - BALL_R) { vx = -vx; x = Math.max(BALL_R, Math.min(WW - BALL_R, x)); }
+        if (y < BRICK_TOP + 2) break;
+        ctx.globalAlpha = 0.6 * (1 - i / 26);
+        ctx.beginPath(); ctx.arc(x, y, 0.55, 0, Math.PI * 2); ctx.fill();
+      }
+      ctx.globalAlpha = 1;
+    }
+    // trail behind the pearls
+    if (!this.reduced && !s.attached) {
+      this.trail.push({ x: s.bx, y: s.by });
+      for (const e of s.extra) this.trail.push({ x: e.bx, y: e.by });
+    }
+    this.trail = this.trail.slice(-24);
+    this.trail.forEach((t, i) => {
+      ctx.globalAlpha = (i / this.trail.length) * 0.35;
+      ctx.fillStyle = '#bfe9ff';
+      ctx.beginPath(); ctx.arc(t.x, t.y, BALL_R * (0.4 + 0.6 * i / this.trail.length), 0, Math.PI * 2); ctx.fill();
+    });
+    ctx.globalAlpha = 1;
+    // pearls
     ctx.fillStyle = '#fff';
     ctx.shadowColor = '#bfe9ff';
     ctx.shadowBlur = 6;
     ctx.beginPath(); ctx.arc(s.bx, s.by, BALL_R, 0, Math.PI * 2); ctx.fill();
+    for (const e of s.extra) { ctx.beginPath(); ctx.arc(e.bx, e.by, BALL_R, 0, Math.PI * 2); ctx.fill(); }
     ctx.shadowBlur = 0;
+    if (s.chain >= 3) {
+      ctx.fillStyle = '#ffd23f';
+      ctx.font = '800 3.6px ui-rounded, system-ui';
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+      ctx.fillText(`Chain ×${s.chain}`, s.bx, s.by - 5);
+    }
+    if (this.banner) {
+      const bt = (now - this.banner.t0) / 1400;
+      if (bt > 1) this.banner = null;
+      else {
+        ctx.globalAlpha = bt > 0.75 ? (1 - bt) / 0.25 : 1;
+        ctx.fillStyle = '#fff';
+        ctx.font = '800 5px ui-rounded, system-ui';
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'middle';
+        ctx.fillText(this.banner.text, WW / 2, 100);
+        ctx.globalAlpha = 1;
+      }
+    }
     // particles
     for (const p of this.particles) {
       p.x += p.vx; p.y += p.vy; p.vy += 0.05; p.life -= 0.03;
@@ -187,7 +251,7 @@ export default class BreakerView {
     if (s.attached && !s.over) {
       ctx.textAlign = 'center';
       ctx.font = '800 5px ui-rounded, system-ui';
-      ctx.fillText('Tap to launch!', WW / 2, 110);
+      ctx.fillText(s.stickOff ? 'Tap to fire!' : 'Tap to launch!', WW / 2, 110);
     }
   }
 }
@@ -202,5 +266,6 @@ export function hud(sim) {
 
 export const HOW = `<div class="tip">🧱 <b>Drag</b> left and right to move the clam paddle (or use ← →). <b>Tap</b> to launch the pearl.</div>
 <div class="tip">🎯 Where the pearl hits the paddle sets its angle. Brighter coral needs more hits.</div>
-<div class="tip">★ Some bricks drop power-ups: <b>W</b> wide paddle, <b>+</b> extra life, <b>●</b> bonus pearl (+50).</div>
-<div class="tip">⚡ Clear the wall for a big bonus – the next one is faster. You have 3 pearls.</div>`;
+<div class="tip">★ Some bricks drop power-ups: <b>W</b> wide paddle, <b>+</b> extra life, <b>M</b> multiball, <b>S</b> sticky clam (catch the pearl, then aim and fire), <b>●</b> bonus pearl (+50).</div>
+<div class="tip">🔗 Break several bricks before the pearl comes back for a <b>chain</b> bonus – listen for the notes climbing.</div>
+<div class="tip">⚡ Clear the wall for a big bonus – but don't dawdle: the coral creeps down every 30 seconds. You have 3 pearls.</div>`;
