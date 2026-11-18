@@ -1792,14 +1792,51 @@ function ludoSeats(me, opponents, kind) {
   return [0, 1, 2, 3].map((i) => (i === me ? 'human' : order.includes(i) ? kind : null));
 }
 
+const LUDO_RULES = [
+  ['master', '🏁 Capture before home', 'A token can only enter its home lane after you have captured someone'],
+  ['joda', '🧱 Joda blocks', 'Two of your tokens on one square can\'t be captured'],
+  ['quick', '⚡ Quick start', 'Everyone starts with one token already out'],
+];
+const BOT_SKILL = [[0.3, '🙂 Easy'], [0.6, '😀 Normal'], [0.95, '😈 Hard']];
+
+/** Toggles for house rules (+ optionally bot skill and Team Up). Returns HTML; read back with readLudoSetup. */
+function ludoSetupHtml({ bots = true, teams = false } = {}) {
+  const r = { ...(load().ludoRules || {}) };
+  const skill = load().ludoSkill ?? 0.6;
+  return `<h3 style="margin-top:12px">🏠 House rules</h3>
+    <div class="rule-list">${LUDO_RULES.map(([k, name, desc]) => `<label class="rule"><input type="checkbox" data-rule="${k}" ${r[k] ? 'checked' : ''}><span><b>${name}</b><span class="small muted">${desc}</span></span></label>`).join('')}
+    ${teams ? `<label class="rule"><input type="checkbox" data-rule="teams" ${r.teams ? 'checked' : ''}><span><b>🤝 Team Up 2v2</b><span class="small muted">Red + Yellow vs Green + Blue. Partners never capture each other; a team wins when both are home. Uses all 4 seats.</span></span></label>` : ''}</div>
+    ${bots ? `<h3 style="margin-top:12px">🤖 Bots</h3><div class="seg" id="ls-skill">${BOT_SKILL.map(([v, l]) => `<button class="seg-btn ${Math.abs(skill - v) < 0.01 ? 'on' : ''}" data-v="${v}" aria-pressed="${Math.abs(skill - v) < 0.01}">${l}</button>`).join('')}</div>
+    <label class="rule" style="margin-top:8px"><input type="checkbox" id="ls-fast" ${load().settings.ludoFast ? 'checked' : ''}><span><b>⏩ Fast bots</b><span class="small muted">Bots roll and move quicker</span></span></label>` : ''}`;
+}
+function wireLudoSetup(sheet) {
+  for (const b of $$('#ls-skill .seg-btn', sheet)) b.onclick = () => { $$('#ls-skill .seg-btn', sheet).forEach((x) => { x.classList.toggle('on', x === b); x.setAttribute('aria-pressed', String(x === b)); }); sfx.tap(); };
+}
+function readLudoSetup(sheet) {
+  const rules = {};
+  for (const c of $$('[data-rule]', sheet)) rules[c.dataset.rule] = c.checked;
+  const sk = $('#ls-skill .seg-btn.on', sheet);
+  const skill = sk ? Number(sk.dataset.v) : load().ludoSkill ?? 0.6;
+  const fast = $('#ls-fast', sheet) ? $('#ls-fast', sheet).checked : !!load().settings.ludoFast;
+  update((d) => { d.ludoRules = { ...(d.ludoRules || {}), ...rules }; d.ludoSkill = skill; d.settings.ludoFast = fast; });
+  return { rules, skill };
+}
+
 async function ludoVsComputer() {
   const me = await pickLudoColour();
   if (me === null) return arcadeMenu('ludo');
-  const n = await modal('<h2>🤖 How many computer players?</h2>', {
+  let setup = null;
+  const n = await modal(`<h2>🤖 Play the computer</h2><h3>How many bots?</h3>${ludoSetupHtml({ bots: true, teams: true })}`, {
     buttons: [{ label: '1 bot (head to head)', value: '1' }, { label: '2 bots', value: '2', cls: 'blue' }, { label: '3 bots (full table)', value: '3', cls: 'blue' }],
+    onOpen: (sheet) => {
+      wireLudoSetup(sheet);
+      for (const b of $$('.actions .btn', sheet)) b.addEventListener('click', () => { setup = readLudoSetup(sheet); }, true);
+    },
   });
   if (!n) return arcadeMenu('ludo');
-  return playVersus('ludo', new LudoVersus({ seed: randSeed(), seats: ludoSeats(me, Number(n), 'ai'), mine: [me], first: me }), null);
+  setup ||= { rules: load().ludoRules || {}, skill: load().ludoSkill ?? 0.6 };
+  const teams = !!setup.rules.teams;
+  return playVersus('ludo', new LudoVersus({ seed: randSeed(), seats: ludoSeats(me, teams ? 3 : Number(n), 'ai'), mine: [me], first: me, rules: setup.rules, skill: setup.skill }), null);
 }
 
 // ---------------------------------------------------------------- chess setup
@@ -1924,6 +1961,7 @@ async function ludoParty(again) {
   const names = [0, 1, 2, 3].map((i) => (again?.names || saved.names || [])[i] || '');
   let bots = again?.bots ?? saved.bots ?? false;
   const playersOf = (ss) => ss.filter((x) => x === 'human').length;
+  let setupRead = null;
   const conf = again || await new Promise((resolve) => {
     const rowHtml = (i) => {
       const [n, hex, dot] = LUDO_COLOURS[i];
@@ -1939,7 +1977,8 @@ async function ludoParty(again) {
       <h3>How many players?</h3>
       <div class="seg party-count">${[2, 3, 4].map((n) => `<button class="seg-btn ${playersOf(seats) === n ? 'on' : ''}" data-n="${n}">${n} players</button>`).join('')}</div>
       <div class="party-rows">${[0, 1, 2, 3].map(rowHtml).join('')}</div>
-      <p class="small muted party-hint"></p>`, {
+      <p class="small muted party-hint"></p>
+      ${ludoSetupHtml({ bots: true, teams: true })}`, {
       buttons: [{ label: '▶ Start game', value: 'go', cls: 'green' }, { label: 'Back', value: null, cls: 'ghost' }],
       onOpen: (sheet) => {
         const sync = () => {
@@ -1968,16 +2007,21 @@ async function ludoParty(again) {
           for (const b of $$('.seg-btn', row)) b.onclick = () => { seats[i] = b.dataset.v || null; bots = seats.includes('ai'); sfx.tap(); sync(); };
           $('.party-name', row).oninput = (e) => { names[i] = e.target.value.trim(); };
         }
+        wireLudoSetup(sheet);
+        for (const b of $$('.actions .btn', sheet)) b.addEventListener('click', () => { setupRead = readLudoSetup(sheet); }, true);
         sync();
       },
-    }).then((r) => resolve(r === 'go' ? { seats: seats.slice(), names: names.slice(), bots } : null));
+    }).then((r) => resolve(r === 'go' ? { seats: seats.slice(), names: names.slice(), bots, ...(setupRead || {}) } : null));
   });
   if (!conf || playersOf(conf.seats) < 1 || conf.seats.filter(Boolean).length < 2) return arcadeMenu('ludo');
   update((d) => { d.ludoParty = conf; });
   const nm = {};
   conf.seats.forEach((x, i) => { if (x === 'human' && conf.names[i]) nm[i] = conf.names[i]; });
   const first = conf.seats.findIndex((x) => x === 'human');
-  return playVersus('ludo', new LudoVersus({ seed: randSeed(), seats: conf.seats, names: nm, first }), null, { party: conf });
+  const rules = conf.rules || load().ludoRules || {};
+  // Team Up needs all four seats: empty seats become bots
+  const tableSeats = rules.teams ? conf.seats.map((x) => x || 'ai') : conf.seats;
+  return playVersus('ludo', new LudoVersus({ seed: randSeed(), seats: tableSeats, names: nm, first, rules, skill: conf.skill ?? load().ludoSkill ?? 0.6 }), null, { party: conf });
 }
 
 async function createOnline(id) {
@@ -2233,7 +2277,13 @@ async function endVersus(run) {
     return showHub();
   } else {
     const places = sim.places();
-    html = `<h2>🎲 Final standings</h2><div class="list">${places.map((p) => `<div class="item"><span class="rank">${['🥇', '🥈', '🥉', '4️⃣'][p.place - 1]}</span><span class="name">${esc(p.name)}</span></div>`).join('')}</div>`;
+    const wt = sim.game.winningTeam;
+    if (wt) {
+      const label = (i) => esc(sim.labelOf(i));
+      html = `<h2>🤝 Team ${label(wt[0])} & ${label(wt[1])} win!</h2><p class="muted">${wt.map((i) => LUDO_COLOURS[i][2]).join(' + ')} brought every token home.</p>`;
+      sfx.win();
+    } else html = '';
+    if (!wt) html = `<h2>🎲 Final standings</h2><div class="list">${places.map((p) => `<div class="item"><span class="rank">${['🥇', '🥈', '🥉', '4️⃣'][p.place - 1]}</span><span class="name">${esc(p.name)}</span></div>`).join('')}</div>`;
     sfx.win();
   }
   const r = await modal(html, { dismissable: false, buttons: [

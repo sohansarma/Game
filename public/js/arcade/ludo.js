@@ -19,12 +19,22 @@ export const HOME = 56;
 
 export const abs = (player, p) => (p < 0 || p > 50 ? -1 : (START[player] + p) % 52);
 
+/**
+ * House rules (all off = classic):
+ *  master  – a token may only enter its home column after its player has captured once
+ *  joda    – two of your tokens on one square form a block that can't be captured
+ *  quick   – each player starts with one token already out
+ *  teams   – 2v2: seats 0+2 vs 1+3; partners never capture each other; a team wins when both are home
+ */
+export const DEFAULT_RULES = { master: false, joda: false, quick: false, teams: false };
+
 export class LudoGame {
   /** players: 4 controller tags ('human' | 'ai' | 'remote') or null for an empty seat */
-  constructor(rng, players = ['human', 'ai', 'ai', 'ai'], first = null) {
+  constructor(rng, players = ['human', 'ai', 'ai', 'ai'], first = null, rules = DEFAULT_RULES) {
+    this.rules = { ...DEFAULT_RULES, ...(rules || {}) };
     this.rng = rng;
     this.players = players;
-    this.tokens = players.map(() => [-1, -1, -1, -1]);
+    this.tokens = players.map(() => [this.rules.quick ? 0 : -1, -1, -1, -1]);
     this.turn = first !== null && players[first] ? first : players.findIndex(Boolean);
     this.phase = 'roll'; // 'roll' | 'move'
     this.roll = 0;
@@ -45,7 +55,10 @@ export class LudoGame {
     this.tokens[player].forEach((p, t) => {
       if (p === HOME) return;
       if (p < 0) { if (roll === 6) out.push(t); return; }
-      if (p + roll <= HOME) out.push(t);
+      if (p + roll > HOME) return;
+      // master rule: no entering the home column before your first capture
+      if (this.rules.master && p <= 50 && p + roll > 50 && !this.captures[player]) return;
+      out.push(t);
     });
     return out;
   }
@@ -84,7 +97,9 @@ export class LudoGame {
     const a = abs(pl, to);
     if (a >= 0 && !SAFE.has(a)) {
       this.players.forEach((_, op) => {
-        if (op === pl || !this.players[op]) return;
+        if (op === pl || !this.players[op] || this.partners(op, pl)) return;
+        const here = this.tokens[op].filter((q) => abs(op, q) === a).length;
+        if (this.rules.joda && here >= 2) return; // a block can't be captured
         this.tokens[op].forEach((q, k) => {
           if (abs(op, q) === a) {
             this.tokens[op][k] = -1;
@@ -111,6 +126,11 @@ export class LudoGame {
     return true;
   }
 
+  /** In team play seats 0+2 and 1+3 are partners. */
+  partners(a, b) {
+    return !!this.rules.teams && a !== b && a % 2 === b % 2;
+  }
+
   passTurn() {
     this.sixes = 0;
     this.phase = 'roll';
@@ -123,6 +143,16 @@ export class LudoGame {
   }
 
   checkOver() {
+    if (this.rules.teams) {
+      for (const team of [[0, 2], [1, 3]]) {
+        if (team.every((i) => !this.players[i] || this.finished.includes(i))) {
+          this.winningTeam = team;
+          this.over = true;
+          this.phase = 'over';
+          return true;
+        }
+      }
+    }
     const remaining = this.players.map((p, i) => (p && !this.finished.includes(i) ? i : -1)).filter((i) => i >= 0);
     if (remaining.length <= 1) {
       if (remaining.length === 1) this.finished.push(remaining[0]);
@@ -162,7 +192,7 @@ export function aiChoose(g, skill, rng) {
     if (a < 0 || SAFE.has(a)) return 0;
     let d = 0;
     g.players.forEach((_, op) => {
-      if (op === pl || !g.active(op)) return;
+      if (op === pl || !g.active(op) || g.partners?.(op, pl)) return;
       for (const q of g.tokens[op]) {
         const qa = abs(op, q);
         if (qa < 0) continue;
@@ -184,7 +214,7 @@ export function aiChoose(g, skill, rng) {
     if (to > 50 && from <= 50) v += 30;
     if (a >= 0 && !SAFE.has(a)) {
       g.players.forEach((_, op) => {
-        if (op !== pl && g.players[op]) for (const q of g.tokens[op]) if (abs(op, q) === a) v += 80 + q;
+        if (op !== pl && g.players[op] && !g.partners?.(op, pl)) for (const q of g.tokens[op]) if (abs(op, q) === a) v += 80 + q;
       });
     }
     if (SAFE.has(a)) v += 15;

@@ -243,13 +243,15 @@ export class ChessCasual extends ChessBase {
 // ---------------------------------------------------------------- ludo
 export class LudoVersus {
   /** seats: 4 x 'human' | 'ai' | null; mine: seats controlled here (null = every human seat is local) */
-  constructor({ seed, seats, mine = null, names = {}, first = null }) {
+  constructor({ seed, seats, mine = null, names = {}, first = null, rules = null, skill = 0.6 }) {
     this.rng = new Rng(seed);
+    this.rules = rules;
+    this.skill = skill;
     this.seats = seats;
     this.mine = mine;
     this.names = names;
     this.mySide = mine && mine.length === 1 ? mine[0] : undefined;
-    this.game = new LudoGame(this.rng, seats.map((s) => (s === 'ai' ? 'ai' : s ? 'human' : null)), first ?? seats.findIndex((s) => s === 'human'));
+    this.game = new LudoGame(this.rng, seats.map((s) => (s === 'ai' ? 'ai' : s ? 'human' : null)), first ?? seats.findIndex((s) => s === 'human'), rules);
     this.over = false;
     this.moves = []; // [seat, 'r' | token] in order
     this.runBots();
@@ -269,7 +271,7 @@ export class LudoVersus {
   canMove() { return this.myTurn() && this.game.phase === 'move'; }
   runBots() {
     let guard = 0;
-    while (!this.game.over && this.seats[this.game.turn] === 'ai' && guard++ < 20000) this.game.aiStep(0.6, this.rng);
+    while (!this.game.over && this.seats[this.game.turn] === 'ai' && guard++ < 20000) this.game.aiStep(this.skill, this.rng);
     if (this.game.over) this.over = true;
   }
   roll() {

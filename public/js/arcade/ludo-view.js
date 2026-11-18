@@ -6,6 +6,9 @@
 //                  move(t) -> {ok, events, end?}, labelOf?(seat), isLocal?(seat) }
 import { COLORS, START, SAFE, HOME, abs } from './ludo.js';
 import { sfx, haptic } from '../audio.js';
+import { load } from '../storage.js';
+
+const REACTIONS = ['😂', '😎', '😤', '😭', '🎉', '🙏'];
 import { woodTexture, softShadow, drawDie as drawDie3D, throwPose } from './table.js';
 
 const FILL = { red: '#d62f2f', green: '#2e8b3e', yellow: '#f5b800', blue: '#1b62c4' };
@@ -60,11 +63,60 @@ export default class LudoView {
     this.resize();
     this.bind();
     this.renderControls();
+    this.mountReactionButton();
     this.loop = this.loop.bind(this);
     this.raf = requestAnimationFrame(this.loop);
   }
 
+  /** A floating emoji from a seat's name tag. */
+  react(seat, emoji, delay = 0) {
+    setTimeout(() => { if (!this.destroyed) (this.reacts ||= []).push({ seat, emoji, t0: performance.now() }); }, delay);
+  }
+
+  drawReactions(now) {
+    if (!this.reacts?.length) return;
+    const ctx = this.ctx;
+    ctx.save();
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    for (const r of this.reacts) {
+      const t = (now - r.t0) / 1800;
+      if (t > 1) continue;
+      const p = this.panelRect(r.seat);
+      const top = this.cornerOf(r.seat) < 2;
+      const x = p.x + p.w / 2, y = (top ? p.y + p.h + 6 : p.y - 6) + (top ? 1 : -1) * t * 46;
+      ctx.globalAlpha = t < 0.15 ? t / 0.15 : t > 0.7 ? (1 - t) / 0.3 : 1;
+      const sz = 30 * (t < 0.15 ? 0.6 + (t / 0.15) * 0.5 : 1.1 - (t - 0.15) * 0.15);
+      ctx.font = `${sz}px "Apple Color Emoji","Segoe UI Emoji","Noto Color Emoji",sans-serif`;
+      ctx.fillStyle = '#000';
+      ctx.fillText(r.emoji, x, y);
+    }
+    ctx.restore();
+    this.reacts = this.reacts.filter((r) => now - r.t0 < 1800);
+  }
+
+  /** The 😊 button: pick a reaction for your seat (or whoever's turn it is in pass & play). */
+  mountReactionButton() {
+    const wrap = this.canvas.parentElement;
+    if (!wrap || wrap.querySelector('.ludo-react')) return;
+    const box = document.createElement('div');
+    box.className = 'ludo-react';
+    box.innerHTML = `<div class="lr-row" hidden>${REACTIONS.map((e) => `<button class="lr-e" aria-label="React ${e}">${e}</button>`).join('')}</div><button class="lr-btn" aria-label="Send a reaction" aria-expanded="false">😊</button>`;
+    wrap.appendChild(box);
+    const row = box.querySelector('.lr-row'), btn = box.querySelector('.lr-btn');
+    btn.onclick = () => { row.hidden = !row.hidden; btn.setAttribute('aria-expanded', String(!row.hidden)); };
+    for (const b of box.querySelectorAll('.lr-e')) b.onclick = () => {
+      const seat = this.sim.mySide ?? this.game.turn;
+      this.react(seat, b.textContent);
+      haptic(8);
+      row.hidden = true;
+      btn.setAttribute('aria-expanded', 'false');
+    };
+    this.reactBox = box;
+  }
+
   destroy() {
+    this.reactBox?.remove();
     this.destroyed = true;
     clearTimeout(this.autoTimer);
     cancelAnimationFrame(this.raf);
@@ -269,9 +321,11 @@ export default class LudoView {
         this.activeSeat = e.player;
         const p = this.panelRect(e.player);
         const local = this.isLocal(e.player);
-        this.die = { value: e.value, rollT0: now, seat: e.player, dur: this.reduced ? 1 : local ? 760 : 560, from: [p.x + p.w / 2, p.y + p.h / 2], yaw: (now % 1000) / 1000 - 0.5 };
+        const fast = !local && load().settings.ludoFast;
+        this.die = { value: e.value, rollT0: now, seat: e.player, dur: this.reduced ? 1 : local ? 760 : fast ? 300 : 560, from: [p.x + p.w / 2, p.y + p.h / 2], yaw: (now % 1000) / 1000 - 0.5 };
+        if (e.value === 6 && !local && Math.random() < 0.25) this.react(e.player, '🎉');
         sfx.dice ? sfx.dice() : sfx.tap();
-        this.wait = now + (this.reduced ? 250 : local ? 1000 : 760);
+        this.wait = now + (this.reduced ? 250 : local ? 1000 : fast ? 380 : 760);
         this.renderControls();
         if (e.value === 6 && this.isLocal(e.player)) haptic(25);
         break;
@@ -280,7 +334,12 @@ export default class LudoView {
         const path = [];
         if (e.from < 0) path.push(0);
         else for (let p = e.from + 1; p <= e.to; p++) path.push(p);
-        this.anim = { player: e.player, token: e.token, path, step: 0, t0: now, captured: e.captured, ms: this.reduced ? 25 : this.isLocal(e.player) ? 160 : 120 };
+        this.anim = { player: e.player, token: e.token, path, step: 0, t0: now, captured: e.captured, ms: this.reduced ? 25 : this.isLocal(e.player) ? 160 : load().settings.ludoFast ? 60 : 120 };
+        // bots have feelings too
+        if (e.captured.length) {
+          if (!this.isLocal(e.player) && Math.random() < 0.7) this.react(e.player, ['😎', '😂', '🦈'][Math.floor(Math.random() * 3)], 700);
+          for (const c of e.captured) if (!this.isLocal(c.player) && Math.random() < 0.8) this.react(c.player, ['😤', '😭', '🙈'][Math.floor(Math.random() * 3)], 900);
+        }
         break;
       }
       case 'pass':
@@ -497,6 +556,7 @@ export default class LudoView {
     this.drawBoard(now);
     this.drawPanels(now);
     this.drawTokens(now);
+    this.drawReactions(now);
     // centre-board banner
     if (this.note && performance.now() - this.noteT < 1600) {
       const t = (performance.now() - this.noteT) / 1600;

@@ -587,3 +587,18 @@ body.cozy .btn, body.cozy .game-card .tag, body.cozy .seg-btn.on { filter: none;
 /* vibe sheet: Done always reachable */
 .modal .sheet > .actions { position: sticky; bottom: -1px; padding-top: 10px; background: inherit; }
 .cube-scramble, .cube-moves { font-family: ui-monospace, Menlo, monospace; text-align: center; padding: 4px 8px; border-radius: 10px; background: rgba(0,0,0,.18); max-width: 100%; overflow-wrap: anywhere; }
+
+/* Ludo: house rules sheet + reactions */
+.rule-list { display: flex; flex-direction: column; gap: 6px; text-align: left; }
+.rule { display: flex; gap: 10px; align-items: flex-start; padding: 8px 10px; border-radius: 12px; background: var(--panel-2); border: 1px solid var(--line); }
+.rule input { width: 22px; height: 22px; margin-top: 2px; accent-color: var(--gold); flex: 0 0 auto; }
+.rule > span { display: flex; flex-direction: column; gap: 2px; }
+.board-wrap { position: relative; }
+.ludo-react { position: absolute; right: 8px; bottom: 8px; display: flex; flex-direction: column; align-items: flex-end; gap: 6px; z-index: 4; }
+.lr-btn { width: 48px; height: 48px; border-radius: 50%; font-size: 1.5rem; background: rgba(20,12,6,.75); border: 2px solid rgba(255,214,94,.4); }
+.lr-row { display: flex; gap: 4px; padding: 6px; border-radius: 999px; background: rgba(20,12,6,.85); border: 1px solid rgba(255,214,94,.3); }
+.lr-row[hidden] { display: none; }
+.lr-e { width: 44px; height: 44px; font-size: 1.4rem; border-radius: 50%; background: transparent; border: 0; }
+.modal .sheet .rule { flex-direction: row; align-items: flex-start; text-align: left; }
+.modal .sheet .rule > span { flex: 1; align-items: flex-start; text-align: left; }
+.modal .sheet .rule input { width: 22px; height: 22px; }
