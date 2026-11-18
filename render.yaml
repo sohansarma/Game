@@ -1,6 +1,7 @@
 # One-click deploy on Render (free web service). Note: the free plan has no
-# persistent disk, so leaderboards reset when the service is redeployed or
-# restarted. Add a disk (paid) or use Fly.io volumes for permanent boards.
+# persistent disk, so leaderboards AND player accounts/cloud saves reset when
+# the service is redeployed or restarted. For real players add a disk (paid
+# plan, mount it and set DATA_DIR to the mount path) or use Fly.io volumes.
 services:
   - type: web
     name: tidepop

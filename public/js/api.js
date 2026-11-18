@@ -579,3 +579,30 @@ export const ugc = {
     return req('/scores', { method: 'POST', body: JSON.stringify({ board: 'ugc', key, seed, log, v: (await import('./modes.js')).ENGINE_VERSION, playerId: p.playerId, token: p.token }) });
   },
 };
+
+// ---------------------------------------------------------------------------
+// Accounts & cloud save (see cloud.js). On a Tidepop server: username +
+// password accounts. Inside the claude.ai artifact: the viewer's Claude
+// account, with the save in a private per-person document.
+
+/** Is a Tidepop server (with accounts) reachable from here? */
+export async function accountsAvailable() {
+  if (inArtifact()) return false;
+  try {
+    await req('/health', {}, 4000);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+export function accountCall(op, body = {}, timeout = 12000) {
+  return req('/account/' + op, { method: 'POST', body: JSON.stringify(body) }, timeout);
+}
+
+/** Private save document for the signed-in Claude user (artifact only). */
+export async function claudeSaveDoc() {
+  const sh = await sharedDb();
+  if (!sh) return null;
+  return sh.db.doc(`data/users/${sh.uid}/save`);
+}

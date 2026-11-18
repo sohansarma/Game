@@ -77,7 +77,7 @@ export function defaultSave() {
     blocksRun: null, // in-progress endless run { seed, log }
     achievements: {},
     stats: { matches: 0, specials: 0, rainbows: 0, bestCascade: 0, levelsWon: 0, gamesPlayed: 0, lines: 0, perfectClears: 0, bestCombo: 0 },
-    settings: { sfx: true, music: true, haptics: true, reducedMotion: false, leaderboard: true },
+    settings: { sfx: true, music: true, haptics: true, reducedMotion: false, leaderboard: true, cozy: 'off', cozyVol: 0.6, thunder: true, sleepTimer: 0 },
     pending: [], // unsent leaderboard submissions
   };
 }
@@ -115,9 +115,93 @@ export function save() {
   }
 }
 
+const changeFns = new Set();
+/** Called after every update() – the cloud sync listens here. */
+export function onSaveChange(fn) {
+  changeFns.add(fn);
+  return () => changeFns.delete(fn);
+}
+
 export function update(fn) {
   fn(load());
+  cache.updatedAt = Date.now();
   save();
+  for (const f of changeFns) { try { f(); } catch { /* ignore */ } }
+}
+
+/** Replace the whole save (used by cloud sync after a merge). */
+export function replaceSave(data) {
+  cache = migrate(data);
+  save();
+}
+
+// ---------------------------------------------------------------- cloud merge
+// Fields that stay on this device and are never uploaded.
+export const LOCAL_ONLY = ['token', 'pending', 'blocksRun', 'settings', 'cloud', 'cozySuggested'];
+
+/** The part of the save that goes to the cloud. */
+export function cloudCopy(s = load()) {
+  const out = {};
+  for (const [k, v] of Object.entries(s)) if (!LOCAL_ONLY.includes(k)) out[k] = v;
+  return JSON.parse(JSON.stringify(out));
+}
+
+const isObj = (x) => x && typeof x === 'object' && !Array.isArray(x);
+const maxNum = (a, b) => Math.max(Number(a) || 0, Number(b) || 0);
+const maxPerKey = (a = {}, b = {}) => {
+  const out = { ...a };
+  for (const [k, v] of Object.entries(b || {})) out[k] = typeof v === 'number' ? maxNum(out[k], v) : out[k] ?? v;
+  return out;
+};
+
+/**
+ * Merge two saves of the same player (e.g. phone + laptop) without losing
+ * progress: levels, stars, best scores, stats and achievements keep the best
+ * of both; the wallet and everything else come from the newer save.
+ */
+export function mergeSaves(a, b, { firstMerge = false } = {}) {
+  if (!isObj(a)) return b;
+  if (!isObj(b)) return a;
+  const newer = (b.updatedAt || 0) >= (a.updatedAt || 0) ? b : a;
+  const older = newer === a ? b : a;
+  const m = { ...older, ...newer };
+  m.createdAt = Math.min(a.createdAt || Date.now(), b.createdAt || Date.now());
+  m.onboarded = !!(a.onboarded || b.onboarded);
+  m.updatedAt = Math.max(a.updatedAt || 0, b.updatedAt || 0);
+  // match-3 levels: best stars and score per level
+  m.levels = { ...(older.levels || {}) };
+  for (const [n, L] of Object.entries(newer.levels || {})) {
+    const o = m.levels[n];
+    m.levels[n] = o ? { ...o, ...L, stars: maxNum(o.stars, L.stars), best: maxNum(o.best, L.best) } : L;
+  }
+  m.dailyDive = { ...(older.dailyDive || {}) };
+  for (const [k, d] of Object.entries(newer.dailyDive || {})) {
+    const o = m.dailyDive[k];
+    m.dailyDive[k] = o ? { ...o, ...d, best: maxNum(o.best, d.best), ranked: !!(o.ranked || d.ranked) } : d;
+  }
+  m.deep = maxPerKey(older.deep, newer.deep);
+  m.blocksDaily = maxPerKey(older.blocksDaily, newer.blocksDaily);
+  m.blocks = { ...(older.blocks || {}), ...(newer.blocks || {}), best: maxNum(a.blocks?.best, b.blocks?.best), games: maxNum(a.blocks?.games, b.blocks?.games) };
+  m.stats = maxPerKey(older.stats, newer.stats);
+  m.achievements = { ...(older.achievements || {}), ...(newer.achievements || {}) };
+  // arcade games: best, games played and daily bests per game
+  m.arcade = { ...(older.arcade || {}) };
+  for (const [id, g] of Object.entries(newer.arcade || {})) {
+    const o = m.arcade[id];
+    m.arcade[id] = o ? { ...o, ...g, best: maxNum(o.best, g.best), games: maxNum(o.games, g.games), daily: maxPerKey(o.daily, g.daily), week: maxPerKey(o.week, g.week) } : g;
+  }
+  if (a.chessRecord || b.chessRecord) {
+    m.chessRecord = { ...(older.chessRecord || {}) };
+    for (const [lvl, r] of Object.entries(newer.chessRecord || {})) m.chessRecord[lvl] = maxPerKey(m.chessRecord[lvl], r);
+  }
+  // first sync on a newly signed-in device: never lose shells or boosters to a fresh default save
+  if (firstMerge) {
+    m.shells = maxNum(a.shells, b.shells);
+    m.boosters = maxPerKey(a.boosters, b.boosters);
+  }
+  // the daily-reward streak: whichever claimed most recently
+  if ((a.daily?.lastClaim || '') !== (b.daily?.lastClaim || '')) m.daily = (a.daily?.lastClaim || '') > (b.daily?.lastClaim || '') ? a.daily : b.daily;
+  return m;
 }
 
 export function exportSave() {

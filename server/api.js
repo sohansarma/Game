@@ -8,6 +8,7 @@ import { replayBlocks } from '../public/js/blocks.js';
 import { getLevel, MAX_LEVEL } from '../public/js/levels.js';
 import { BOARDS, acceptableKeys, dayKey, weekKey, dailyConfig, deepConfig, blocksSeed, ENGINE_VERSION } from '../public/js/modes.js';
 import { cleanName, nameProblem } from '../public/js/storage.js';
+import { createAccounts, MAX_SAVE_BYTES } from './accounts.js';
 import { verifyArcade } from '../public/js/arcade/index.js';
 import { sanitize as ugcSanitize, replay as ugcReplay } from '../public/js/maker/engine.js';
 
@@ -35,13 +36,13 @@ function send(res, code, body, origin) {
   res.end(JSON.stringify(body));
 }
 
-function readBody(req) {
+function readBody(req, max = MAX_BODY) {
   return new Promise((resolve, reject) => {
     let size = 0;
     const chunks = [];
     req.on('data', (c) => {
       size += c.length;
-      if (size > MAX_BODY) {
+      if (size > max) {
         reject(Object.assign(new Error('body too large'), { status: 413 }));
         req.destroy();
       } else chunks.push(c);
@@ -77,10 +78,12 @@ export function createApi(store, { now = () => new Date(), origin = process.env.
   const { db } = store;
   const limit = rateLimiter(rate);
   const fail = (status, error) => Object.assign(new Error(error), { status });
+  const accounts = createAccounts({ store, now, fail, players: db.players });
 
   function auth(body) {
     const p = typeof body.playerId === 'string' && db.players[body.playerId];
-    if (!p || typeof body.token !== 'string' || p.tokenHash !== sha(body.token)) throw fail(401, 'unknown player');
+    // a player has its original token plus one per signed-in device (accounts.js)
+    if (!p || typeof body.token !== 'string' || (p.tokenHash !== sha(body.token) && !p.tokenHashes?.includes(sha(body.token)))) throw fail(401, 'unknown player');
     return p;
   }
 
@@ -374,7 +377,8 @@ export function createApi(store, { now = () => new Date(), origin = process.env.
       }
       if (req.method !== 'POST') throw fail(404, 'not found');
       if (!limit(ip)) throw fail(429, 'slow down a little');
-      const body = await readBody(req);
+      const body = await readBody(req, url.pathname === '/api/account/save' ? MAX_SAVE_BYTES + 8192 : MAX_BODY);
+      if (url.pathname.startsWith('/api/account/')) return send(res, 200, await accounts.handle(url.pathname.slice(13), body), origin);
 
       switch (url.pathname) {
         case '/api/register': {

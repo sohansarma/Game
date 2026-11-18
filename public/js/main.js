@@ -15,6 +15,8 @@ import { MatchView } from './matchview.js';
 import { BlocksView } from './blocksview.js';
 import { iconURL, PALETTE, clearSpriteCache } from './creatures.js';
 import { sfx, unlockAudio, configureAudio, haptic } from './audio.js';
+import { startCloud, syncNow, cloudAccount, cloudStatus, onCloudChange, signUp, logIn, logOut, recoverAccount, changePassword, deleteAccount, setClaudeSync } from './cloud.js';
+import { configureCozy, cozyActive, cozySleeping, wakeCozy, onSleep, isNightTime } from './cozy.js';
 import * as api from './api.js';
 import { ACHIEVEMENTS, checkAchievements } from './achievements.js';
 import { $, $$, esc, fmt, showScreen, currentScreen, modal, closeModal, isModalOpen, toast, starsHtml, setBackground } from './ui.js';
@@ -62,10 +64,16 @@ async function boot() {
 
   api.checkServer().then((ok) => { if (ok) api.flushPending().catch(() => {}); });
 
+  onSleep(() => toast('🌙 Sleep timer – the rain has faded. Sweet dreams'));
+  onCloudChange((st, merged) => {
+    if (merged && !view && !isModalOpen() && currentScreen() === 'hub') showHub();
+    if (currentScreen() === 'settings') renderAccountBox();
+  });
+  startCloud().catch(() => {});
   showHub();
   const ch = parseChallenge(location.hash);
   if (!s.onboarded) await onboarding();
-  else if (!ch) await maybeDailyReward();
+  else if (!ch) { await maybeDailyReward(); maybeSuggestCozy(); }
   if (ch) acceptChallenge(ch);
 }
 
@@ -73,6 +81,36 @@ function applySettings() {
   const s = load();
   configureAudio(s.settings);
   document.body.classList.toggle('reduced-motion', !!s.settings.reducedMotion);
+  configureCozy(s.settings);
+}
+
+/** Quick toggle from the Arcade: rain on/off (remembers 'only at night' if chosen). */
+function toggleCozy() {
+  const on = cozyActive();
+  update((d) => { d.settings.cozy = on ? 'off' : (d.settings.cozyLast === 'night' && isNightTime() ? 'night' : 'on'); });
+  applySettings();
+  sfx.tap();
+  toast(on ? '☀️ Cozy rain off' : '🌧️ Cozy rain on – sleep well');
+  if (currentScreen() === 'hub') showHub();
+}
+
+// One gentle suggestion, the first time someone plays late at night.
+function maybeSuggestCozy() {
+  const s = load();
+  if (!isNightTime() || s.settings.cozy !== 'off' || s.cozySuggested) return;
+  update((d) => { d.cozySuggested = true; });
+  setTimeout(async () => {
+    if (isModalOpen() || view) return;
+    const r = await modal(`<h2>🌧️ Can't sleep?</h2><p>Turn on <b>Cozy rain</b>: soft rain and distant thunder while you play, with a sleep timer that fades it all out.</p>`, {
+      buttons: [{ label: '🌧️ Turn it on', value: 'on', cls: 'green' }, { label: 'Only at night', value: 'night', cls: 'blue' }, { label: 'Not now', value: null, cls: 'ghost' }],
+    });
+    if (r) {
+      update((d) => { d.settings.cozy = r; d.settings.cozyLast = r; if (!d.settings.sleepTimer) d.settings.sleepTimer = 30; });
+      applySettings();
+      toast('🌙 Sleep timer set to 30 min – change it in Settings');
+      if (currentScreen() === 'hub') showHub();
+    }
+  }, 1500);
 }
 
 function leaveGame() {
@@ -109,6 +147,191 @@ function wireNameField(root, onValid) {
   return check;
 }
 
+// ------------------------------------------------------------------ accounts & cloud save
+const ago = (t) => {
+  if (!t) return 'not yet';
+  const s = Math.round((Date.now() - t) / 1000);
+  return s < 10 ? 'just now' : s < 60 ? `${s}s ago` : s < 3600 ? `${Math.round(s / 60)} min ago` : s < 86400 ? `${Math.round(s / 3600)} h ago` : new Date(t).toLocaleDateString();
+};
+
+/** Username/password form inside a sheet. fields: [{k, label, type, auto}] */
+function authForm({ title, intro = '', fields, submit, footer = '', onSubmit }) {
+  return modal(`<h2>${title}</h2>${intro}
+    <form class="auth-form" novalidate>
+      ${fields.map((f) => `<label class="auth-field"><span>${f.label}</span>
+        <div class="auth-input"><input name="${f.k}" type="${f.type || 'text'}" autocomplete="${f.auto || 'off'}" ${f.type === 'password' ? 'minlength="8"' : ''} autocapitalize="none" spellcheck="false" required>
+        ${f.type === 'password' ? '<button type="button" class="auth-eye" aria-label="Show password">👁️</button>' : ''}</div></label>`).join('')}
+      <p class="auth-msg small" role="alert"></p>
+      <button class="btn green auth-go" type="submit">${submit}</button>
+      ${footer}
+    </form>`, {
+    buttons: [{ label: 'Cancel', value: null, cls: 'ghost' }],
+    onOpen: (sheet) => {
+      const form = $('.auth-form', sheet), msg = $('.auth-msg', sheet), go = $('.auth-go', sheet);
+      for (const eye of $$('.auth-eye', sheet)) eye.onclick = () => { const i = eye.previousElementSibling; i.type = i.type === 'password' ? 'text' : 'password'; };
+      setTimeout(() => form.querySelector('input')?.focus(), 50);
+      form.onsubmit = async (e) => {
+        e.preventDefault();
+        const vals = Object.fromEntries(new FormData(form).entries());
+        go.disabled = true;
+        msg.textContent = 'One moment…';
+        msg.classList.remove('bad');
+        try {
+          const out = await onSubmit(vals, sheet);
+          closeModal(out ?? true);
+        } catch (err) {
+          msg.textContent = err.status === 503 || !err.status ? "Can't reach the server – check your connection" : err.message;
+          msg.classList.add('bad');
+          go.disabled = false;
+        }
+      };
+      for (const a of $$('[data-close]', sheet)) a.onclick = (e) => { e.preventDefault(); closeModal(a.dataset.close); };
+    },
+  });
+}
+
+async function showRecoveryCode(code, first) {
+  await modal(`<h2>🔑 Your recovery code</h2>
+    <p>${first ? 'Your account is ready! ' : ''}If you ever forget your password, this code lets you reset it. <b>Write it down or screenshot it now</b> – we can't show it again.</p>
+    <div class="recovery-code" id="rc">${esc(code)}</div>
+    <button class="btn sm blue" id="rc-copy" type="button">📋 Copy code</button>`, {
+    dismissable: false,
+    buttons: [{ label: "I've saved it", value: true, cls: 'green' }],
+    onOpen: (sheet) => { $('#rc-copy', sheet).onclick = async () => { try { await navigator.clipboard.writeText(code); toast('Copied'); } catch { toast('Select the code and copy it'); } }; },
+  });
+}
+
+async function openSignUp() {
+  const r = await authForm({
+    title: '☁️ Create your account',
+    intro: '<p class="small muted">Free. Keeps your levels, scores and shells safe, and lets you play on any phone, tablet or computer. No email needed.</p>',
+    fields: [
+      { k: 'username', label: 'Username', auto: 'username' },
+      { k: 'password', label: 'Password (8+ characters)', type: 'password', auto: 'new-password' },
+    ],
+    submit: 'Create account',
+    footer: '<p class="small center" style="margin-top:10px">Already have one? <a href="#" data-close="login">Log in</a></p>',
+    onSubmit: (v) => signUp(v.username, v.password),
+  });
+  if (r === 'login') return openLogIn();
+  if (r?.recovery) {
+    await showRecoveryCode(r.recovery, true);
+    toast(`☁️ Signed in as ${r.username} – progress now saves to the cloud`);
+  }
+  return r;
+}
+
+async function openLogIn() {
+  const r = await authForm({
+    title: '☁️ Log in',
+    intro: '<p class="small muted">Your progress from other devices will be combined with this one – nothing is lost.</p>',
+    fields: [
+      { k: 'username', label: 'Username', auto: 'username' },
+      { k: 'password', label: 'Password', type: 'password', auto: 'current-password' },
+    ],
+    submit: 'Log in',
+    footer: '<p class="small center" style="margin-top:10px"><a href="#" data-close="forgot">Forgot password?</a> · <a href="#" data-close="signup">Create account</a></p>',
+    onSubmit: (v) => logIn(v.username, v.password),
+  });
+  if (r === 'forgot') return openRecover();
+  if (r === 'signup') return openSignUp();
+  if (r?.session) toast(`☁️ Welcome back, ${r.username}!`);
+  return r;
+}
+
+async function openRecover() {
+  const r = await authForm({
+    title: '🔑 Reset your password',
+    intro: '<p class="small muted">Use the recovery code you saved when you created your account.</p>',
+    fields: [
+      { k: 'username', label: 'Username', auto: 'username' },
+      { k: 'code', label: 'Recovery code (XXXX-XXXX-…)' },
+      { k: 'password', label: 'New password', type: 'password', auto: 'new-password' },
+    ],
+    submit: 'Reset password',
+    onSubmit: (v) => recoverAccount(v.username, v.code, v.password),
+  });
+  if (r?.recovery) { await showRecoveryCode(r.recovery, false); toast('🔑 Password changed – you are logged in'); }
+  return r;
+}
+
+/** The Account box at the top of Settings. */
+async function renderAccountBox() {
+  const box = $('#s-account');
+  if (!box) return;
+  const acc = cloudAccount();
+  const st = cloudStatus();
+  const state = st.state === 'syncing' ? '⏳ Syncing…' : st.error ? `⚠️ ${esc(st.error)}` : `✅ Saved ${ago(acc?.syncedAt)}`;
+  if (acc?.mode === 'server') {
+    box.innerHTML = `<div class="account-card">
+      <div class="account-who"><span class="account-avatar">☁️</span><div><b>${esc(acc.username)}</b><div class="small muted">${state}</div></div></div>
+      <p class="small muted">Your progress syncs to every device you log in on.</p>
+      <div class="row" style="flex-wrap:wrap;gap:8px">
+        <button class="btn sm blue" data-acc="sync">🔄 Sync now</button>
+        <button class="btn sm ghost" data-acc="password">🔑 Change password</button>
+        <button class="btn sm ghost" data-acc="logout">Log out</button>
+        <button class="btn sm red" data-acc="delete">Delete account</button>
+      </div></div>`;
+  } else if (api.inArtifact()) {
+    const on = acc?.mode === 'claude';
+    box.innerHTML = `<div class="account-card">
+      <div class="account-who"><span class="account-avatar">✳️</span><div><b>Your Claude account</b><div class="small muted">${on ? state : 'Cloud save is off on this device'}</div></div></div>
+      <p class="small muted">${on ? 'Progress saves privately to your Claude account – open Tidepop on any device signed in to Claude to continue.' : 'Turn it on to keep your progress in sync across devices.'}</p>
+      <div class="row" style="gap:8px">${on ? '<button class="btn sm blue" data-acc="sync">🔄 Sync now</button><button class="btn sm ghost" data-acc="claude-off">Turn off</button>' : '<button class="btn sm green" data-acc="claude-on">☁️ Turn on cloud save</button>'}</div></div>`;
+  } else {
+    box.innerHTML = '<div class="account-card"><p class="small muted">Checking for the Tidepop server…</p></div>';
+    const ok = await api.accountsAvailable();
+    if (!$('#s-account')) return;
+    box.innerHTML = ok
+      ? `<div class="account-card">
+          <div class="account-who"><span class="account-avatar">☁️</span><div><b>Save your progress</b><div class="small muted">Right now it lives only on this device</div></div></div>
+          <p class="small muted">Create a free account to keep your levels, scores and shells safe and play on any device.</p>
+          <div class="row" style="gap:8px"><button class="btn sm green" data-acc="signup">Create account</button><button class="btn sm blue" data-acc="login">Log in</button></div></div>`
+      : `<div class="account-card"><p class="small muted">☁️ Accounts need the Tidepop server, which this copy of the game isn't connected to. You can still move progress with a save code below.</p></div>`;
+  }
+  for (const b of $$('[data-acc]', box)) b.onclick = () => accountAction(b.dataset.acc);
+}
+
+async function accountAction(a) {
+  sfx.tap();
+  if (a === 'signup') await openSignUp();
+  else if (a === 'login') await openLogIn();
+  else if (a === 'sync') { const ok = await syncNow(); toast(ok ? '☁️ Progress synced' : `⚠️ ${cloudStatus().error || 'Sync failed'}`); }
+  else if (a === 'claude-on') await setClaudeSync(true);
+  else if (a === 'claude-off') await setClaudeSync(false);
+  else if (a === 'logout') {
+    const ok = await modal('<h2>Log out?</h2><p>Your progress stays on this device and in your account.</p>', { buttons: [{ label: 'Log out', value: true, cls: 'blue' }, { label: 'Cancel', value: false, cls: 'ghost' }], row: true });
+    if (ok) { await logOut(); toast('Logged out'); }
+  } else if (a === 'password') {
+    const r = await authForm({
+      title: '🔑 Change password',
+      fields: [{ k: 'current', label: 'Current password', type: 'password', auto: 'current-password' }, { k: 'password', label: 'New password', type: 'password', auto: 'new-password' }],
+      submit: 'Change password',
+      onSubmit: (v) => changePassword(v.current, v.password),
+    });
+    if (r) toast('🔑 Password changed – other devices will ask you to log in again');
+  } else if (a === 'delete') {
+    const r = await authForm({
+      title: '🗑️ Delete your account?',
+      intro: '<p>This permanently deletes your account and its cloud save. Progress on <b>this</b> device stays. Your leaderboard scores stay unless you also delete them below ("Delete online scores").</p>',
+      fields: [{ k: 'password', label: 'Type your password to confirm', type: 'password', auto: 'current-password' }],
+      submit: 'Delete my account',
+      onSubmit: (v) => deleteAccount(v.password),
+    });
+    if (r) toast('Account deleted');
+  }
+  if (currentScreen() === 'settings') renderAccountBox();
+}
+
+/** A gentle nudge on the Arcade once someone has played a bit. */
+function accountNudgeHtml(s) {
+  if (cloudAccount() || api.inArtifact() || !api.isOnline()) return '';
+  const played = Object.values(s.arcade || {}).reduce((n, g) => n + (g.games || 0), 0) + (s.stats.gamesPlayed || 0);
+  if (played < 3 || (s.nudgeHiddenUntil || 0) > Date.now()) return '';
+  return `<div class="account-nudge" id="u-nudge"><span>☁️</span><div class="grow"><b>Don't lose your progress</b><div class="small">Free account · play on any device</div></div>
+    <button class="btn sm green" id="u-nudge-go">Save it</button><button class="icon-btn sm" id="u-nudge-x" aria-label="Not now">✕</button></div>`;
+}
+
 // ------------------------------------------------------------------ onboarding
 async function onboarding() {
   let name = load().name;
@@ -117,6 +340,7 @@ async function onboarding() {
     <p>Welcome to the <b>Tidepop Arcade</b>! Match-3, chess, ludo, mining and more – pick any game, climb the leaderboards and challenge your friends.</p>
     <p class="small muted">Free to play · plays offline</p>
     <div class="tip name-tip"><label for="nf-input"><b>Choose your name</b></label>${nameFieldHtml(name)}</div>
+    ${api.inArtifact() ? '' : '<p class="small center" id="ob-login-row" style="display:none">Played before? <a href="#" id="ob-login">Log in to your account</a></p>'}
   `, {
     dismissable: false,
     buttons: [{ label: "Let's play!", value: 'go' }],
@@ -128,8 +352,19 @@ async function onboarding() {
       input.addEventListener('input', () => { const v = check(); if (v) name = v; });
       $('#nf-roll', sheet).addEventListener('click', () => { name = cleanName(input.value); });
       input.onkeydown = (e) => { if (e.key === 'Enter' && check()) go?.click(); };
+      const lr = $('#ob-login-row', sheet);
+      if (lr) api.accountsAvailable().then((ok) => { if (ok) lr.style.display = ''; });
+      $('#ob-login', sheet)?.addEventListener('click', (e) => { e.preventDefault(); closeModal('login'); });
     },
   });
+  if (res === 'login') {
+    const r = await openLogIn();
+    if (!r?.session) return onboarding();
+    update((d) => { d.onboarded = true; });
+    claimDaily(true);
+    showHub();
+    return;
+  }
   if (res === 'go') {
     update((d) => { d.name = name; d.onboarded = true; });
     claimDaily(true);
@@ -771,11 +1006,13 @@ function showHub() {
       <span class="spacer"></span>
       <button class="icon-btn" id="u-lb" aria-label="Leaderboards">🏆</button>
       <button class="icon-btn ${st.canClaim ? 'badge-dot' : ''}" id="u-gift" aria-label="Daily treasure">🎁</button>
+      <button class="icon-btn ${cozyActive() ? 'on' : ''}" id="u-cozy" aria-label="Cozy rain" title="Cozy rain">${cozyActive() ? '🌧️' : '🌙'}</button>
       <button class="icon-btn" id="u-settings" aria-label="Settings">⚙️</button>
     </div>
     <div class="scroll">
       <div class="home-hero"><div class="logo">Tide<span>pop</span> <small class="arcade-word">Arcade</small></div></div>
       <div class="hub-timer" role="timer">⏳ Today's challenges end in <b id="u-timer">${hms(msToReset())}</b><br><span class="small">🗓️ Weekly tournament ends in <b>${weekLeft()}</b> · top 10 win shells</span></div>
+      ${accountNudgeHtml(load())}
       <button class="hot-card" id="u-hot"><span class="hot-flame">🔥</span><span class="grow"><small>HOT TODAY · 2× SHELLS</small><b>${hot.icon} ${esc(hot.title)}</b></span><span class="btn sm">Play</span></button>
       <div class="missions">
         <div class="row"><b class="grow">🎯 Daily missions</b><span class="small muted">reward: 🐚 150 + 🎁</span></div>
@@ -797,6 +1034,9 @@ function showHub() {
   const on = (id, fn) => { const b = $(id, el); if (b) b.onclick = () => { sfx.tap(); fn(); }; };
   on('#u-lb', () => showLeaderboard());
   on('#u-settings', showSettings);
+  on('#u-cozy', toggleCozy);
+  on('#u-nudge-go', async () => { await openSignUp(); showHub(); });
+  on('#u-nudge-x', () => { update((d) => { d.nudgeHiddenUntil = Date.now() + 3 * 86400000; }); showHub(); });
   on('#u-gift', () => (dailyStatus().canClaim ? maybeDailyReward() : toast('Already claimed today – see you tomorrow! 🔥')));
   on('#u-hot', () => hot.open());
   on('#u-community', () => showCommunity());
@@ -2198,11 +2438,21 @@ function showSettings() {
   const el = showScreen('settings', `
     <div class="topbar"><button class="icon-btn" id="s-back" aria-label="Back">←</button><h2 class="grow">Settings</h2></div>
     <div class="scroll">
-      <h3>Your name</h3>
+      <h3>☁️ Account</h3>
+      <div id="s-account"></div>
+      <h3 style="margin-top:18px">Your name</h3>
       <div class="name-settings">${nameFieldHtml(s.name)}<button class="btn sm" id="s-save-name">Save name</button></div>
       <h3 style="margin-top:18px">Sound & feel</h3>
       ${sw('sfx', '🔊 Sound effects')}${sw('music', '🎵 Music')}${sw('haptics', '📳 Vibration')}
       ${sw('reducedMotion', '🧘 Reduced motion', 'Calmer animations, no screen shake')}
+      <h3 style="margin-top:18px">🌧️ Cozy rain</h3>
+      <p class="small muted">Soft rain and distant thunder for late-night play. Game sounds get quieter under the rain.</p>
+      <div class="seg" data-cozy="cozy">${[['off', 'Off'], ['on', 'On'], ['night', '🌙 Only at night']].map(([v, l]) => `<button class="seg-btn ${s.settings.cozy === v ? 'on' : ''}" data-v="${v}">${l}</button>`).join('')}</div>
+      <div class="range-row"><span>🔈</span><input type="range" id="s-cozyvol" min="0" max="100" value="${Math.round((s.settings.cozyVol ?? 0.6) * 100)}" aria-label="Rain volume"><span>🔊</span></div>
+      ${sw('thunder', '⛈️ Distant thunder', 'With a soft lightning glow (no flashes with Reduced motion)')}
+      <p class="small" style="margin:8px 0 4px">⏲️ Sleep timer – fade the rain out after</p>
+      <div class="seg" data-cozy="sleepTimer">${[[0, 'Off'], [15, '15 min'], [30, '30 min'], [60, '1 hour'], [90, '1½ h']].map(([v, l]) => `<button class="seg-btn ${Number(s.settings.sleepTimer || 0) === v ? 'on' : ''}" data-v="${v}">${l}</button>`).join('')}</div>
+      ${cozySleeping() ? '<button class="btn sm blue" id="s-wake" style="margin-top:8px">🌧️ Bring the rain back</button>' : ''}
       <h3 style="margin-top:18px">Leaderboards</h3>
       ${sw('leaderboard', '🏆 Take part in online leaderboards', 'Only your name and scores are shared')}
       <div class="row" style="margin-top:10px;flex-wrap:wrap;gap:10px">
@@ -2220,6 +2470,19 @@ function showSettings() {
       <p class="small muted">Tidepop v1.0 (engine ${ENGINE_VERSION}) · free to play.</p>
     </div>`);
   wireSwitches(el);
+  renderAccountBox();
+  for (const group of $$('[data-cozy]', el)) {
+    for (const b of $$('.seg-btn', group)) b.onclick = () => {
+      $$('.seg-btn', group).forEach((x) => x.classList.toggle('on', x === b));
+      const k = group.dataset.cozy;
+      update((d) => { d.settings[k] = k === 'sleepTimer' ? Number(b.dataset.v) : b.dataset.v; if (k === 'cozy' && b.dataset.v !== 'off') d.settings.cozyLast = b.dataset.v; });
+      applySettings();
+      sfx.tap();
+    };
+  }
+  const vol = $('#s-cozyvol', el);
+  vol.oninput = () => { update((d) => { d.settings.cozyVol = Number(vol.value) / 100; }); applySettings(); };
+  $('#s-wake', el)?.addEventListener('click', () => { wakeCozy(); sfx.tap(); showSettings(); });
   $('#s-back', el).onclick = () => { sfx.tap(); showHub(); };
   $('#s-help', el).onclick = () => howToPlay();
   const checkName = wireNameField(el, (ok) => { $('#s-save-name', el).disabled = !ok; });
@@ -2265,8 +2528,9 @@ function showSettings() {
     onboarding();
   };
   $('#s-privacy', el).onclick = () => modal(`<h2>🔒 Privacy</h2><div class="tip">
-    • No accounts or emails needed.<br>
-    • Your progress stays on your device.<br>
+    • Accounts are optional and need no email. With one, we store your username, a salted hash of your password (never the password itself) and your game save, so you can play on any device. Delete it any time in Settings.<br>
+    • Without an account, your progress stays on your device.<br>
+    • Inside claude.ai, your save is kept privately in your Claude account's area of this game's database.<br>
     • If online leaderboards are on, only the name you chose, a random player ID and your game moves/scores are sent – to verify scores fairly.<br>
     • Daily boards are deleted after 30 days, weekly boards after 12 weeks.<br>
     • You can delete your online scores at any time in Settings.</div>`, { buttons: [{ label: 'OK', value: null }] });

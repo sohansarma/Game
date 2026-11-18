@@ -54,6 +54,28 @@ export function unlockAudio() {
   musicVerb.connect(reverb);
 
   if (settings.music) startMusic();
+  applyNight();
+  for (const fn of readyFns.splice(0)) { try { fn(ctx, out); } catch { /* ignore */ } }
+}
+
+// ---- shared with the cozy rain ambience (cozy.js)
+const readyFns = [];
+let night = false;
+/** Calls fn(ctx, out) once audio is running (right away if it already is). */
+export function onAudioReady(fn) {
+  if (ctx) fn(ctx, out);
+  else readyFns.push(fn);
+}
+/** Night mode: softer game sounds and music under the rain. */
+export function setNightAudio(on) {
+  night = !!on;
+  applyNight();
+}
+function applyNight() {
+  if (!ctx) return;
+  const t = ctx.currentTime;
+  sfxBus.gain.setTargetAtTime(night ? 0.3 : 0.55, t, 0.4);
+  musicBus.gain.setTargetAtTime(night ? 0.08 : 0.16, t, 0.6);
 }
 
 // Exponentially decaying stereo noise = a small, soft "room".

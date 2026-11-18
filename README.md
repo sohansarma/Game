@@ -55,6 +55,23 @@ You open the app into the **Arcade hub**. It's built to bring you back every day
 
 **How the games are built:** each arcade game is a pure, deterministic simulation in `public/js/arcade/<game>.js`; the drawing and input code is in `<game>-view.js`. Turn-based games log moves. Real-time games run at a fixed 60 ticks per second and log only `[tick, input]`. The server, or the shared leaderboard in the hosted copy, replays the log with the same file to get the true score. A forged log can't stall the server: input that's out of sync with the replay, or a run over one hour long, is rejected.
 
+## 🌧️ Cozy rain (night mode)
+
+Settings → **Cozy rain** (or the 🌙 button on the Arcade): soft rain and distant thunder for late-night play, synthesised live with WebAudio (no audio files). Rain falls behind the game, a gentle sky glow comes a moment before each roll of thunder (no flashes with *Reduced motion*), game sounds and music get quieter, and a **sleep timer** (15 min – 1½ h) fades everything out. *Only at night* switches it on automatically between 9 pm and 6 am. Night-time players are offered it once.
+
+## ☁️ Accounts & cloud save
+
+Accounts are optional; guests keep playing with progress on their device.
+
+- **On a Tidepop server:** username + password (no email). Passwords are hashed with scrypt and a per-user salt; sessions are random tokens stored only as SHA-256 hashes and expire after 180 days. Wrong passwords lock the account for a growing delay, on top of the per-IP rate limit. A one-time **recovery code** shown at sign-up resets a forgotten password and signs out other devices. Players can change their password, log out and delete their account from Settings.
+- **Cross-device sync:** each account keeps one cloud save with a revision number. Devices download, **merge** and upload: levels, stars, best scores, stats and achievements keep the best of both; the wallet and other values come from the newer save; the first sync on a newly signed-in device never loses shells. Two devices saving at once get a conflict and merge again, so nothing is silently overwritten. Sync runs on start, a few seconds after any change and when the app goes to the background.
+- **Leaderboards:** an account owns one leaderboard player; every signed-in device gets its own player token, so scores from all devices land on the same name.
+- **Inside claude.ai:** players are already signed in with their Claude account; the save lives in a private per-person area of the artifact's database.
+
+API: `POST /api/account/{signup|login|logout|me|save|password|recover|delete}` (see `server/accounts.js`).
+
+> **Hosting accounts:** cloud saves live in the server's data file, so the server needs **persistent storage**. Render's free plan has no disk (data is lost on redeploy/restart): add a Render disk, or use Fly.io/Railway with a volume, and point `DATA_DIR` at it. For GitHub Pages, host the server somewhere persistent and set `window.TIDEPOP_API` in `public/config.js`.
+
 ## Play with and against friends
 
 - **⚔️ Challenge links.** Any arcade run can be sent as a link (`#ch-…`). Your friend plays the *exact same* run (same seed), sees whose score they're chasing, and gets a win, tie or loss result with a rematch button.
