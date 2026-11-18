@@ -94,4 +94,4 @@ export function blocksSeed(board, key, runSeed) {
 
 // Bump when engine rules change in a way that alters replays. The server
 // rejects submissions from a different version (client is told to update).
-export const ENGINE_VERSION = 1;
+export const ENGINE_VERSION = 2; // 2: Starfish (2x2) special

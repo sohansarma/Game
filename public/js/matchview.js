@@ -82,12 +82,18 @@ export class MatchView {
   tween(sp, to, dur, easing = ease.outCubic) {
     return new Promise((resolve) => {
       const from = { x: sp.x, y: sp.y, scale: sp.scale, alpha: sp.alpha };
-      sp.anim = { from, to, t0: performance.now(), dur: dur * this.speed, easing, resolve };
+      sp.anim = { from, to, t0: performance.now(), dur: this.ff ? 1 : dur * this.speed, easing, resolve };
     });
   }
 
   wait(ms) {
-    return new Promise((r) => setTimeout(r, ms * this.speed));
+    return new Promise((r) => setTimeout(r, this.ff ? 0 : ms * this.speed));
+  }
+
+  /** Jump every running/coming animation to its end (the engine already knows the result). */
+  fastForward() {
+    this.ff = true;
+    for (const sp of this.sprites.values()) if (sp.anim) sp.anim.dur = 1;
   }
 
   // ---------- step playback ----------
@@ -105,9 +111,11 @@ export class MatchView {
     this.viewCrate = this.game.crate.map((r) => r.slice());
     this.viewScore = this.game.score;
     this.busy = false;
+    this.ff = false;
     this.hooks.onUpdate?.(this.viewScore, null);
     this.hooks.onSettled?.();
     this.resetHintTimer();
+    if (this.queued) { const [a, b] = this.queued; this.queued = null; this.trySwap(a, b); }
   }
 
   async playStep(step) {
@@ -178,19 +186,22 @@ export class MatchView {
     // effects
     let boom = false, zap = false, pearl = false;
     for (const e of effects) {
-      this.effects.push({ ...e, t0: performance.now(), dur: 420 });
+      this.effects.push({ ...e, t0: performance.now(), dur: e.kind === 'star' ? 620 : 420 });
       if (e.kind === 'bomb') boom = true;
       else if (e.kind === 'rainbow' || e.kind === 'nova') pearl = true;
       else zap = true;
     }
     if (boom) { sfx.boom(); haptic(40); if (!this.reduced) this.shake = 1; }
+    else if (!this.reduced && (cleared.length >= 10 || cascade >= 3)) this.shake = Math.max(this.shake, 0.45); // big clears land with weight
     if (pearl) { sfx.rainbow(); haptic(30); }
     if (zap) sfx.zap();
     if (cleared.length) sfx.match(cascade);
     if (upgraded.length) sfx.special();
 
     const anims = [];
+    const goalColors = new Set((this.game.cfg.objectives || []).filter((o) => o.type === 'collect').map((o) => o.color));
     for (const g of cleared) {
+      if (goalColors.has(g.color) && !this.reduced && (this.flyers ||= []).length < 24) this.flyers.push({ x: g.c + 0.5, y: g.r + 0.5, color: g.color, t0: performance.now() + Math.random() * 120 });
       const sp = this.sprites.get(g.id);
       if (!sp) continue;
       anims.push(this.tween(sp, { scale: 1.25, alpha: 0 }, 220).then(() => this.sprites.delete(g.id)));
@@ -291,7 +302,7 @@ export class MatchView {
     const cv = this.canvas;
     let down = null;
     const onDown = (e) => {
-      if (this.busy) return;
+      if (this.busy && this.mode !== 'swap') return; // swipes are allowed mid-cascade (fast-forward)
       const cell = this.cellAt(e.clientX, e.clientY);
       if (!cell) return;
       try { cv.setPointerCapture?.(e.pointerId); } catch { /* synthetic or lost pointer */ }
@@ -300,7 +311,7 @@ export class MatchView {
       this.resetHintTimer();
     };
     const onMove = (e) => {
-      if (!down || down.moved || this.busy || this.mode !== 'swap') return;
+      if (!down || down.moved || this.mode !== 'swap') return;
       const dx = e.clientX - down.x, dy = e.clientY - down.y;
       const th = this.cell * 0.35;
       if (Math.abs(dx) < th && Math.abs(dy) < th) return;
@@ -372,7 +383,13 @@ export class MatchView {
   }
 
   trySwap(a, b) {
-    if (this.busy || !this.game.canAct()) return;
+    if (this.busy) {
+      // don't make fast players wait: finish the current animation now, then swap
+      this.queued = [a, b];
+      this.fastForward();
+      return;
+    }
+    if (!this.game.canAct()) return;
     if (!this.game.isOpen(b[0], b[1]) || !this.game.gem(a[0], a[1]) || !this.game.gem(b[0], b[1])) return;
     const res = this.game.swap(a, b);
     if (res.steps.length) this.play(res.steps);
@@ -511,6 +528,19 @@ export class MatchView {
         ctx.beginPath();
         ctx.arc(e.c * C + C / 2, e.r * C + C / 2, rad, 0, Math.PI * 2);
         ctx.stroke();
+      } else if (e.kind === 'star') {
+        const k = Math.min(1, t * 1.6);
+        const x0 = e.c * C + C / 2, y0 = e.r * C + C / 2, x1 = e.tc * C + C / 2, y1 = e.tr * C + C / 2;
+        const mx = (x0 + x1) / 2, my = Math.min(y0, y1) - C * 1.2; // a little arc
+        const qx = (1 - k) * (1 - k) * x0 + 2 * (1 - k) * k * mx + k * k * x1;
+        const qy = (1 - k) * (1 - k) * y0 + 2 * (1 - k) * k * my + k * k * y1;
+        ctx.globalAlpha = 1;
+        ctx.strokeStyle = 'rgba(255,200,120,0.55)';
+        ctx.lineWidth = 4;
+        ctx.beginPath(); ctx.moveTo(x0, y0); ctx.quadraticCurveTo(mx, my, qx, qy); ctx.stroke();
+        ctx.font = `${C * 0.8}px "Apple Color Emoji","Segoe UI Emoji","Noto Color Emoji",sans-serif`;
+        ctx.textAlign = 'center'; ctx.textBaseline = 'middle'; ctx.fillStyle = '#000';
+        ctx.save(); ctx.translate(qx, qy); ctx.rotate(k * Math.PI * 2); ctx.fillText('⭐', 0, 0); ctx.restore();
       } else if (e.kind === 'rainbow') {
         ctx.strokeStyle = `hsl(${(now / 3) % 360},90%,75%)`;
         ctx.lineWidth = 3;
@@ -522,6 +552,20 @@ export class MatchView {
         ctx.stroke();
       }
       ctx.globalAlpha = 1;
+    }
+
+    // collected creatures swim up to the goal counter above the board
+    if (this.flyers?.length) {
+      for (const f of this.flyers) {
+        const t = Math.max(0, Math.min(1, (now - f.t0) / 520));
+        const e = t * t * (3 - 2 * t);
+        const x = (f.x + (g.cols / 2 - f.x) * e) * C, y = (f.y + (-0.8 - f.y) * e) * C - Math.sin(e * Math.PI) * C;
+        ctx.globalAlpha = 1 - t * 0.6;
+        const sz = C * (0.7 - e * 0.3);
+        ctx.drawImage(sprite(f.color, 0, Math.round(sz * this.dpr)), x - sz / 2, y - sz / 2, sz, sz);
+      }
+      ctx.globalAlpha = 1;
+      this.flyers = this.flyers.filter((f) => now - f.t0 < 520);
     }
 
     // particles

@@ -13,7 +13,7 @@
 
 import { Rng } from './rng.js';
 
-export const SPECIAL = Object.freeze({ NONE: 0, LINE_H: 1, LINE_V: 2, BOMB: 3, RAINBOW: 4 });
+export const SPECIAL = Object.freeze({ NONE: 0, LINE_H: 1, LINE_V: 2, BOMB: 3, RAINBOW: 4, STAR: 5 });
 export const RAINBOW_COLOR = -1;
 
 export const POINTS = Object.freeze({
@@ -126,6 +126,8 @@ export class Game {
       const u1 = this.gem(r - 1, c), u2 = this.gem(r - 2, c);
       if (l1 && l2 && l1.color === col && l2.color === col) continue;
       if (u1 && u2 && u1.color === col && u2.color === col) continue;
+      const ul = this.gem(r - 1, c - 1);
+      if (l1 && u1 && ul && l1.color === col && u1.color === col && ul.color === col) continue; // no ready-made 2x2
       return col;
     }
     return this.rng.int(this.colors);
@@ -175,6 +177,14 @@ export class Game {
         r = e;
       }
     }
+    // 2x2 squares of one colour (Starfish)
+    for (let r = 0; r + 1 < R; r++)
+      for (let c = 0; c + 1 < C; c++) {
+        const g = this.gems[r][c];
+        if (!g || g.color < 0) continue;
+        const same = (rr, cc) => this.gems[rr][cc] && this.gems[rr][cc].color === g.color;
+        if (same(r, c + 1) && same(r + 1, c) && same(r + 1, c + 1)) runs.push({ dir: 'sq', color: g.color, cells: [[r, c], [r, c + 1], [r + 1, c], [r + 1, c + 1]] });
+      }
     return runs;
   }
 
@@ -204,13 +214,16 @@ export class Game {
 
   // Decide which special (if any) a match group creates and where.
   planSpecial(group, preferred) {
-    const maxLen = Math.max(...group.runs.map((r) => r.cells.length));
+    const lines = group.runs.filter((r) => r.dir !== 'sq');
+    const maxLen = lines.length ? Math.max(...lines.map((r) => r.cells.length)) : 0;
     const hasH = group.runs.some((r) => r.dir === 'h');
     const hasV = group.runs.some((r) => r.dir === 'v');
+    const hasSq = group.runs.some((r) => r.dir === 'sq');
     let special = SPECIAL.NONE;
     if (maxLen >= 5) special = SPECIAL.RAINBOW;
     else if (hasH && hasV) special = SPECIAL.BOMB;
-    else if (maxLen === 4) special = group.runs[0].dir === 'h' ? SPECIAL.LINE_H : SPECIAL.LINE_V;
+    else if (maxLen === 4) special = lines[0].dir === 'h' ? SPECIAL.LINE_H : SPECIAL.LINE_V;
+    else if (hasSq) special = SPECIAL.STAR;
     if (special === SPECIAL.NONE) return null;
 
     const cells = [...group.cells.values()];
@@ -226,7 +239,7 @@ export class Game {
       for (const [k, n] of counts) if (n > 1 && usable(unkey(k))) { at = unkey(k); break; }
     }
     if (!at) {
-      const longest = group.runs.reduce((a, b) => (b.cells.length > a.cells.length ? b : a));
+      const longest = (lines.length ? lines : group.runs).reduce((a, b) => (b.cells.length > a.cells.length ? b : a));
       const mid = longest.cells[Math.floor((longest.cells.length - 1) / 2)];
       if (usable(mid)) at = mid;
     }
@@ -412,6 +425,27 @@ export class Game {
     return true;
   }
 
+  /** A starfish's target: a goal tile (algae, crate), else a gem of the most common colour. */
+  starTarget(fromR, fromC, avoid) {
+    let best = null, bestScore = -1;
+    for (let r = 0; r < this.rows; r++)
+      for (let c = 0; c < this.cols; c++) {
+        if (!this.isCell(r, c) || avoid.has(key(r, c)) || (r === fromR && c === fromC)) continue;
+        let sc = 0;
+        if (this.crate[r][c] > 0) sc = 30 + this.crate[r][c];
+        else if (this.jelly[r][c] > 0) sc = 20 + this.jelly[r][c];
+        if (sc > bestScore || (sc === bestScore && sc > 0 && this.rng.int(2))) { bestScore = sc; best = [r, c]; }
+      }
+    if (bestScore > 0) return best;
+    const counts = new Array(this.colors).fill(0);
+    for (let r = 0; r < this.rows; r++) for (let c = 0; c < this.cols; c++) { const g = this.gems[r][c]; if (g && g.color >= 0) counts[g.color]++; }
+    let col = 0;
+    for (let i = 1; i < counts.length; i++) if (counts[i] > counts[col]) col = i;
+    const opts = [];
+    for (let r = 0; r < this.rows; r++) for (let c = 0; c < this.cols; c++) { const g = this.gems[r][c]; if (g && g.color === col && !avoid.has(key(r, c))) opts.push([r, c]); }
+    return opts.length ? opts[this.rng.int(opts.length)] : null;
+  }
+
   // ---------- resolution ----------
   // Swapping two specials or a rainbow – returns the initial clear plan.
   comboActivation(posA, gA, posB, gB, steps) {
@@ -460,6 +494,18 @@ export class Game {
       }
       cells.push(...targets);
       effects.push({ kind: 'rainbow', r: rp, c: cp, targets });
+      return { cells, spent, effects };
+    }
+    // starfish + special: the starfish carries the other special to a goal tile and fires it there
+    if (gA.special === S.STAR || gB.special === S.STAR) {
+      const other = gA.special === S.STAR ? gB : gA;
+      cells.push([ra, ca], [rb, cb]);
+      const t = this.starTarget(ra, ca, new Set([key(ra, ca), key(rb, cb)])) || [ra, ca];
+      effects.push({ kind: 'star', r: ra, c: ca, tr: t[0], tc: t[1] });
+      if (other.special === S.STAR) { addArea(t[0], t[1], 1); for (const [dr, dc] of [[0, 2], [0, -2], [2, 0], [-2, 0]]) if (this.isCell(t[0] + dr, t[1] + dc)) cells.push([t[0] + dr, t[1] + dc]); }
+      else if (other.special === S.BOMB) { addArea(t[0], t[1], 1); effects.push({ kind: 'bomb', r: t[0], c: t[1], radius: 1 }); }
+      else { other.special === S.LINE_H ? addRow(t[0]) : addCol(t[1]); effects.push({ kind: 'line', r: t[0], c: t[1], dir: other.special === S.LINE_H ? 'h' : 'v' }); }
+      cells.push(t);
       return { cells, spent, effects };
     }
     // two non-rainbow specials
@@ -560,6 +606,13 @@ export class Game {
           for (let rr = r - 1; rr <= r + 1; rr++) for (let cc = c - 1; cc <= c + 1; cc++) add(rr, cc);
           effects.push({ kind: 'bomb', r, c, radius: 1 });
           break;
+        case SPECIAL.STAR: {
+          // clear the plus around it, then swim to a goal tile and clear it
+          for (const [dr, dc] of [[0, 0], [1, 0], [-1, 0], [0, 1], [0, -1]]) add(r + dr, c + dc);
+          const t = this.starTarget(r, c, new Set(toClear.keys()));
+          if (t) { add(t[0], t[1]); effects.push({ kind: 'star', r, c, tr: t[0], tc: t[1] }); }
+          break;
+        }
         case SPECIAL.RAINBOW: {
           // triggered indirectly: wipe the most common colour
           const counts = new Array(this.colors).fill(0);

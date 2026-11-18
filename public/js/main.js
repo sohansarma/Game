@@ -2,7 +2,7 @@
 
 import { Game, replay, SPECIAL } from './engine.js';
 import { BlockGame, replayBlocks } from './blocks.js';
-import { getLevel, LEVEL_COUNT, MAX_LEVEL, worldOf } from './levels.js';
+import { getLevel, LEVEL_COUNT, MAX_LEVEL, worldOf, difficultyOf } from './levels.js';
 import { dailyConfig, deepConfig, dayKey, weekKey, blocksSeed, ENGINE_VERSION, BOARDS } from './modes.js';
 import { ARCADE, ARCADE_BY_ID, arcadeSeed, tierOf, challengeHash, parseChallenge } from './arcade/index.js';
 import { hashString } from './rng.js';
@@ -1097,7 +1097,8 @@ async function startLevel(n) {
   const best = load().levels[n];
   const goals = new Game({ ...cfg }).objectiveProgress();
   const res = await modal(`
-    <h2>${world.boss ? '👑 ' : ''}Level ${n}</h2>
+    <h2>${world.boss ? '👑 ' : ''}Level ${n}${difficultyOf(n) === 'super' ? ' <span class="diff super">Super hard</span>' : difficultyOf(n) === 'hard' ? ' <span class="diff hard">Hard</span>' : ''}</h2>
+    ${(load().winStreak || 0) >= 2 ? `<p class="small">🔥 ${load().winStreak}-level win streak – keep it going for free boosters!</p>` : ''}
     <p class="muted small">${esc(world.name)}${n % 10 === 1 && n > 1 && !best ? ' · <b>new world!</b>' : ''}${best?.stars ? ` · best ${starsHtml(best.stars)}` : ''}</p>
     <div class="goal-list">${goals.map((g) => goalHtml(g, true)).join('')}</div>
     <p><b>${cfg.moves}</b> moves</p>
@@ -1395,6 +1396,7 @@ async function endLevel(run) {
     }
     run.ended = true;
     recordMatchStats(game);
+    update((d) => { d.winStreak = 0; });
     if (r === 'retry') startLevel(n);
     else showMap(n);
     return;
@@ -1408,7 +1410,11 @@ async function endLevel(run) {
   let shells = prevStars === 0 ? 10 + stars * 5 : Math.max(0, stars - prevStars) * 5;
   let gift = null;
   if (prevStars === 0 && n % 5 === 0) gift = ['hammer', 'shuffle', 'moves'][(n / 5) % 3];
+  const streak = (load().winStreak || 0) + 1;
+  const streakGift = streak === 3 ? { hammer: 1 } : streak === 5 ? { hammer: 1, moves: 1 } : streak % 10 === 0 ? { hammer: 1, shuffle: 1, moves: 1 } : null;
   update((d) => {
+    d.winStreak = streak;
+    if (streakGift) for (const [k, v] of Object.entries(streakGift)) d.boosters[k] += v;
     d.levels[n] = { stars: Math.max(prevStars, stars), best: Math.max(prev?.best || 0, game.score) };
     d.shells += shells;
     if (prevStars === 0) d.stats.levelsWon++;
@@ -1425,6 +1431,7 @@ async function endLevel(run) {
     <div class="big-score">${fmt(game.score)}</div>
     ${prev?.best && game.score > prev.best ? '<p>🎉 New best!</p>' : ''}
     ${shells ? `<div class="reward">+${shells} 🐚</div>` : ''}${gift ? `<div class="reward">🎁 ${BOOSTER_ICON[gift]} +1</div>` : ''}
+    ${streak >= 2 ? `<p class="small">🔥 Win streak: <b>${streak}</b>${streakGift ? ` – free ${Object.keys(streakGift).map((k) => BOOSTER_ICON[k]).join(' ')}!` : streak < 3 ? ' – win 3 in a row for a free 🔨' : streak < 5 ? ' – 5 in a row for more boosters' : ''}</p>` : ''}
     ${worldEnd ? `<p>Next stop: <b>${esc(worldOf(next).name)}</b></p>` : ''}`, {
     dismissable: false,
     buttons: [

@@ -25,6 +25,14 @@ export const WORLDS = [
 const ROMAN = ['', 'I', 'II', 'III', 'IV', 'V', 'VI', 'VII', 'VIII', 'IX', 'X'];
 
 /** World info for any level number (worlds repeat with a numeral: "Coral Gardens II"). */
+/** Difficulty label from the same win-rate curve the balancer targets. */
+export function difficultyOf(n) {
+  const inWorld = (n - 1) % 10;
+  let w = 0.97 - 0.0045 * Math.min(n, 60) - 0.012 * inWorld;
+  if (n % 10 === 0) w -= 0.08;
+  return n % 10 === 0 && n >= 20 ? 'super' : w < 0.72 ? 'hard' : null;
+}
+
 export function worldOf(n) {
   const w = Math.floor((n - 1) / 10);
   const base = WORLDS[w % WORLDS.length];

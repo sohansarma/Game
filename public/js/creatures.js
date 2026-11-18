@@ -27,6 +27,7 @@ export function sprite(color, special, size) {
     drawCreature(ctx, color, size);
     if (special === SPECIAL.LINE_H || special === SPECIAL.LINE_V) drawWave(ctx, size, special === SPECIAL.LINE_H);
     if (special === SPECIAL.BOMB) drawBubble(ctx, size);
+    if (special === SPECIAL.STAR) drawStarBadge(ctx, size);
   }
   if (cache.size > 400) cache.clear();
   cache.set(k, c);
@@ -207,6 +208,30 @@ function drawWave(ctx, s, horizontal) {
   };
   if (horizontal) { tri(s * 0.94, s * 0.5, 0); tri(s * 0.06, s * 0.5, Math.PI); }
   else { tri(s * 0.5, s * 0.94, Math.PI / 2); tri(s * 0.5, s * 0.06, -Math.PI / 2); }
+}
+
+/** Starfish special: a little orange starfish clinging to the creature. */
+function drawStarBadge(ctx, s) {
+  const cx = s * 0.74, cy = s * 0.26, R = s * 0.22, r = s * 0.09;
+  ctx.save();
+  ctx.beginPath();
+  for (let i = 0; i < 10; i++) {
+    const a = -Math.PI / 2 + (i * Math.PI) / 5;
+    const rr = i % 2 ? r : R;
+    const x = cx + Math.cos(a) * rr, y = cy + Math.sin(a) * rr;
+    if (i) ctx.lineTo(x, y); else ctx.moveTo(x, y);
+  }
+  ctx.closePath();
+  const g = ctx.createRadialGradient(cx - R * 0.3, cy - R * 0.3, 1, cx, cy, R);
+  g.addColorStop(0, '#ffe08a'); g.addColorStop(1, '#ff7a3d');
+  ctx.fillStyle = g;
+  ctx.fill();
+  ctx.lineWidth = s * 0.025;
+  ctx.strokeStyle = '#fff';
+  ctx.stroke();
+  ctx.fillStyle = 'rgba(255,255,255,0.8)';
+  for (let i = 0; i < 5; i++) { const a = -Math.PI / 2 + (i * 2 * Math.PI) / 5; ctx.beginPath(); ctx.arc(cx + Math.cos(a) * R * 0.45, cy + Math.sin(a) * R * 0.45, s * 0.012, 0, Math.PI * 2); ctx.fill(); }
+  ctx.restore();
 }
 
 function drawBubble(ctx, s) {
