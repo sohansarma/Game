@@ -92,7 +92,21 @@ export function sanitize(spec) {
     rules[k] = v;
   }
   const palette = clampInt(spec.palette, 0, PALETTES.length - 1, 0);
-  return { sv: SPEC_VERSION, template: spec.template, title, description: description || '', hero: pick(EMOJI.heroes, spec.hero, tpl === TEMPLATES.flap ? '🐡' : '🧺'), good: goods, bad: bads, rules, palette };
+  const out = { sv: SPEC_VERSION, template: spec.template, title, description: description || '', hero: pick(EMOJI.heroes, spec.hero, tpl === TEMPLATES.flap ? '🐡' : '🧺'), good: goods, bad: bads, rules, palette };
+  // credit for remixes (shown on the card) and the weekly jam entry tag
+  if (spec.remix && /^[a-z0-9]{8}$/.test(spec.remix.id)) {
+    out.remix = { id: spec.remix.id, title: cleanText(spec.remix.title, 30) || 'a game', owner: cleanText(spec.remix.owner, 40) || 'a creator' };
+  }
+  if (typeof spec.jam === 'string' && /^\d{4}-W\d{2}$/.test(spec.jam)) out.jam = spec.jam;
+  return out;
+}
+
+// One theme per week – a small prompt for creators, entries get their own shelf.
+export const JAM_THEMES = ['🐙 Eight arms', '🌙 Night swim', '🍩 Sweet treats', '⚡ Speed demons', '👻 Spooky reef', '🎵 Rhythm of the tide', '🧊 Frozen sea', '🌈 Rainbow reef', '🐢 Slow and steady', '💎 Treasure hunt', '🌋 Hot water', '🎈 Floaty'];
+export function jamTheme(week) {
+  let h = 0;
+  for (const c of String(week)) h = (h * 31 + c.charCodeAt(0)) >>> 0;
+  return JAM_THEMES[h % JAM_THEMES.length];
 }
 
 export function starterSpec(template) {

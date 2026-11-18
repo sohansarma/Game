@@ -9,7 +9,7 @@ import { hashString } from './rng.js';
 import { ChessVersus, ChessCasual, LudoVersus, TIME_CONTROLS, newCode, validCode, rebuild, describe } from './versus.js';
 import { CASUAL_LEVELS } from './arcade/chess.js';
 import { tableBackgroundCSS } from './arcade/table.js';
-import { TEMPLATES, RULE_INFO, EMOJI, PALETTES, sanitize as ugcSanitize, starterSpec, createSim as ugcCreate } from './maker/engine.js';
+import { TEMPLATES, RULE_INFO, EMOJI, PALETTES, sanitize as ugcSanitize, starterSpec, createSim as ugcCreate, jamTheme } from './maker/engine.js';
 import { load, update, save, totalStars, highestUnlocked, exportSave, importSave, resetSave, randomNickname, cleanName, nameProblem, NAME_MIN, NAME_MAX, ADJECTIVES, ANIMALS } from './storage.js';
 import { MatchView } from './matchview.js';
 import { BlocksView } from './blocksview.js';
@@ -2606,7 +2606,10 @@ function ugcCard(g) {
     <span class="ugc-hero">${g.hero}</span>
     <span class="grow" style="min-width:0;text-align:left"><b class="ugc-title">${esc(g.title)}</b>
       <span class="sub">by ${esc(g.owner)}${g.mine ? ' (you)' : ''} · ${TEMPLATES[g.template]?.icon || ''} ${TEMPLATES[g.template]?.name || ''} · v${g.version}</span>
-      <span class="sub"><span class="star-on">${stars5(g.rating)}</span> ${g.ratings ? g.rating.toFixed(1) + ` (${g.ratings})` : 'no ratings yet'} · ▶ ${fmt(g.plays)}</span></span></button>`;
+      <span class="sub"><span class="star-on">${stars5(g.rating)}</span> ${g.ratings ? g.rating.toFixed(1) + ` (${g.ratings})` : 'no ratings yet'} · ▶ ${fmt(g.plays)}</span>
+      ${g.remix ? `<span class="sub">🔁 remix of <b>${esc(g.remix.title)}</b> by ${esc(g.remix.owner)}</span>` : ''}
+      ${g.jam === weekKey() ? `<span class="sub">🎨 Jam entry: ${esc(jamTheme(g.jam))}</span>` : ''}
+      ${g.underReview ? '<span class="sub warn">⏸ Under review – hidden from the shelves until a moderator checks it</span>' : ''}</span></button>`;
 }
 
 async function showCommunity(tab = 'trending') {
@@ -2615,7 +2618,7 @@ async function showCommunity(tab = 'trending') {
   const el = showScreen('community', `
     <div class="topbar"><button class="icon-btn" id="c-back" aria-label="Back">←</button><h2 class="grow">Community games</h2>
       <button class="icon-btn" id="c-studio" aria-label="Creator Studio">🛠️</button></div>
-    <div class="tabs" role="tablist">${[['trending', '🔥 Trending'], ['top', '⭐ Top rated'], ['new', '🆕 New'], ['mine', '🛠️ Mine']].map(([k, l]) => `<button class="tab ${k === tab ? 'on' : ''}" data-t="${k}">${l}</button>`).join('')}</div>
+    <div class="tabs" role="tablist">${[['trending', '🔥 Trending'], ['top', '⭐ Top rated'], ['jam', '🎨 Jam'], ['new', '🆕 New'], ['mine', '🛠️ Mine']].map(([k, l]) => `<button class="tab ${k === tab ? 'on' : ''}" data-t="${k}">${l}</button>`).join('')}</div>
     <div class="scroll"><div class="list" id="c-list"><p class="center muted">Loading…</p></div></div>`);
   $('#c-back', el).onclick = () => { sfx.tap(); showHub(); };
   $('#c-studio', el).onclick = () => { sfx.tap(); showStudio(); };
@@ -2633,9 +2636,13 @@ async function showCommunity(tab = 'trending') {
     trending: [...games].sort((a, b) => b.recentPlays * 2 + bayes(b) * 3 - (a.recentPlays * 2 + bayes(a) * 3)),
     top: [...games].filter((g) => g.ratings).sort((a, b) => bayes(b) - bayes(a)),
     new: [...games].sort((a, b) => b.createdAt - a.createdAt),
+    jam: games.filter((g) => g.jam === weekKey()).sort((a, b) => bayes(b) - bayes(a)),
     mine: games.filter((g) => g.mine),
   }[tab];
-  list.innerHTML = sorted.length ? sorted.map(ugcCard).join('') : `<div class="tip">${tab === 'mine' ? "You haven't published a game yet. Open the 🛠️ Creator Studio to make one!" : 'No games here yet – be the first to create one in the 🛠️ Creator Studio!'}</div>`;
+  // featured shelf: well-rated games that real players keep coming back to
+  const featured = tab === 'trending' ? games.filter((g) => !g.mine && g.ratings >= 3 && bayes(g) >= 3.9 && g.players >= 3).sort((a, b) => bayes(b) - bayes(a)).slice(0, 3) : [];
+  const jamHead = tab === 'jam' ? `<div class="tip">🎨 <b>This week's jam: ${esc(jamTheme(weekKey()))}</b><br>Make a game on the theme and tick "Enter the jam" when you publish. Entries get this shelf until Sunday night.</div>` : '';
+  list.innerHTML = (featured.length ? `<h3 class="hub-h">⭐ Featured</h3>${featured.map(ugcCard).join('')}<h3 class="hub-h">🔥 Trending</h3>` : '') + jamHead + (sorted.length ? sorted.map(ugcCard).join('') : `<div class="tip">${tab === 'mine' ? "You haven't published a game yet. Open the 🛠️ Creator Studio to make one!" : tab === 'jam' ? 'No entries yet – yours could be the first!' : 'No games here yet – be the first to create one in the 🛠️ Creator Studio!'}</div>`);
   for (const b of $$('.ugc-card', list)) b.onclick = () => { sfx.tap(); ugcDetail(b.dataset.id); };
 }
 
@@ -2647,14 +2654,16 @@ async function ugcDetail(id) {
   const r = await modal(`<div style="font-size:3rem">${g.hero}</div><h2>${esc(g.title)}</h2>
     <p class="muted small">by <b>${esc(g.owner)}</b> · ${TEMPLATES[g.template].icon} ${TEMPLATES[g.template].name} · version ${g.version}</p>
     ${g.description ? `<p>${esc(g.description)}</p>` : ''}
+    ${g.remix ? `<p class="small">🔁 Remix of <b>${esc(g.remix.title)}</b> by ${esc(g.remix.owner)}</p>` : ''}
+    ${g.underReview && g.mine ? '<div class="tip">⏸ <b>Under review.</b> A few players reported this version, so it is off the shelves until a moderator checks it. Publishing a fixed version starts a fresh review.</div>' : ''}
     <p><span class="star-on">${stars5(g.rating)}</span> ${g.ratings ? `${g.rating.toFixed(1)} from ${g.ratings} rating${g.ratings > 1 ? 's' : ''}` : 'Not rated yet'} · ▶ ${fmt(g.plays)} plays</p>
     ${g.mine ? '<p class="small muted">🛠️ You made this – players rate it after they play.</p>' : played ? `<div class="rate-row" role="group" aria-label="Your rating">${[1, 2, 3, 4, 5].map((n) => `<button class="rate-star ${n <= (g.myRating || 0) ? 'on' : ''}" data-s="${n}" aria-label="${n} star${n > 1 ? 's' : ''}">★</button>`).join('')}</div><p class="small muted">${g.myRating ? 'Your rating – tap to change' : 'Tap to rate this game'}</p>` : '<p class="small muted">Play once to rate it.</p>'}
     <div class="tip"><b>What's new</b><br>${(g.history || []).slice(-3).reverse().map((h) => `v${h.v} · ${new Date(h.at).toLocaleDateString()} – ${esc(h.note)}`).join('<br>')}</div>
     <div class="tip"><b>🏆 Top scores (v${g.version})</b><div id="u-top" class="small">Loading…</div></div>`, {
     buttons: [
       { label: '▶ Play', value: 'play', cls: 'green' },
-      ...(g.mine ? [{ label: '✏️ Edit & publish update', value: 'edit', cls: 'blue' }] : []),
-      ...(!g.mine ? [{ label: '🚩 Report', value: 'report', cls: 'ghost' }] : []),
+      ...(g.mine ? [{ label: '✏️ Edit & publish update', value: 'edit', cls: 'blue' }] : [{ label: '🔁 Remix it', value: 'remix', cls: 'blue' }]),
+      ...(!g.mine && played ? [{ label: '🚩 Report', value: 'report', cls: 'ghost' }] : []),
       { label: 'Back', value: 'back', cls: 'ghost' },
     ],
     onOpen: (sheet) => {
@@ -2672,8 +2681,15 @@ async function ugcDetail(id) {
   });
   if (r === 'play') playUgc(g);
   else if (r === 'edit') editGame(g.spec, g.id, g.version);
+  else if (r === 'remix') {
+    // start a new draft from this game's rules, crediting the original
+    const nid = api.newUgcId();
+    const spec = { ...g.spec, title: `${g.spec.title}`.slice(0, 23) + ' remix', jam: undefined, remix: { id: g.id, title: g.spec.title, owner: g.owner } };
+    saveDraft(nid, spec, 0);
+    editGame(spec, nid, 0);
+  }
   else if (r === 'report') {
-    const ok = await modal('<h2>🚩 Report this game?</h2><p>Report games that are mean, scary or inappropriate. Games with several reports are hidden.</p>', { buttons: [{ label: 'Report', value: true, cls: 'red' }, { label: 'Cancel', value: false, cls: 'ghost' }], row: true });
+    const ok = await modal('<h2>🚩 Report this game?</h2><p>Report games that are mean, scary or inappropriate. When several players report a version it is held for a moderator to check.</p>', { buttons: [{ label: 'Report', value: true, cls: 'red' }, { label: 'Cancel', value: false, cls: 'ghost' }], row: true });
     if (ok) { await api.ugc.report(id).catch(() => {}); toast('Thanks – our community keeps Tidepop kind.'); }
     showCommunity();
   } else if (r === 'back' && currentScreen() !== 'community') showCommunity();
@@ -2730,7 +2746,7 @@ async function endUgc(run) {
     d.shells += shells;
   });
   noteGameEnd('community', score > best);
-  api.ugc.played(g.id).catch(() => {});
+  const playedP = api.ugc.played(g.id).catch(() => {});
   score > best ? sfx.win() : sfx.lose();
   announceAchievements();
   const p = modal(`<h2>${g.hero} ${esc(sim.overReason || 'Game over')}</h2><div class="big-score">${fmt(score)}</div>
@@ -2744,7 +2760,7 @@ async function endUgc(run) {
         const n = Number(b.dataset.s);
         $$('.rate-star', sheet).forEach((x) => x.classList.toggle('on', Number(x.dataset.s) <= n));
         sfx.star(n - 1);
-        api.ugc.rate(g.id, n).then(() => toast(`Rated ${n}★ – the creator thanks you!`)).catch(() => {});
+        playedP.then(() => api.ugc.rate(g.id, n)).then(() => toast(`Rated ${n}★ – the creator thanks you!`)).catch(() => {});
       };
     },
   });
@@ -2903,9 +2919,11 @@ function editGame(spec0, id, version, fromTest) {
     const ok = await modal(`<h2>🚀 ${version ? `Publish version ${version + 1}` : 'Publish your game'}</h2>
       <p>${clean.hero} <b>${esc(clean.title)}</b> will be playable by everyone in the community.</p>
       <label class="small">${version ? "What's new? (players see this)" : 'Release note (optional)'}<input id="pub-note" maxlength="120" placeholder="${version ? 'e.g. Easier start, new 🍩 goodie' : 'First release'}" style="width:100%"></label>
-      <p class="small muted">Keep it friendly for all ages – games with several reports are hidden.</p>`, {
+      <label class="rule"><input type="checkbox" id="pub-jam" ${clean.jam === weekKey() ? 'checked' : ''}> <span>🎨 Enter this week's jam: <b>${esc(jamTheme(weekKey()))}</b></span></label>
+      ${clean.remix ? `<p class="small">🔁 Credits <b>${esc(clean.remix.title)}</b> by ${esc(clean.remix.owner)} as the original.</p>` : ''}
+      <p class="small muted">Keep it friendly for all ages – versions reported by several players are held for a moderator to check.</p>`, {
       buttons: [{ label: 'Publish', value: true, cls: 'green' }, { label: 'Cancel', value: false, cls: 'ghost' }], row: true,
-      onOpen: (sheet) => { $('#pub-note', sheet).oninput = (e) => { note = e.target.value; }; },
+      onOpen: (sheet) => { $('#pub-note', sheet).oninput = (e) => { note = e.target.value; }; $('#pub-jam', sheet).onchange = (e) => { clean.jam = e.target.checked ? weekKey() : undefined; if (!clean.jam) delete clean.jam; }; },
     });
     if (!ok) return;
     try {

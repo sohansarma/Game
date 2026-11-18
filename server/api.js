@@ -130,14 +130,17 @@ export function createApi(store, { now = () => new Date(), origin = process.env.
   // ---- community games (Creator Studio)
   function ugcSummary(rec, me) {
     const spec = rec.specs[rec.version];
-    const rs = Object.values(rec.ratings || {});
+    // only players who actually played (and aren't the creator) count
+    const rs = Object.entries(rec.ratings || {}).filter(([pid]) => pid !== rec.owner && rec.plays?.[pid]).map(([, s]) => s);
+    const reports = Object.entries(rec.reports || {}).filter(([pid, v]) => pid !== rec.owner && (v === true || v === rec.version)).length;
     const week = Date.now() - 7 * 86400000;
     return {
       id: rec.id, version: rec.version, title: spec.title, description: spec.description, template: spec.template, hero: spec.hero, palette: spec.palette,
       owner: db.players[rec.owner]?.name || 'Creator', mine: rec.owner === me, createdAt: rec.createdAt, updatedAt: rec.updatedAt, history: rec.history,
       rating: rs.length ? rs.reduce((a, b) => a + b, 0) / rs.length : 0, ratings: rs.length,
       plays: Object.values(rec.plays || {}).reduce((a, b) => a + b, 0), players: Object.keys(rec.plays || {}).length,
-      recentPlays: Object.values(rec.playedAt || {}).filter((t) => t > week).length, reports: Object.keys(rec.reports || {}).length,
+      recentPlays: Object.values(rec.playedAt || {}).filter((t) => t > week).length, reports,
+      underReview: !rec.cleared && reports >= 3, remix: spec.remix || null, jam: spec.jam || null,
       myRating: rec.ratings?.[me] || 0, mePlayed: !!rec.plays?.[me],
     };
   }
@@ -161,6 +164,7 @@ export function createApi(store, { now = () => new Date(), origin = process.env.
         for (const v of Object.keys(r.specs)) if (Number(v) <= r.version - 10) delete r.specs[v];
         r.history = [...r.history, { v: r.version, at: t, note: String(body.note || '').slice(0, 120) || (r.version === 1 ? 'First release' : 'Updated') }].slice(-20);
         r.updatedAt = t;
+        r.cleared = false; // a new version is reviewed fresh
         db.creations[id] = r;
         store.dirty();
         return { ok: true, version: r.version };
@@ -177,6 +181,8 @@ export function createApi(store, { now = () => new Date(), origin = process.env.
       case 'play':
       case 'report': {
         if (!rec) throw fail(404, 'That game was removed');
+        if (body.action !== 'play' && rec.owner === body.playerId) throw fail(403, "You can't rate or report your own game");
+        if (body.action !== 'play' && !rec.plays?.[body.playerId]) throw fail(403, 'Play it first');
         if (body.action === 'rate') {
           const s = Math.round(Number(body.stars));
           if (!(s >= 1 && s <= 5)) throw fail(400, 'stars must be 1-5');
@@ -184,7 +190,16 @@ export function createApi(store, { now = () => new Date(), origin = process.env.
         } else if (body.action === 'play') {
           (rec.plays ||= {})[body.playerId] = Math.min(99999, (rec.plays[body.playerId] || 0) + 1);
           (rec.playedAt ||= {})[body.playerId] = t;
-        } else (rec.reports ||= {})[body.playerId] = true;
+        } else (rec.reports ||= {})[body.playerId] = rec.version;
+        store.dirty();
+        return { ok: true };
+      }
+      case 'moderate': {
+        // a moderator (ADMIN_KEY) clears a held game or removes it
+        if (!process.env.ADMIN_KEY || body.admin !== process.env.ADMIN_KEY) throw fail(403, 'moderators only');
+        if (!rec) throw fail(404, 'no such game');
+        if (body.decision === 'remove') delete db.creations[id];
+        else { rec.cleared = true; rec.reports = {}; }
         store.dirty();
         return { ok: true };
       }
@@ -366,7 +381,8 @@ export function createApi(store, { now = () => new Date(), origin = process.env.
           if (!rec) throw fail(404, 'That game was removed');
           return send(res, 200, { ...ugcSummary(rec, me), specs: rec.specs, spec: rec.specs[rec.version] }, origin);
         }
-        const games = Object.values(db.creations || {}).map((r) => ugcSummary(r, me)).filter((g) => g.reports < 3 || g.mine);
+        // games held for review stay visible to their creator (with a note), not to the shelves
+        const games = Object.values(db.creations || {}).map((r) => ugcSummary(r, me)).filter((g) => !g.underReview || g.mine);
         return send(res, 200, { games }, origin);
       }
       if (req.method === 'GET' && url.pathname === '/api/match') {

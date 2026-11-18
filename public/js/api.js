@@ -425,13 +425,15 @@ export function newUgcId() {
 function summarize(rec, ownerName, agg) {
   const v = rec.version;
   const spec = rec.specs[v];
-  const rs = Object.values(agg.r || {});
+  // fair ratings: only from people who played it and aren't the creator
+  const rs = Object.entries(agg.r || {}).filter(([pid]) => pid !== agg.owner && agg.p?.[pid]).map(([, s]) => s);
+  const reports = Object.entries(agg.rep || {}).filter(([pid, ver]) => pid !== agg.owner && (ver === true || ver === v) && agg.p?.[pid]).length;
   return {
     id: rec.id, version: v, title: spec.title, description: spec.description, template: spec.template, hero: spec.hero, palette: spec.palette,
     owner: ownerName, mine: !!agg.mine, createdAt: rec.createdAt, updatedAt: rec.updatedAt, history: rec.history || [],
     rating: rs.length ? rs.reduce((a, b) => a + b, 0) / rs.length : 0, ratings: rs.length,
     plays: Object.values(agg.p || {}).reduce((a, b) => a + b, 0), players: Object.keys(agg.p || {}).length,
-    recentPlays: agg.recent || 0, reports: Object.keys(agg.rep || {}).length, myRating: agg.myRating || 0, mePlayed: !!agg.mePlayed,
+    recentPlays: agg.recent || 0, reports, underReview: reports >= 3, remix: spec.remix || null, jam: spec.jam || null, myRating: agg.myRating || 0, mePlayed: !!agg.mePlayed,
   };
 }
 
@@ -443,7 +445,7 @@ async function sharedUgcAll(sh) {
     for (const [id, s] of Object.entries(x.r || {})) if (s >= 1 && s <= 5) { ((agg[id] ||= { r: {}, p: {}, rep: {} }).r[d.id] = s); if (d.id === sh.uid) agg[id].myRating = s; }
     for (const [id, n] of Object.entries(x.p || {})) if (Number.isInteger(n) && n > 0 && n < 100000) { (agg[id] ||= { r: {}, p: {}, rep: {} }).p[d.id] = n; if (d.id === sh.uid) agg[id].mePlayed = true; }
     for (const [id, t] of Object.entries(x.pt || {})) if (Date.now() - t < 7 * 86400000) (agg[id] ||= { r: {}, p: {}, rep: {} }).recent = (agg[id].recent || 0) + 1;
-    for (const id of Object.keys(x.rep || {})) (agg[id] ||= { r: {}, p: {}, rep: {} }).rep[d.id] = true;
+    for (const [id, ver] of Object.entries(x.rep || {})) (agg[id] ||= { r: {}, p: {}, rep: {} }).rep[d.id] = ver;
   });
   const out = [];
   games.docs.forEach((d) => {
@@ -451,7 +453,7 @@ async function sharedUgcAll(sh) {
     for (const rec of Object.values(x.creations || {})) {
       if (!rec || !UGC_ID.test(rec.id) || !rec.specs?.[rec.version]) continue;
       const a = agg[rec.id] || {};
-      out.push({ ...summarize(rec, String(x.name || 'Creator').slice(0, 40), { ...a, mine: d.id === sh.uid }), _rec: rec });
+      out.push({ ...summarize(rec, String(x.name || 'Creator').slice(0, 40), { ...a, owner: d.id, mine: d.id === sh.uid }), _rec: rec });
     }
   });
   return out;
@@ -476,7 +478,7 @@ export const ugc = {
   /** List published games (hidden ones filtered unless they're mine). */
   async list() {
     const sh = await sharedDb();
-    if (sh) return (await sharedUgcAll(sh)).filter((g) => g.reports < 3 || g.mine).map(({ _rec, ...g }) => g);
+    if (sh) return (await sharedUgcAll(sh)).filter((g) => !g.underReview || g.mine).map(({ _rec, ...g }) => g);
     const p = load();
     return (await req('/ugc?' + new URLSearchParams({ playerId: p.playerId }).toString())).games;
   },
@@ -552,7 +554,11 @@ export const ugc = {
 
   async report(id) {
     const sh = await sharedDb();
-    if (sh) { await myRatingsDoc(sh, (d) => { d.rep[id] = true; }); return { ok: true }; }
+    if (sh) {
+      const g = (await sharedUgcAll(sh)).find((x) => x.id === id);
+      await myRatingsDoc(sh, (d) => { d.rep[id] = g?.version || true; });
+      return { ok: true };
+    }
     const p = await ensureRegistered();
     return req('/ugc', { method: 'POST', body: JSON.stringify({ action: 'report', id, playerId: p.playerId, token: p.token }) });
   },

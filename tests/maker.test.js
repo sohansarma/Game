@@ -108,13 +108,29 @@ test('server: publish, version, play, rate, report, verified scores', async () =
   assert.equal(g.body.owner, 'Clever Octopus 11');
   assert.equal((await get('/api/leaderboard?board=ugc&key=abcd2345-1')).body.entries[0].score, sim.score);
 
-  // reports hide a game from others (but not from its maker)
+  // fair ratings: the maker can't rate their own game; you must play before rating or reporting
+  assert.equal((await as(maker, { action: 'play', id: 'abcd2345' })).status, 200);
+  assert.equal((await as(maker, { action: 'rate', id: 'abcd2345', stars: 5 })).status, 403);
+  const lurker = (await post('/api/register', { name: 'Shy Crab 20' })).body;
+  assert.equal((await as(lurker, { action: 'rate', id: 'abcd2345', stars: 1 })).status, 403);
+  assert.equal((await as(lurker, { action: 'report', id: 'abcd2345' })).status, 403);
+
+  // reports from players hold a version for review (off the shelves, the maker is told)
   for (let i = 0; i < 3; i++) {
     const r = (await post('/api/register', { name: `Calm Seal ${30 + i}` })).body;
-    await as(r, { action: 'report', id: 'abcd2345' });
+    await as(r, { action: 'play', id: 'abcd2345' });
+    assert.equal((await as(r, { action: 'report', id: 'abcd2345' })).status, 200);
   }
-  assert.equal((await get(`/api/ugc?playerId=${fan.playerId}`)).body.games.length, 0, 'hidden after 3 reports');
-  assert.equal((await get(`/api/ugc?playerId=${maker.playerId}`)).body.games.length, 1, 'maker still sees it');
+  assert.equal((await get(`/api/ugc?playerId=${fan.playerId}`)).body.games.length, 0, 'held after 3 reports');
+  const mine = (await get(`/api/ugc?playerId=${maker.playerId}`)).body.games;
+  assert.equal(mine.length, 1, 'maker still sees it');
+  assert.equal(mine[0].underReview, true, 'and is told it is under review');
+  // only a moderator can clear it
+  assert.equal((await as(fan, { action: 'moderate', id: 'abcd2345', decision: 'clear', admin: 'nope' })).status, 403);
+  process.env.ADMIN_KEY = 'test-admin-key';
+  assert.equal((await as(fan, { action: 'moderate', id: 'abcd2345', decision: 'clear', admin: 'test-admin-key' })).status, 200);
+  delete process.env.ADMIN_KEY;
+  assert.equal((await get(`/api/ugc?playerId=${fan.playerId}`)).body.games.length, 1, 'cleared by a moderator');
 
   assert.equal((await as(fan, { action: 'delete', id: 'abcd2345' })).status, 403);
   assert.equal((await as(maker, { action: 'delete', id: 'abcd2345' })).status, 200);
