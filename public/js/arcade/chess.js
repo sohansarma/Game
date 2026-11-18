@@ -531,9 +531,9 @@ function replay(seed, log) {
 
 export default {
   id: 'chess',
-  title: 'Chess Ladder',
+  title: 'Chess',
   icon: '♟️',
-  tagline: 'Beat ever-stronger sea bots – or a friend',
+  tagline: 'Sea-creature bots, a ladder – or play a friend',
   color: ['#a1887f', '#263238'],
   maxLog: 3000,
   shellsPer: 15,

@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="utf-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, user-scalable=no" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
   <title>Tidepop</title>
   <meta name="description" content="Tidepop – a free, ad-free match-3 and block puzzle game for all ages. Daily challenges and fair, verified leaderboards." />
   <meta name="theme-color" content="#1565c0" />
@@ -18,7 +18,7 @@
 </head>
 <body>
   <div id="bg" aria-hidden="true"><div class="bubbles"></div></div>
-  <main id="app" aria-live="polite">
+  <main id="app">
     <section id="screen-loading" class="screen active">
       <div class="logo big">Tide<span>pop</span></div>
       <p class="muted">Loading the reef…</p>
@@ -27,7 +27,7 @@
   <div id="modal" class="modal" role="dialog" aria-modal="true" aria-hidden="true">
     <div class="sheet" tabindex="-1"></div>
   </div>
-  <div id="toasts" aria-live="assertive"></div>
+  <div id="toasts" role="status" aria-live="polite"></div>
   <noscript><p style="padding:2rem;color:#fff">Tidepop needs JavaScript enabled to play.</p></noscript>
   <script type="module" src="js/main.js"></script>
 </body>

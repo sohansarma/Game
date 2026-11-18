@@ -108,7 +108,7 @@ async function goodNight() {
 async function showVibePicker() {
   const st = load().settings;
   const cur = cozyActive() ? st.cozySound : 'off';
-  const card = (id, icon, name, desc) => `<button class="vibe-card ${cur === id ? 'on' : ''}" data-vibe="${id}"><span class="vibe-icon">${icon}</span><b>${name}</b><span class="small">${desc}</span></button>`;
+  const card = (id, icon, name, desc) => `<button class="vibe-card ${cur === id ? 'on' : ''}" data-vibe="${id}" aria-pressed="${cur === id}"><span class="vibe-icon" aria-hidden="true">${icon}</span><b>${name}</b><span class="small">${desc}</span></button>`;
   const r = await modal(`<h2>🌙 Choose your vibe</h2>
     <p class="small muted">Each vibe changes the whole platform – sounds, sky, colours, music and even what Pip is up to.</p>
     <div class="vibe-grid">
@@ -133,7 +133,7 @@ async function showVibePicker() {
         applySettings();
       };
       for (const b of $$('[data-vibe]', sheet)) b.onclick = () => {
-        $$('[data-vibe]', sheet).forEach((x) => x.classList.toggle('on', x === b));
+        $$('[data-vibe]', sheet).forEach((x) => { x.classList.toggle('on', x === b); x.setAttribute('aria-pressed', String(x === b)); });
         apply(b.dataset.vibe);
         sfx.tap();
         haptic(10);
@@ -387,10 +387,10 @@ function showPool(slotId = 'sky') {
   poolState();
   let selected = slotId;
   const el = showScreen('pool', `
-    <div class="topbar"><button class="icon-btn" id="p-back" aria-label="Back">←</button><h2 class="grow">🏝️ Your Tide Pool</h2><span class="pill" id="p-shells"></span></div>
+    <div class="topbar"><button class="icon-btn" id="p-back" aria-label="Back">←</button><h2 class="grow">🏝️ Your Cozy Cove</h2><span class="pill" id="p-shells"></span></div>
     <div class="scroll">
       <div class="pool-comfort" id="p-comfort"></div>
-      <div class="pool-stage"><canvas id="p-canvas" aria-label="Your tide pool – tap a spot to decorate it"></canvas></div>
+      <div class="pool-stage"><canvas id="p-canvas" aria-label="Your cozy cove – tap a spot to decorate it"></canvas></div>
       <p class="small muted center" style="margin:6px 0 2px">Tap a spot in your cove to decorate it · tap Pip to say hi</p>
       <div class="pool-slots" id="p-slots"></div>
       <div id="p-items"></div>
@@ -701,7 +701,7 @@ async function onboarding() {
   let name = load().name;
   const res = await modal(`
     <div class="logo">Tide<span>pop</span></div>
-    <p>Welcome to the <b>Tidepop Arcade</b>! Match-3, chess, ludo, mining and more – pick any game, climb the leaderboards and challenge your friends.</p>
+    <p>Welcome to <b>Tidepop</b> – a cozy arcade by the sea. A new shared puzzle every day, match-3, block puzzles, chess and ludo with friends, and more.</p>
     <p class="small muted">Free to play · plays offline</p>
     <div class="tip name-tip"><label for="nf-input"><b>Choose your name</b></label>${nameFieldHtml(name)}</div>
     ${api.inArtifact() ? '' : '<p class="small center" id="ob-login-row" style="display:none">Played before? <a href="#" id="ob-login">Log in to your account</a></p>'}
@@ -838,7 +838,7 @@ function goHome() {
     </div>
     <div class="scroll">
       <div class="home-hero">
-        <div class="logo">Tide<span>pop</span></div>
+        <div class="logo game-logo">Shell <span>Swap</span></div>
         <div class="creatures">${creatures}</div>
       </div>
       <button class="btn wide play-big" id="h-play">▶ Play Level ${next}</button>
@@ -1315,12 +1315,12 @@ function arcadeStats(id) {
 function hubGames() {
   const s = load();
   return [
-    { id: 'tidepop', title: 'Tidepop', icon: '🐚', tagline: 'Match-3 adventure · endless levels', best: `⭐ ${totalStars(s)}`, played: s.dailyDive[dayKey()]?.best !== undefined, dailyBoard: 'daily', open: goHome },
-    { id: 'reef', title: 'Reef Blocks', icon: '🧱', tagline: 'Drag blocks, clear lines, chain combos', best: fmt(s.blocks.best), played: s.blocksDaily[dayKey()] !== undefined, dailyBoard: 'blocksDaily', open: blocksMenu },
+    { id: 'tidepop', title: 'Shell Swap', icon: '🐚', tagline: 'Match-3 adventure · endless levels', best: `⭐ ${totalStars(s)}`, played: s.dailyDive[dayKey()]?.best !== undefined, everPlayed: (s.stats.gamesPlayed || 0) > 0 || Object.keys(s.levels || {}).length > 0, dailyBoard: 'daily', open: goHome },
+    { id: 'reef', title: 'Reef Blocks', icon: '🧱', tagline: 'Drag blocks, clear lines, chain combos', best: fmt(s.blocks.best), played: s.blocksDaily[dayKey()] !== undefined, everPlayed: (s.blocks.games || 0) > 0, dailyBoard: 'blocksDaily', open: blocksMenu },
     ...ARCADE.filter((g) => !g.special).map((g) => {
       const st = arcadeStats(g.id);
       const t = tierOf(g, st.best).tier;
-      return { id: g.id, title: g.title, icon: g.icon, tagline: g.tagline, best: `${fmt(st.best)}${t ? ` · ${t.icon}` : ''}`, played: st.daily[dayKey()] !== undefined, dailyBoard: g.id + 'Daily', open: () => arcadeMenu(g.id) };
+      return { id: g.id, title: g.title, icon: g.icon, tagline: g.tagline, best: `${fmt(st.best)}${t ? ` · ${t.icon}` : ''}`, played: st.daily[dayKey()] !== undefined, everPlayed: (st.games || 0) > 0, dailyBoard: g.id + 'Daily', open: () => arcadeMenu(g.id) };
     }),
   ];
 }
@@ -1396,29 +1396,30 @@ function showHub() {
       <button class="icon-btn" id="u-settings" aria-label="Settings">⚙️</button>
     </div>
     <div class="scroll">
-      <div class="home-hero"><div class="logo">Tide<span>pop</span> <small class="arcade-word">Arcade</small></div></div>
-      <div class="hub-timer" role="timer">⏳ Today's challenges end in <b id="u-timer">${hms(msToReset())}</b><br><span class="small">🗓️ Weekly tournament ends in <b>${weekLeft()}</b> · top 10 win shells</span></div>
+      <div class="hub-head"><div class="logo small-logo">Tide<span>pop</span></div><div class="hub-timer" aria-live="off">New challenges in <b id="u-timer">${hms(msToReset())}</b></div></div>
       ${tideCardHtml()}
-      ${pipHtml(load())}
-      ${accountNudgeHtml(load())}
-      <button class="hot-card" id="u-hot"><span class="hot-flame">🔥</span><span class="grow"><small>HOT TODAY · 2× SHELLS</small><b>${hot.icon} ${esc(hot.title)}</b></span><span class="btn sm">Play</span></button>
-      <div class="missions">
-        <div class="row"><b class="grow">🎯 Daily missions</b><span class="small muted">reward: 🐚 150 + 🎁</span></div>
-        ${ms.list.map((m) => `<div class="mission ${m.cur >= m.goal ? 'done' : ''}"><span>${m.cur >= m.goal ? '✅' : '⬜'} ${esc(m.text)}</span><span class="small">${m.cur}/${m.goal}</span></div>`).join('')}
-        ${ms.claimed ? '<p class="small muted center">Chest claimed – new missions at reset!</p>' : `<button class="btn wide ${allDone ? 'green' : 'ghost'}" id="u-chest" ${allDone ? '' : 'disabled'}>${allDone ? '🎁 Open the mission chest' : 'Complete all 3 to open the chest'}</button>`}
-      </div>
-      <div class="community-row">
-        <button class="card pool-card" id="u-pool">${newlyFound(load()).length ? '<span class="tag">New find!</span>' : ''}<span class="emoji">🏝️</span><b>Your Tide Pool</b><span class="sub">${(() => { const c = comfortOf(load().pool); return `${'⭐'.repeat(c.level) || 'Decorate your cozy cove'}${c.level ? ` · +${c.level * 5} 🐚 a day` : ''}`; })()}</span></button>
-        <button class="card" id="u-community"><span class="emoji">🌟</span><b>Community games</b><span class="sub">Made by players · play, rate & compete</span></button>
-        <button class="card" id="u-studio"><span class="emoji">🛠️</span><b>Creator Studio</b><span class="sub">Build your own game – no coding</span></button>
-      </div>
+      <h3 class="hub-h">🎮 Games</h3>
       <div class="game-grid">${games.map((g) => {
         const rk = ranks[g.dailyBoard + ':' + dayKey()];
-        return `<button class="game-card ${g.id === hot.id ? 'hot' : ''}" data-g="${g.id}">
-          ${g.id === hot.id ? '<span class="tag">🔥 2×</span>' : g.played ? `<span class="tag done">${rk ? '#' + rk : '✓'} today</span>` : '<span class="tag">Daily!</span>'}
-          <span class="game-icon">${g.icon}</span><b>${esc(g.title)}</b><span class="sub">${esc(g.tagline)}</span><span class="sub">Best: <b>${g.best}</b></span></button>`;
+        const fresh = !g.everPlayed;
+        const tag = g.id === hot.id ? '<span class="tag hot">🔥 2× today</span>' : g.played ? `<span class="tag done">${rk ? '#' + rk : '✓'} today</span>` : fresh ? '<span class="tag new">New</span>' : '';
+        return `<button class="game-card ${g.id === hot.id ? 'hot' : ''}" data-g="${g.id}" aria-label="${esc(g.title)}. ${esc(g.tagline)}. Best ${esc(String(g.best).replace(/<[^>]+>/g, ''))}${g.id === hot.id ? '. Hot game: double shells today' : g.played ? '. Played today' : ''}">
+          ${tag}<span class="game-icon" aria-hidden="true">${g.icon}</span><b>${esc(g.title)}</b><span class="sub">${esc(g.tagline)}</span><span class="sub">Best: <b>${g.best}</b></span></button>`;
       }).join('')}</div>
-      <p class="center small muted" style="margin-top:14px">${games.length} games · free to play · playing as <b>${esc(s.name)}</b></p>
+      ${accountNudgeHtml(load())}
+      ${pipHtml(load())}
+      <div class="missions">
+        <div class="row"><b class="grow">🎯 Daily missions</b><span class="small muted">reward: 🐚 150 + 🧊</span></div>
+        ${ms.list.map((m) => `<div class="mission ${m.cur >= m.goal ? 'done' : ''}"><span>${m.cur >= m.goal ? '✅' : '◻️'} ${esc(m.text)}</span><span class="small">${m.cur}/${m.goal}</span></div>`).join('')}
+        ${ms.claimed ? '<p class="small muted center">Chest claimed – new missions at reset!</p>' : `<button class="btn wide ${allDone ? 'green' : 'ghost'}" id="u-chest" ${allDone ? '' : 'aria-disabled="true"'}>${allDone ? '🎁 Open the mission chest' : 'Complete all 3 to open the chest'}</button>`}
+        <p class="small muted center" style="margin:2px 0 0">🗓️ Weekly tournament ends in <b>${weekLeft()}</b></p>
+      </div>
+      <div class="community-row">
+        <button class="card pool-card" id="u-pool">${newlyFound(load()).length ? '<span class="tag">New find!</span>' : ''}<span class="emoji" aria-hidden="true">🏝️</span><b>Your Cozy Cove</b><span class="sub">${(() => { const c = comfortOf(load().pool); return `${'⭐'.repeat(c.level) || 'Decorate your own little cove'}${c.level ? ` · +${c.level * 5} 🐚 a day` : ''}`; })()}</span></button>
+        <button class="card" id="u-community"><span class="emoji" aria-hidden="true">🌟</span><b>Community games</b><span class="sub">Made by players · play, rate & compete</span></button>
+        <button class="card" id="u-studio"><span class="emoji" aria-hidden="true">🛠️</span><b>Creator Studio</b><span class="sub">Build your own game – no coding</span></button>
+      </div>
+      <p class="center small muted" style="margin-top:14px">${games.length + 1} games · free to play · playing as <b>${esc(s.name)}</b></p>
     </div>`);
   const on = (id, fn) => { const b = $(id, el); if (b) b.onclick = () => { sfx.tap(); fn(); }; };
   on('#u-lb', () => showLeaderboard());
@@ -1429,12 +1430,12 @@ function showHub() {
   on('#u-nudge-go', async () => { await openSignUp(); showHub(); });
   on('#u-nudge-x', () => { update((d) => { d.nudgeHiddenUntil = Date.now() + 3 * 86400000; }); showHub(); });
   on('#u-gift', () => (dailyStatus().canClaim ? maybeDailyReward() : toast('Already claimed today – see you tomorrow! 🔥')));
-  on('#u-hot', () => hot.open());
   on('#u-community', () => showCommunity());
   on('#u-studio', () => showStudio());
   on('#u-pool', () => showPool());
   on('#u-tide', () => playTide());
   on('#u-chest', () => {
+    if (!missions().list.every((m) => m.cur >= m.goal)) { toast('Finish all 3 missions first'); return; }
     const freeze = (load().daily.freezes || 0) < MAX_FREEZES;
     update((d) => { d.missions = { ...missionState(), claimed: true }; d.shells += 150; d.boosters.hammer++; d.boosters.moves++; if (freeze) d.daily.freezes = (d.daily.freezes || 0) + 1; });
     sfx.win();
@@ -1451,7 +1452,7 @@ function showHub() {
     t.textContent = hms(left);
     const tt = $('#u-tide-next');
     if (tt) tt.textContent = hms(left);
-    if (left < 3600000 && !(cozyActive() && isNightTime())) t.parentElement.classList.add('urgent');
+    if (left < 3600000 && !(cozyActive() && isNightTime())) t.closest('.hub-timer')?.classList.add('urgent');
   }, 1000);
   checkRankAlerts(games);
   claimWeeklyPrizes();
@@ -2148,7 +2149,11 @@ async function playArcade(id, { daily, seed: forcedSeed, challenge } = {}) {
   });
   $('#ar-pause', el).onclick = () => { sfx.tap(); pauseMenu(); };
   refresh();
-  if (!arcadeStats(id).games) arcadeHow(id);
+  // first time: a short in-game tip instead of a wall of rules (How to play stays in the menu)
+  if (!arcadeStats(id).games) {
+    const first = (mod.HOW || '').match(/<div class="tip">([\s\S]*?)<\/div>/);
+    if (first) setTimeout(() => toast(first[1].replace(/<[^>]+>/g, '').trim()), 600);
+  }
 }
 
 async function endArcade(run) {
@@ -2677,7 +2682,7 @@ async function endBlocks(run) {
 
 // ------------------------------------------------------------------ leaderboards
 const LB_GAMES = () => [
-  { id: 'tidepop', label: '🐚 Tidepop', boards: [['daily', '📅 Daily Dive'], ['deep', '🐋 Deep Dive'], ['stars', '⭐ Adventure']] },
+  { id: 'tidepop', label: '🐚 Shell Swap', boards: [['daily', '📅 Daily Dive'], ['deep', '🐋 Deep Dive'], ['stars', '⭐ Adventure']] },
   { id: 'reef', label: '🧱 Reef Blocks', boards: [['blocksDaily', '📅 Today'], ['blocks', '🏆 All-time']] },
   ...ARCADE.map((g) => ({ id: g.id, label: `${g.icon} ${g.title}`, boards: g.special ? [[g.id + 'Daily', '📅 Today']] : [[g.id + 'Daily', '📅 Today'], [g.id + 'Week', '🗓️ This week'], [g.id, '🏆 All-time']] })),
 ];
