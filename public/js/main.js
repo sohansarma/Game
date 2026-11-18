@@ -208,6 +208,66 @@ function wireNameField(root, onValid) {
   return check;
 }
 
+// ------------------------------------------------------------------ Cube Twist free solve
+const ao = (times, n) => {
+  if (times.length < n) return null;
+  const last = times.slice(-n).sort((a, b) => a - b);
+  const mid = last.slice(1, -1); // drop best & worst, like official averages
+  return mid.reduce((a, b) => a + b, 0) / mid.length;
+};
+
+async function playCubeFree(n) {
+  leaveGame();
+  try { history.pushState({ g: 1 }, ''); } catch { /* sandboxed */ }
+  const mod = await VIEWS.cube();
+  const { CubeFree } = await import('./arcade/cube.js');
+  const sim = new CubeFree(randSeed(), n);
+  const run = { kind: 'free', id: 'cube', sim };
+  currentRun = run;
+  setBackground(ARCADE_BY_ID.cube.color);
+  const el = showScreen('arcade', `
+    <div class="hud">
+      <button class="icon-btn" id="ar-pause" aria-label="Menu">⏸</button>
+      <div class="box grow arcade-hud" id="ar-hud"></div>
+    </div>
+    <div class="board-wrap"><canvas id="ar-canvas" aria-label="Cube"></canvas></div>
+    <div id="ar-controls" class="arcade-controls"></div>
+    <div class="mode-label" id="ar-label">⏱️ Free solve · ${n}×${n} · not ranked</div>`);
+  applyTable(el, 'cube');
+  const refresh = () => { const box = $('#ar-hud', el); if (box) box.innerHTML = mod.hud(sim).map((h) => `<div class="hstat ${h.big ? 'big' : ''}"><span class="lbl">${esc(String(h.label))}</span><b>${h.value}</b></div>`).join(''); };
+  view = new mod.default({
+    canvas: $('#ar-canvas', el), controls: $('#ar-controls', el), sim, reducedMotion: load().settings.reducedMotion,
+    hooks: {
+      onChange: refresh,
+      onQuit: () => { sim.quit(); showHub(); },
+      onOver: async () => {
+        if (!sim.solved) return showHub();
+        const t = view?.lastTime || 0;
+        const key = 'n' + n;
+        update((d) => { d.cubeTimes = { ...(d.cubeTimes || {}) }; d.cubeTimes[key] = [...(d.cubeTimes[key] || []), Math.round(t * 100) / 100].slice(-100); });
+        const times = load().cubeTimes[key];
+        const best = Math.min(...times), a5 = ao(times, 5), a12 = ao(times, 12);
+        const pb = t <= best;
+        if (pb) sfx.win();
+        const r = await modal(`<h2>🧊 Solved!</h2><div class="big-score">${t.toFixed(2)} s</div>
+          <p class="muted">${sim.cubeMoves} moves${pb && times.length > 1 ? ' · 🎉 new personal best!' : ''}</p>
+          <div class="tide-stats"><div><b>${best.toFixed(2)}</b><span>Best</span></div><div><b>${a5 ? a5.toFixed(2) : '–'}</b><span>ao5</span></div><div><b>${a12 ? a12.toFixed(2) : '–'}</b><span>ao12</span></div><div><b>${times.length}</b><span>Solves</span></div></div>`, {
+          buttons: [{ label: '↻ Next scramble', value: 'again', cls: 'green' }, { label: '🕹️ Arcade', value: null, cls: 'ghost' }],
+        });
+        if (r === 'again') playCubeFree(n);
+        else showHub();
+      },
+    },
+  });
+  $('#ar-pause', el).onclick = async () => {
+    sfx.tap();
+    const r = await modal('<h2>⏸ Free solve</h2>', { buttons: [{ label: '▶ Keep solving', value: null, cls: 'green' }, { label: '↻ New scramble', value: 'new', cls: 'blue' }, { label: '🕹️ Arcade', value: 'hub', cls: 'ghost' }] });
+    if (r === 'new') playCubeFree(n);
+    else if (r === 'hub') showHub();
+  };
+  refresh();
+}
+
 // ------------------------------------------------------------------ Tide of the Day
 function tideDays() {
   return load().tide?.days || {};
@@ -1560,6 +1620,7 @@ async function arcadeMenu(id) {
       { label: g.board ? '▶ Play the ladder' : '▶ Play', value: 'play', cls: 'green' },
       ...(id === 'ludo' ? [{ label: '👥 Pass & play · 2–4 players (offline)', value: 'party', cls: 'blue' }, { label: '🤖 Quick game vs computer', value: 'cpu', cls: 'blue' }] : []),
       ...(id === 'chess' ? [{ label: '👥 Pass & play · 2 players (offline)', value: 'party', cls: 'blue' }, { label: '🤖 Play vs computer', value: 'cpu', cls: 'blue' }] : []),
+      ...(id === 'cube' ? [{ label: '⏱️ Free solve · 3×3 (timer, no limit)', value: 'free3', cls: 'blue' }, { label: '⏱️ Free solve · 2×2', value: 'free2', cls: 'blue' }] : []),
       ...(g.board ? [{ label: '👥 Play a friend', value: 'friend', cls: 'blue' }] : []),
       { label: `📅 Daily challenge${today === undefined ? ' (new!)' : ''}`, value: 'daily', cls: 'blue' },
       { label: '🏆 Leaderboard', value: 'lb', cls: 'ghost' },
@@ -1573,6 +1634,7 @@ async function arcadeMenu(id) {
   else if (r === 'friend') versusMenu(id);
   else if (r === 'cpu') (id === 'chess' ? chessSetup() : ludoVsComputer());
   else if (r === 'party') (id === 'chess' ? chessParty() : ludoParty());
+  else if (r === 'free3' || r === 'free2') playCubeFree(r === 'free3' ? 3 : 2);
 }
 
 /** Chess & Ludo are played on a real-looking wooden table instead of the arcade frame. */

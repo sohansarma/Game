@@ -2,7 +2,7 @@
 //  • swipe across a sticker to turn that layer (middle slices too)
 //  • drag the space around the cube to look around it
 //  • keys: U D L R F B (Shift = counter-clockwise), arrows orbit the view
-import { COLORS, FACE_NORMALS } from './cube.js';
+import { COLORS, FACE_NORMALS, notation } from './cube.js';
 import { sfx, haptic } from '../audio.js';
 
 const AXES = [[1, 0, 0], [0, 1, 0], [0, 0, 1]];
@@ -33,6 +33,8 @@ export default class CubeView {
     this.hits = [];
     this.banner = null;
     this.undoStack = []; // player twists on the current cube
+    this.history = []; // the same, in standard notation
+    this.t0 = 0; // timer starts on the first twist
     this.stageShown = sim.stage;
     this.destroyed = false;
     this.resize();
@@ -174,15 +176,19 @@ export default class CubeView {
     if (!res.ok) { sfx.bad(); return; }
     haptic(8);
     sfx.swap();
-    if (!isUndo) this.undoStack.push([axis, layer, dir]);
+    if (!isUndo) { this.undoStack.push([axis, layer, dir]); this.history.push(notation(this.sim.plan.n, axis, layer, dir)); }
+    if (!this.t0) this.t0 = performance.now();
     if (res.solved) {
       // show the finished cube for a moment, then the next scramble
       this.anim = null;
       this.undoStack = [];
-      this.banner = { text: `Solved in ${res.moves} twists! +${res.reward}`, t0: performance.now(), good: true };
+      this.lastTime = (performance.now() - (this.t0 || performance.now())) / 1000;
+      this.history = [];
+      this.t0 = 0;
+      this.banner = { text: res.free ? `Solved in ${this.lastTime.toFixed(2)} s · ${res.moves} moves!` : `Solved in ${res.moves} twists · ${this.lastTime.toFixed(1)} s! +${res.reward}`, t0: performance.now(), good: true };
       sfx.win();
       haptic(40);
-      setTimeout(() => { if (!this.destroyed) this.showStageBanner(); }, 1300);
+      if (!res.free) setTimeout(() => { if (!this.destroyed) this.showStageBanner(); }, 1300);
     } else {
       this.anim = { axis, layer, dir, t0: performance.now(), dur: this.reduced ? 1 : 170 };
     }
@@ -192,20 +198,33 @@ export default class CubeView {
   }
 
   undo() {
-    const t = this.undoStack.pop();
-    if (!t) return;
-    this.doTwist(t[0], t[1], -t[2], true);
+    const res = this.sim.undo?.();
+    if (!res?.ok) return;
+    this.undoStack.pop();
+    this.history.pop();
+    if (this.anim) this.anim.t0 = -1e9;
+    const [axis, layer, dir] = res.t;
+    this.anim = { axis, layer, dir, t0: performance.now(), dur: this.reduced ? 1 : 150 };
+    sfx.swap();
+    this.renderControls();
+    this.hooks.onChange?.(this.sim);
   }
 
   showStageBanner() {
     const p = this.sim.plan;
-    this.banner = { text: `Cube #${this.sim.stage} · ${p.n}×${p.n} · ${p.depth}-twist scramble`, t0: performance.now() };
+    this.banner = this.sim.free
+      ? { text: `Free solve · ${p.n}×${p.n} · timer starts on your first move`, t0: performance.now() }
+      : { text: `Cube ${this.sim.stage} of 20 · ${p.n}×${p.n} · ${p.depth}-twist scramble`, t0: performance.now() };
   }
 
   renderControls() {
     const s = this.sim;
-    this.controls.innerHTML = `<div class="col" style="gap:6px;width:100%;align-items:center"><div class="row" style="gap:8px;flex-wrap:wrap;justify-content:center">
-      <button class="btn sm ghost" data-a="undo" ${this.undoStack.length && !s.over ? '' : 'disabled'}>↶ Undo</button>
+    const hist = this.history.slice(-14).join(' ');
+    this.controls.innerHTML = `<div class="col" style="gap:6px;width:100%;align-items:center">
+      ${s.free ? `<div class="cube-scramble small"><b>Scramble:</b> ${s.scramble.join(' ')}</div>` : ''}
+      <div class="cube-moves small" aria-label="Your moves">${hist ? `<b>Moves:</b> ${hist}` : '<span class="muted">Your moves appear here in standard notation</span>'}</div>
+      <div class="row" style="gap:8px;flex-wrap:wrap;justify-content:center">
+      <button class="btn sm ghost" data-a="undo" ${this.undoStack.length && !s.over ? '' : 'disabled'}>↶ Undo (free)</button>
       <button class="btn sm ghost" data-a="view">🔄 Reset view</button>
       <button class="btn sm ghost" data-a="quit">🏁 Stop</button></div>
       <div class="small center muted">Swipe a sticker to turn its layer · drag around the cube to look around</div></div>`;
@@ -290,10 +309,20 @@ export default class CubeView {
         ctx.fillStyle = gl;
         ctx.fill();
         if (!a) hits.push({ poly: body.map(([x, y]) => [x, y]), depth: this.proj(fc)[2], p: cb.p.slice(), n: nrm });
+        else if (!(a && cb.p[a.axis] === a.layer)) hits.push({ poly: body.map(([x, y]) => [x, y]), depth: this.proj(fc)[2], p: cb.p.slice(), n: nrm });
       }
     }
-    this.hits = hits;
+    // during a turn, keep the turning layer's last known hit areas so fast swipes still land
+    this.hits = a ? [...hits, ...(this.lastHits || []).filter((h) => h.p[a.axis] === a.layer)] : hits;
+    if (!a) this.lastHits = hits;
     this.drawBanner(now);
+    // live solve timer + move counter
+    const secs = this.t0 ? (now - this.t0) / 1000 : 0;
+    ctx.font = '800 15px ui-monospace, Menlo, monospace';
+    ctx.textAlign = 'right';
+    ctx.textBaseline = 'top';
+    ctx.fillStyle = 'rgba(255,255,255,0.85)';
+    ctx.fillText(`⏱ ${secs.toFixed(1)}s · ${this.sim.cubeMoves} move${this.sim.cubeMoves === 1 ? "" : "s"}`, this.W - 10, this.H - 26);
   }
 
   drawBanner(now) {
@@ -339,6 +368,7 @@ function roundedPoly(ctx, pts, r) {
 
 export function hud(sim) {
   const p = sim.plan;
+  if (sim.free) return [{ label: 'Mode', value: 'Free solve', big: true }, { label: 'Cube', value: `${p.n}×${p.n}` }, { label: 'Moves', value: sim.cubeMoves }];
   return [
     { label: 'Score', value: sim.score.toLocaleString('en-US'), big: true },
     { label: 'Twists', value: `🔄 ${sim.twists}`, warn: sim.twists <= 10 },

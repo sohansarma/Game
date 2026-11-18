@@ -84,6 +84,8 @@ export function decodeTwist(layers, code) {
 }
 const same = (a, b) => a[0] === b[0] && a[1] === b[1] && a[2] === b[2];
 
+export const RUN_CUBES = 20;
+
 /** Stage plan: cube size, scramble depth and twist allowance. */
 export function stagePlan(stage) {
   if (stage === 1) return { n: 2, depth: 3, allow: 30 };
@@ -93,7 +95,7 @@ export function stagePlan(stage) {
   const i = stage - 4;
   if (i < DEPTHS.length) return { n: 3, depth: DEPTHS[i], allow: DEPTHS[i] * 5 + 15 };
   // full scrambles from stage 14 on, with a shrinking allowance
-  return { n: 3, depth: 25, allow: Math.max(45, 140 - (stage - 14) * 8) };
+  return { n: 3, depth: 25, allow: Math.max(70, 140 - (stage - 14) * 6) };
 }
 
 class CubeRun {
@@ -135,6 +137,23 @@ class CubeRun {
     }
     this.twists += plan.allow;
     this.cubeMoves = 0;
+    this.mine = []; // your twists on this cube (for free undo)
+    this.startTick = null;
+  }
+
+  /** Undo your last twist on this cube – free (the twist is refunded). */
+  undo() {
+    if (this.over || !this.mine.length) return { ok: false };
+    const t = this.mine.pop();
+    const inv = inverse(t);
+    this.log.push(['u']);
+    this.cube.twist(...inv);
+    const top = this.stack[this.stack.length - 1];
+    if (top && same(top, t)) this.stack.pop();
+    else this.stack.push(inv);
+    this.twists++;
+    this.cubeMoves--;
+    return { ok: true, t: inv };
   }
 
   /** Player twist. Returns { ok, solved?, reward? }. */
@@ -149,6 +168,7 @@ class CubeRun {
     else this.stack.push(t);
     this.twists--;
     this.cubeMoves++;
+    this.mine.push(t);
     const res = { ok: true, solved: false };
     if (this.cube.solved()) {
       const p = this.plan;
@@ -158,6 +178,14 @@ class CubeRun {
       res.solved = true;
       res.reward = reward;
       res.moves = this.cubeMoves;
+      if (this.stage >= RUN_CUBES) {
+        // a full run is 20 cubes – finishing all of them is the goal
+        this.points += 500 + this.twists * 2;
+        this.over = true;
+        this.overReason = `All ${RUN_CUBES} cubes solved! 🏆`;
+        res.complete = true;
+        return res;
+      }
       this.nextCube();
     } else if (this.twists <= 0) {
       this.over = true;
@@ -181,10 +209,74 @@ function replay(seed, log) {
     let r;
     if (typeof a === 'number') { const t = decodeTwist(sim.cube.layers, a); r = t ? sim.twist(...t) : { ok: false }; }
     else if (Array.isArray(a) && a[0] === 'q') { sim.quit(); r = { ok: true }; }
+    else if (Array.isArray(a) && a[0] === 'u') r = sim.undo();
     else return { ok: false, reason: 'unknown action', sim };
     if (!r.ok) return { ok: false, reason: 'invalid action', sim };
   }
   return { ok: true, sim };
+}
+
+/** Standard notation for a twist (U D L R F B, M E S for 3x3 middles, ' = counter-clockwise). */
+export function notation(n, axis, layer, dir) {
+  const hi = n === 2 ? 1 : 2, lo = -hi;
+  // [axis][layer] -> [letter, dir that is clockwise for that face]
+  const map = {
+    0: { [hi]: ['R', -1], [lo]: ['L', 1], 0: ['M', 1] },
+    1: { [hi]: ['U', -1], [lo]: ['D', 1], 0: ['E', 1] },
+    2: { [hi]: ['F', -1], [lo]: ['B', 1], 0: ['S', -1] },
+  };
+  const [f, cw] = map[axis][layer];
+  return f + (dir === cw ? '' : "'");
+}
+
+/** Free solve: one full scramble, no twist limit – just you, a timer and your moves. */
+export class CubeFree {
+  constructor(seed, n = 3) {
+    const rng = new Rng(seed >>> 0);
+    this.plan = { n, depth: n === 2 ? 11 : 25, allow: Infinity };
+    this.stage = 1;
+    this.cube = new Cube(n);
+    this.stack = [];
+    this.scramble = [];
+    let lastAxis = -1;
+    const layers = this.cube.layers.filter((l) => l !== 0); // outer turns only, like a real scramble
+    while (this.cube.solved() || this.scramble.length < this.plan.depth) {
+      let axis = rng.int(3);
+      if (axis === lastAxis) axis = (axis + 1 + rng.int(2)) % 3;
+      lastAxis = axis;
+      const t = [axis, layers[rng.int(layers.length)], rng.next() < 0.5 ? 1 : -1];
+      this.cube.twist(...t);
+      this.scrambleRaw = [...(this.scrambleRaw || []), t];
+      this.scramble.push(notation(n, ...t));
+      if (this.scramble.length > 60) break;
+    }
+    this.twists = Infinity;
+    this.cubeMoves = 0;
+    this.points = 0;
+    this.mine = [];
+    this.log = [];
+    this.over = false;
+    this.solved = false;
+    this.free = true;
+  }
+  get score() { return 0; }
+  twist(axis, layer, dir) {
+    if (this.over || !this.cube.validTwist(axis, layer, dir)) return { ok: false };
+    this.cube.twist(axis, layer, dir);
+    this.mine.push([axis, layer, dir]);
+    this.cubeMoves++;
+    if (this.cube.solved()) { this.over = true; this.solved = true; this.overReason = 'Solved!'; return { ok: true, solved: true, moves: this.cubeMoves, free: true }; }
+    return { ok: true, solved: false };
+  }
+  undo() {
+    if (this.over || !this.mine.length) return { ok: false };
+    const t = this.mine.pop();
+    const inv = inverse(t);
+    this.cube.twist(...inv);
+    this.cubeMoves--;
+    return { ok: true, t: inv };
+  }
+  quit() { this.over = true; this.overReason = 'Stopped'; }
 }
 
 export default {

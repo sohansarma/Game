@@ -586,3 +586,4 @@ body.cozy .btn, body.cozy .game-card .tag, body.cozy .seg-btn.on { filter: none;
 
 /* vibe sheet: Done always reachable */
 .modal .sheet > .actions { position: sticky; bottom: -1px; padding-top: 10px; background: inherit; }
+.cube-scramble, .cube-moves { font-family: ui-monospace, Menlo, monospace; text-align: center; padding: 4px 8px; border-radius: 10px; background: rgba(0,0,0,.18); max-width: 100%; overflow-wrap: anywhere; }
