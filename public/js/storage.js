@@ -194,6 +194,8 @@ export function mergeSaves(a, b, { firstMerge = false } = {}) {
     m.chessRecord = { ...(older.chessRecord || {}) };
     for (const [lvl, r] of Object.entries(newer.chessRecord || {})) m.chessRecord[lvl] = maxPerKey(m.chessRecord[lvl], r);
   }
+  // Tide Pool: never lose an item; the layout follows the newer save
+  if (a.pool || b.pool) m.pool = { ...(newer.pool || older.pool), owned: { ...(older.pool?.owned || {}), ...(newer.pool?.owned || {}) }, placed: { ...((newer.pool || older.pool)?.placed || {}) } };
   // first sync on a newly signed-in device: never lose shells or boosters to a fresh default save
   if (firstMerge) {
     m.shells = maxNum(a.shells, b.shells);

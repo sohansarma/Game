@@ -15,6 +15,7 @@ import { MatchView } from './matchview.js';
 import { BlocksView } from './blocksview.js';
 import { iconURL, PALETTE, clearSpriteCache } from './creatures.js';
 import { sfx, unlockAudio, configureAudio, haptic, purr } from './audio.js';
+import { SLOTS as POOL_SLOTS, ITEMS as POOL_ITEMS, ITEM as POOL_ITEM, comfortOf, comfortBonus, found as poolFound, newlyFound, drawPool } from './pool.js';
 import { startCloud, syncNow, cloudAccount, cloudStatus, onCloudChange, signUp, logIn, logOut, recoverAccount, changePassword, deleteAccount, setClaudeSync } from './cloud.js';
 import { configureCozy, cozyActive, cozySleeping, wakeCozy, onSleep, isNightTime, cozySound } from './cozy.js';
 import * as api from './api.js';
@@ -159,6 +160,115 @@ function wireNameField(root, onValid) {
   input.oninput = check;
   $('#nf-roll', root).onclick = () => { input.value = randomNickname(); sfx.tap(); check(); };
   return check;
+}
+
+// ------------------------------------------------------------------ Tide Pool home
+let poolRaf = null;
+function poolState() {
+  const s = load();
+  if (!s.pool) {
+    // a small housewarming gift so the cove isn't empty
+    update((d) => { d.pool = { owned: { towel: 1, candle: 1 }, placed: { rug: 'towel', light: 'candle' } }; });
+  }
+  return load().pool;
+}
+
+function showPool(slotId = 'sky') {
+  leaveGame();
+  setBackground(['#4fc3f7', '#1e88e5']);
+  poolState();
+  let selected = slotId;
+  const el = showScreen('pool', `
+    <div class="topbar"><button class="icon-btn" id="p-back" aria-label="Back">←</button><h2 class="grow">🏝️ Your Tide Pool</h2><span class="pill" id="p-shells"></span></div>
+    <div class="scroll">
+      <div class="pool-comfort" id="p-comfort"></div>
+      <div class="pool-stage"><canvas id="p-canvas" aria-label="Your tide pool – tap a spot to decorate it"></canvas></div>
+      <p class="small muted center" style="margin:6px 0 2px">Tap a spot in your cove to decorate it · tap Pip to say hi</p>
+      <div class="pool-slots" id="p-slots"></div>
+      <div id="p-items"></div>
+    </div>`);
+  const canvas = $('#p-canvas', el);
+  const ctx = canvas.getContext('2d');
+  let hits = [];
+  const fit = () => {
+    const r = canvas.getBoundingClientRect();
+    const dpr = Math.min(window.devicePixelRatio || 1, 2.5);
+    canvas.width = Math.round(r.width * dpr); canvas.height = Math.round(r.height * dpr);
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  };
+  fit();
+  const render = () => {
+    const s = load();
+    const c = comfortOf(s.pool);
+    $('#p-shells', el).textContent = `🐚 ${fmt(s.shells)}`;
+    $('#p-comfort', el).innerHTML = `<b>Comfort ${'⭐'.repeat(c.level)}${'☆'.repeat(5 - c.level)}</b><span class="small">${c.level ? `+${c.level * 5} 🐚 on every daily treasure` : 'Decorate to earn a daily bonus'}${c.next ? ` · next star at ${c.next} comfort (now ${c.pts})` : ' · the coziest cove there is!'}</span>`;
+    $('#p-slots', el).innerHTML = POOL_SLOTS.map((sl) => `<button class="seg-btn ${sl.id === selected ? 'on' : ''}" data-slot="${sl.id}">${POOL_ITEM[s.pool.placed[sl.id]]?.icon || '＋'} ${sl.name}</button>`).join('');
+    const items = POOL_ITEMS.filter((i) => i.slot === selected);
+    $('#p-items', el).innerHTML = `<div class="pool-items">${items.map((it) => {
+      const owned = !!s.pool.owned[it.id];
+      const placed = s.pool.placed[selected] === it.id;
+      const ok = poolFound(it, s);
+      const state = placed ? '<span class="pi-state on">✓ Placed</span>'
+        : owned ? '<span class="pi-state">Place</span>'
+        : it.find ? (ok ? '<span class="pi-state new">🎁 Found! Collect</span>' : `<span class="pi-state lock">🔍 ${esc(it.find.text)}</span>`)
+        : `<span class="pi-state ${s.shells >= it.price ? 'buy' : 'lock'}">🐚 ${it.price}</span>`;
+      return `<button class="pool-item ${placed ? 'placed' : ''}" data-item="${it.id}"><span class="pi-icon">${it.icon}</span><b>${esc(it.name)}</b><span class="small muted">+${it.comfort} comfort${it.glow ? ' · glows' : ''}</span>${state}</button>`;
+    }).join('')}</div>${s.pool.placed[selected] ? '<button class="btn sm ghost" id="p-clear" style="margin-top:8px">Leave this spot empty</button>' : ''}`;
+    for (const b of $$('[data-slot]', el)) b.onclick = () => { selected = b.dataset.slot; sfx.tap(); render(); };
+    for (const b of $$('[data-item]', el)) b.onclick = () => pickItem(b.dataset.item);
+    $('#p-clear', el)?.addEventListener('click', () => { update((d) => { delete d.pool.placed[selected]; }); sfx.tap(); render(); });
+  };
+  const pickItem = async (id) => {
+    const it = POOL_ITEM[id];
+    const s = load();
+    if (s.pool.owned[id]) {
+      update((d) => { d.pool.placed[it.slot] = id; });
+      sfx.place();
+      haptic(10);
+    } else if (it.find) {
+      if (!poolFound(it, s)) { toast(`🔍 ${it.find.text} to find the ${it.name}`); sfx.bad(); return; }
+      update((d) => { d.pool.owned[id] = 1; d.pool.placed[it.slot] = id; });
+      sfx.win();
+      toast(`🎁 You found the ${it.name}!`);
+    } else {
+      if (s.shells < it.price) { toast(`You need ${it.price - s.shells} more 🐚 – play any game to earn shells`); sfx.bad(); return; }
+      const ok = await modal(`<h2>${it.icon} ${esc(it.name)}</h2><p>Add it to your cove for <b>${it.price} 🐚</b>? (+${it.comfort} comfort)</p>`, { buttons: [{ label: `Buy for ${it.price} 🐚`, value: true, cls: 'green' }, { label: 'Not now', value: false, cls: 'ghost' }], row: true });
+      if (!ok) return;
+      update((d) => { d.shells -= it.price; d.pool.owned[id] = 1; d.pool.placed[it.slot] = id; });
+      sfx.coin();
+      haptic(20);
+    }
+    const before = comfortOf(s.pool).level, after = comfortOf(load().pool).level;
+    if (after > before) { sfx.win(); toast(`⭐ Your cove is cozier! Daily treasure bonus is now +${after * 5} 🐚`); }
+    render();
+  };
+  canvas.onpointerdown = (e) => {
+    const r = canvas.getBoundingClientRect();
+    const x = e.clientX - r.left, y = e.clientY - r.top;
+    // Pip first (he sits on top), then the smallest spot under the finger
+    const hit = hits.filter((h) => x >= h.x && x <= h.x + h.w && y >= h.y && y <= h.y + h.h).sort((a, b) => (a.id === 'pip' ? -1 : b.id === 'pip' ? 1 : a.w - b.w))[0];
+    if (!hit) return;
+    if (hit.id === 'pip') { purr(); haptic(12); toast(['🦦 Pip wiggles happily', '🦦 Purrrr…', '🦦 Pip rolls over for a belly rub', '🦦 Pip loves the new look!'][Math.floor(Math.random() * 4)]); return; }
+    selected = hit.id;
+    sfx.tap();
+    render();
+    $('#p-items', el)?.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+  };
+  window.addEventListener('resize', fit);
+  cancelAnimationFrame(poolRaf);
+  const frame = () => {
+    if (currentScreen() !== 'pool' || !document.body.contains(canvas)) { window.removeEventListener('resize', fit); return; }
+    const r = canvas.getBoundingClientRect();
+    const sound = cozySound();
+    hits = drawPool(ctx, r.width, r.height, load().pool, { night: cozyActive(), raining: cozyActive() && (sound === 'rain' || sound === 'rainfire'), highlight: selected, showEmpty: true });
+    poolRaf = requestAnimationFrame(frame);
+  };
+  poolRaf = requestAnimationFrame(frame);
+  $('#p-back', el).onclick = () => { sfx.tap(); showHub(); };
+  render();
+  // anything found by playing since last time?
+  const finds = newlyFound(load());
+  if (finds.length) setTimeout(() => toast(`🎁 You found ${finds.length === 1 ? `the ${finds[0].name}` : `${finds.length} new items`} while playing – collect ${finds.length === 1 ? 'it' : 'them'} in the list!`), 500);
 }
 
 // ------------------------------------------------------------------ accounts & cloud save
@@ -445,15 +555,16 @@ function claimDaily(silent) {
   if (!st.canClaim) return null;
   const reward = DAILY_REWARDS[(st.streak - 1) % 7];
   const welcome = st.away >= 3 ? 40 + Math.min(10, st.away) * 10 : 0; // welcome back after a break
+  const cove = comfortBonus(load().pool);
   update((d) => {
     d.daily.lastClaim = localDay();
     d.daily.streak = st.streak;
     if (st.usedFreezes) d.daily.freezes = Math.max(0, (d.daily.freezes || 0) - st.usedFreezes);
-    d.shells += (reward.shells || 0) + welcome;
+    d.shells += (reward.shells || 0) + welcome + cove;
     for (const k of ['hammer', 'shuffle', 'moves']) d.boosters[k] += reward[k] || 0;
   });
   if (!silent) sfx.coin();
-  return { ...reward, welcome };
+  return { ...reward, welcome, cove };
 }
 
 function rewardText(r) {
@@ -476,10 +587,11 @@ async function maybeDailyReward() {
     <p class="muted">Streak: <b>🔥 ${st.streak} day${st.streak > 1 ? 's' : ''}</b>${st.freezes ? ` · 🧊 ${st.freezes} freeze${st.freezes > 1 ? 's' : ''}` : ''}. Come back tomorrow for more!</p>
     ${note}
     <div class="calendar">${cal}</div>
+    ${comfortBonus(load().pool) ? `<p class="small">🏝️ Your cozy cove adds <b>+${comfortBonus(load().pool)} 🐚</b> to every daily treasure.</p>` : ''}
     <p class="small muted">🧊 Open the daily mission chest to earn streak freezes (hold up to ${MAX_FREEZES}). They protect your streak if you miss a day.</p>`, { buttons: [{ label: 'Claim!', value: 'claim', cls: 'green' }] });
   if (res === 'claim') {
     const r = claimDaily();
-    toast(`Got ${rewardText(r)}${r.welcome ? ` + 🐚 ${r.welcome} welcome gift` : ''}`);
+    toast(`Got ${rewardText(r)}${r.welcome ? ` + 🐚 ${r.welcome} welcome gift` : ''}${r.cove ? ` + 🐚 ${r.cove} cozy cove bonus` : ''}`);
     announceAchievements();
     if (currentScreen() === 'home') goHome();
     if (currentScreen() === 'hub') showHub();
@@ -1086,6 +1198,7 @@ function showHub() {
         ${ms.claimed ? '<p class="small muted center">Chest claimed – new missions at reset!</p>' : `<button class="btn wide ${allDone ? 'green' : 'ghost'}" id="u-chest" ${allDone ? '' : 'disabled'}>${allDone ? '🎁 Open the mission chest' : 'Complete all 3 to open the chest'}</button>`}
       </div>
       <div class="community-row">
+        <button class="card pool-card" id="u-pool">${newlyFound(load()).length ? '<span class="tag">New find!</span>' : ''}<span class="emoji">🏝️</span><b>Your Tide Pool</b><span class="sub">${(() => { const c = comfortOf(load().pool); return `${'⭐'.repeat(c.level) || 'Decorate your cozy cove'}${c.level ? ` · +${c.level * 5} 🐚 a day` : ''}`; })()}</span></button>
         <button class="card" id="u-community"><span class="emoji">🌟</span><b>Community games</b><span class="sub">Made by players · play, rate & compete</span></button>
         <button class="card" id="u-studio"><span class="emoji">🛠️</span><b>Creator Studio</b><span class="sub">Build your own game – no coding</span></button>
       </div>
@@ -1109,6 +1222,7 @@ function showHub() {
   on('#u-hot', () => hot.open());
   on('#u-community', () => showCommunity());
   on('#u-studio', () => showStudio());
+  on('#u-pool', () => showPool());
   on('#u-chest', () => {
     const freeze = (load().daily.freezes || 0) < MAX_FREEZES;
     update((d) => { d.missions = { ...missionState(), claimed: true }; d.shells += 150; d.boosters.hammer++; d.boosters.moves++; if (freeze) d.daily.freezes = (d.daily.freezes || 0) + 1; });

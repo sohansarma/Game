@@ -122,4 +122,10 @@ test('merging two saves keeps the best progress from both', () => {
   // a brand-new device logging in must not wipe the wallet with its default 50 shells
   const cloud = { ...defaultSave(), shells: 777, updatedAt: 1000 }, fresh = { ...defaultSave(), updatedAt: 5000 };
   assert.equal(mergeSaves(cloud, fresh, { firstMerge: true }).shells, 777);
+  // Tide Pool items are never lost between devices; layout follows the newer save
+  const p1 = { ...defaultSave(), updatedAt: 10, pool: { owned: { towel: 1, palm: 1 }, placed: { rug: 'towel', plantL: 'palm' } } };
+  const p2 = { ...defaultSave(), updatedAt: 20, pool: { owned: { towel: 1, kite: 1 }, placed: { sky: 'kite' } } };
+  const pm = mergeSaves(p1, p2);
+  assert.deepEqual(Object.keys(pm.pool.owned).sort(), ['kite', 'palm', 'towel']);
+  assert.deepEqual(pm.pool.placed, { sky: 'kite' });
 });

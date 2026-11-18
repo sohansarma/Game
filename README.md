@@ -55,6 +55,10 @@ You open the app into the **Arcade hub**. It's built to bring you back every day
 
 **How the games are built:** each arcade game is a pure, deterministic simulation in `public/js/arcade/<game>.js`; the drawing and input code is in `<game>-view.js`. Turn-based games log moves. Real-time games run at a fixed 60 ticks per second and log only `[tick, input]`. The server, or the shared leaderboard in the hosted copy, replays the log with the same file to get the true score. A forged log can't stall the server: input that's out of sync with the replay, or a run over one hour long, is rejected.
 
+## 🏝️ Tide Pool (your cozy home)
+
+Every player has their own cove (Arcade → **Your Tide Pool**): a scene drawn in code whose sky follows the real time of day, with rain, glowing lanterns and a flickering campfire in cozy mode. Shells earned in **any** game buy decor for 10 spots (sky, rocks, plants, pool, Pip's bed, light, seat, rug); 34 items, 7 of which can't be bought and are **found by playing** specific games (e.g. a chess set for playing Chess, a shell bed for trying 5 different games). Placed items add **comfort**; each comfort star adds +5 🐚 to every daily treasure. Pip the otter naps in whatever bed you choose. Owned items are merged as a union across devices, so nothing is lost in cloud sync. Code: `public/js/pool.js`.
+
 ## 🌧️ Cozy rain (night mode)
 
 Settings → **Cozy rain** (or the 🌙 button on the Arcade): soft rain and distant thunder for late-night play, synthesised live with WebAudio (no audio files). Rain falls behind the game, a gentle sky glow comes a moment before each roll of thunder (no flashes with *Reduced motion*), game sounds and music get quieter, and a **sleep timer** (15 min – 1½ h) fades everything out. *Only at night* switches it on automatically between 9 pm and 6 am. Night-time players are offered it once.
