@@ -21,6 +21,7 @@ import { startCloud, syncNow, cloudAccount, cloudStatus, onCloudChange, signUp, 
 import { configureCozy, cozyActive, cozySleeping, wakeCozy, onSleep, isNightTime, cozySound, VIBES, VIBE } from './cozy.js';
 import * as api from './api.js';
 import * as live from './liveops.js';
+import { DIVISIONS, PROMOTE, DEMOTE } from './league.js';
 import { ACHIEVEMENTS, checkAchievements } from './achievements.js';
 import { $, $$, esc, fmt, showScreen, currentScreen, modal, closeModal, isModalOpen, toast, starsHtml, setBackground } from './ui.js';
 
@@ -1614,6 +1615,40 @@ function showRewards(title, lines) {
   });
 }
 
+async function leagueResult(r) {
+  const was = DIVISIONS[r.division] || DIVISIONS[0], now = DIVISIONS[r.division + r.move] || was;
+  const ok = await modal(`<h2>🏅 Last week's league</h2>
+    <div class="big-score">#${r.rank}</div><p class="muted">of ${r.size} in ${was.icon} ${was.name}</p>
+    ${r.move > 0 ? `<div class="reward">⬆️ Promoted to ${now.icon} ${now.name}!</div>` : r.move < 0 ? `<p>⬇️ Back to ${now.icon} ${now.name} – you'll bounce back.</p>` : `<p>You stay in ${was.icon} ${was.name}.</p>`}
+    ${r.shells ? `<div class="reward">+${r.shells} 🐚</div>` : ''}`, { buttons: [{ label: r.shells ? 'Collect' : 'OK', value: 'ok', cls: 'green' }] });
+  if (!ok) return;
+  try {
+    const res = await api.league.claim();
+    if (res?.shells) { update((d) => { d.shells += res.shells; }); sfx.win(); toast(`+${res.shells} 🐚 from the league`); }
+  } catch { /* try again next time */ }
+  if (currentScreen() === 'hub') showHub();
+}
+
+async function showLeague() {
+  leaveGame();
+  const el = showScreen('league', `
+    <div class="topbar"><button class="icon-btn" id="lg-back" aria-label="Back">←</button><h2 class="grow">🏅 Weekly league</h2><span class="pill">${weekLeft()} left</span></div>
+    <div class="scroll"><div id="lg-body"><p class="center muted">Loading…</p></div></div>`);
+  $('#lg-back', el).onclick = () => { sfx.tap(); showHub(); };
+  let lg;
+  try { lg = await api.league.get(); } catch { $('#lg-body', el).innerHTML = `<div class="tip">${api.inArtifact() ? 'Sign in to Claude to join leagues.' : "📡 Can't reach the league right now."}</div>`; return; }
+  if (currentScreen() !== 'league') return;
+  const dv = DIVISIONS[lg.division] || DIVISIONS[0];
+  const n = lg.group.length;
+  $('#lg-body', el).innerHTML = `
+    <div class="card" style="text-align:left"><b>${dv.icon} ${dv.name} division</b>
+      <p class="small muted">Every game you finish (with leaderboards on) earns <b>10 points</b> – up to 30 games a day – and beating your own best on a board earns <b>20 more</b>. When the week ends, the top ${PROMOTE} move up a division and the bottom ${DEMOTE} move down (in leagues of 10 or more). Top 3 win 🐚 400 / 300 / 200.</p></div>
+    ${lg.joined ? `<div class="league-list">${lg.group.map((m, i) => {
+      const zone = n >= 10 && i < PROMOTE ? 'up' : n >= 10 && i >= n - DEMOTE ? 'down' : '';
+      return `<div class="league-row ${zone} ${m.me ? 'me' : ''}"><b>${i + 1}</b><span class="grow">${esc(m.name)}${m.me ? ' (you)' : ''}</span><span>${fmt(m.pts)} pts</span></div>`;
+    }).join('')}</div>` : '<div class="tip">You\'re not in a league yet this week – finish any game with leaderboards on to join one.</div>'}`;
+}
+
 function showPass() {
   leaveGame();
   const day = dayKey(), season = live.seasonAt(day), p = live.passState(load(), season);
@@ -1734,6 +1769,7 @@ function showHub() {
         ${weeklyHtml()}
       </div>
       ${passCardHtml()}
+      ${load().settings.leaderboard ? `<button class="card league-card" id="u-league"><span class="row" style="gap:10px;width:100%"><span class="emoji" aria-hidden="true">🏅</span><span class="grow" style="text-align:left"><b>Weekly league</b><span class="sub" id="u-league-sub">Play any game to join a league of up to 30 · top ${PROMOTE} move up</span></span></span></button>` : ''}
       <div class="community-row">
         <button class="card pool-card" id="u-pool">${newlyFound(load()).length ? '<span class="tag">New find!</span>' : ''}<span class="emoji" aria-hidden="true">🏝️</span><b>Your Cozy Cove</b><span class="sub">${(() => { const c = comfortOf(load().pool); return `${'⭐'.repeat(c.level) || 'Decorate your own little cove'}${c.level ? ` · +${c.level * 5} 🐚 a day` : ''}`; })()}</span></button>
         <button class="card" id="u-community"><span class="emoji" aria-hidden="true">🌟</span><b>Community games</b><span class="sub">Made by players · play, rate & compete</span></button>
@@ -1756,6 +1792,15 @@ function showHub() {
   on('#u-studio', () => showStudio());
   on('#u-pool', () => showPool());
   on('#u-pass', () => showPass());
+  on('#u-league', () => showLeague());
+  if ($('#u-league', el)) api.league.get().then((lg) => {
+    const sub = $('#u-league-sub');
+    if (!sub || currentScreen() !== 'hub') return;
+    const dv = DIVISIONS[lg.division] || DIVISIONS[0];
+    const me = lg.group.findIndex((m) => m.me) + 1;
+    sub.textContent = lg.joined ? `${dv.icon} ${dv.name} · you're #${me} of ${lg.group.length} with ${lg.group[me - 1]?.pts || 0} pts · ends in ${weekLeft()}` : `${dv.icon} ${dv.name} division · play any game to join this week's league`;
+    if (lg.last && !lg.last.claimed && !isModalOpen()) leagueResult(lg.last);
+  }).catch(() => {});
   on('#u-album', () => showAlbum());
   on('#u-wardrobe', () => showWardrobe());
   on('#u-weekly', () => {

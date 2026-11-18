@@ -43,7 +43,7 @@ function playBlocks(seed) {
 
 async function register(name = 'Happy Otter 12') {
   const r = await post('/api/register', { playerId: 'client-' + Math.random().toString(36).slice(2), name });
-  assert.equal(r.status, 200);
+  assert.equal(r.status, 200, `${name}: ${JSON.stringify(r.body)}`);
   return r.body;
 }
 
@@ -246,4 +246,33 @@ test('anonymous usage counts: only known events, tallied per day, team-only read
   delete process.env.ADMIN_KEY;
   assert.equal(m[dayKey()].game.puffer, 2);
   assert.ok(!JSON.stringify(m).includes('playerId'), 'no ids stored');
+});
+
+test('weekly leagues: verified runs earn points, groups of 30 per division, last week settles once', async () => {
+  const L = await import('../public/js/league.js');
+  const players = [];
+  for (let i = 0; i < 12; i++) players.push(await register(`Kind Fish ${10 + i}`));
+  // everyone plays endless Reef Blocks runs (verified by replay)
+  for (let i = 0; i < players.length; i++) {
+    for (let k = 0; k <= i % 3; k++) {
+      const seed = 5000 + i * 10 + k;
+      const g = playBlocks(seed);
+      const res = await post('/api/scores', { board: 'blocks', key: 'all', seed, log: g.log, score: g.score, v: ENGINE_VERSION, playerId: players[i].playerId, token: players[i].token });
+      assert.equal(res.status, 200, JSON.stringify(res.body));
+    }
+  }
+  const lg = (await get(`/api/league?playerId=${players[0].playerId}`)).body;
+  assert.equal(lg.joined, true);
+  assert.ok(lg.group.length >= 2 && lg.group.length <= L.GROUP_SIZE);
+  assert.ok(lg.group.every((m) => m.pts >= L.RUN_POINTS));
+  assert.ok(!JSON.stringify(lg).includes('pid'), 'no player ids leak');
+  // pure helpers
+  assert.equal(L.movement(1, 30, 0), 1);
+  assert.equal(L.movement(30, 30, 2), -1);
+  assert.equal(L.movement(30, 30, 0), 0, 'no demotion below Bronze');
+  assert.equal(L.movement(1, 5, 0), 0, 'tiny leagues don\'t move');
+  const st = {};
+  let pts = 0;
+  for (let i = 0; i < 40; i++) pts += L.pointsFor(st, 'D', false);
+  assert.equal(pts, L.RUN_POINTS * L.RUNS_PER_DAY, 'daily cap');
 });

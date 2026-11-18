@@ -44,7 +44,8 @@ export function nameProblem(raw) {
   if (/(https?|www\.|\.(com|net|org|io|in|co|gg|me|xyz|app)\b)/i.test(name)) return 'No links, please';
   if (/\d{5,}/.test(name.replace(/[\s._-]/g, ''))) return 'No phone numbers or long numbers';
   const lower = name.toLowerCase();
-  const plain = lower.replace(/[0-9@$!|]/g, (c) => LEET[c] || c);
+  // leetspeak only inside words ("sh1t"); a separate number ("Fish 17") is just a number
+  const plain = lower.split(/([\s._'-]+)/).map((t) => (/^\d+$/.test(t) ? ' ' : t.replace(/[0-9@$!|]/g, (c) => LEET[c] || c))).join('');
   const squashed = plain.replace(/[^\p{L}]/gu, '');
   if (RESERVED.some((w) => squashed.includes(w.replace(/\s/g, '')))) return 'That name is reserved – try another';
   const words = plain.split(/[^\p{L}]+/u).filter(Boolean);

@@ -109,6 +109,7 @@ async function sharedSubmit(sh, entry) {
   doc.name = s.name;
   doc.updatedAt = now;
   await ref.set(doc);
+  if (entry.board !== 'stars') leaguePoints(!prev || score > prev.s).catch(() => {});
   const board = await sharedTop(sh, entry.board, entry.board === 'stars' ? 'all' : entry.key);
   if (weekId) weekRank = (await sharedTop(sh, entry.board + 'Week', weekKey())).me?.rank;
   return { ok: true, rank: board.me?.rank, weekRank, best: doc.scores[id].s, verified: score };
@@ -164,6 +165,78 @@ async function req(path, opts = {}, timeout = 5000) {
 
 export function isOnline() {
   return online;
+}
+
+// ---------------------------------------------------------------------------
+// Weekly leagues. Server: /api/league. Shared-db: league/<uid> =
+// { week, pts, name, division, day, runs, last } – grouped deterministically.
+import * as League from './league.js';
+import { weekKey as wk, dayKey as dk } from './modes.js';
+
+export const league = {
+  async get() {
+    const sh = await sharedDb();
+    if (sh) {
+      const week = wk();
+      const ref = sh.db.collection('league').doc(sh.uid);
+      const snap = await ref.get();
+      const mine = snap.exists ? snap.data() : {};
+      await settleShared(ref, mine, week);
+      const all = (await sh.db.collection('league').get()).docs.map((d) => ({ uid: d.id, ...(d.data() || {}) })).filter((m) => m.week === week && (m.division || 0) === (mine.division || 0) && m.pts > 0);
+      const group = League.groupOf(sh.uid, all, week);
+      return { week, division: mine.division || 0, joined: group.length > 0, last: mine.last || null, group: League.standings(group.map((m) => ({ name: String(m.name || 'Player').slice(0, 40), pts: Number(m.pts) || 0, at: m.at || 0, me: m.uid === sh.uid }))) };
+    }
+    return req('/league?' + new URLSearchParams({ playerId: load().playerId }).toString());
+  },
+  async claim() {
+    const sh = await sharedDb();
+    if (sh) {
+      const ref = sh.db.collection('league').doc(sh.uid);
+      const snap = await ref.get();
+      const d = snap.exists ? snap.data() : {};
+      if (!d.last || d.last.claimed) return { shells: 0 };
+      d.last.claimed = true;
+      await ref.set(d);
+      return { shells: d.last.shells, result: d.last };
+    }
+    const p = await ensureRegistered();
+    return req('/league/claim', { method: 'POST', body: JSON.stringify({ playerId: p.playerId, token: p.token }) });
+  },
+};
+
+async function settleShared(ref, d, week) {
+  if (d.week === week) return;
+  if (d.week && d.pts > 0) {
+    // last week's standing from everyone's docs (best effort)
+    const sh = await sharedDb();
+    const all = (await sh.db.collection('league').get()).docs.map((x) => ({ uid: x.id, ...(x.data() || {}) })).filter((m) => (m.week === d.week || m.lastWeek === d.week) && (m.division || 0) === (d.division || 0));
+    const rows = all.map((m) => ({ uid: m.uid, pts: m.week === d.week ? m.pts : m.lastPts || 0, at: m.at || 0 })).filter((m) => m.pts > 0);
+    const group = League.standings(League.groupOf(sh.uid, rows.length ? rows : [{ uid: sh.uid, pts: d.pts }], d.week));
+    const rank = group.findIndex((m) => m.uid === sh.uid) + 1;
+    const move = League.movement(rank, group.length, d.division || 0);
+    d.last = { week: d.week, rank, size: group.length, division: d.division || 0, move, shells: League.weekReward(rank, group.length), claimed: false };
+    d.division = Math.max(0, Math.min(League.DIVISIONS.length - 1, (d.division || 0) + move));
+  }
+  d.lastWeek = d.week; d.lastPts = d.pts || 0;
+  d.week = week; d.pts = 0;
+  await ref.set(d);
+}
+
+/** Shared-db only: add league points after a verified run (the server does this itself). */
+export async function leaguePoints(improved) {
+  const sh = await sharedDb();
+  if (!sh) return;
+  const ref = sh.db.collection('league').doc(sh.uid);
+  const snap = await ref.get();
+  const d = snap.exists ? snap.data() : {};
+  await settleShared(ref, d, wk());
+  const st = { day: d.day, runs: d.runs || 0 };
+  const pts = League.pointsFor(st, dk(), improved);
+  d.day = st.day; d.runs = st.runs;
+  d.pts = (d.pts || 0) + pts;
+  d.at = Date.now();
+  d.name = load().name;
+  await ref.set(d);
 }
 
 /** Anonymous usage count (no ids, no cookies). Server mode only; off if the player opted out. */

@@ -632,3 +632,13 @@ body.cozy .btn, body.cozy .game-card .tag, body.cozy .seg-btn.on { filter: none;
 .pip.big .pip-otter { font-size: 4.2rem; }
 .pip.big .pip-outfit { font-size: 2.4rem; top: -14px; }
 .reward-list { display: flex; flex-direction: column; gap: 6px; margin: 10px 0; }
+
+/* weekly league */
+.league-card { margin-top: 10px; width: 100%; background: linear-gradient(135deg, rgba(255,212,94,.28), var(--panel)); }
+.league-card .sub { display: block; }
+.league-list { display: flex; flex-direction: column; gap: 6px; margin-top: 12px; }
+.league-row { display: flex; gap: 10px; align-items: center; padding: 10px 12px; border-radius: 12px; background: var(--panel); border: 2px solid var(--line); }
+.league-row > b { min-width: 26px; text-align: center; }
+.league-row.up { border-color: rgba(124,255,178,.6); }
+.league-row.down { border-color: rgba(255,123,123,.5); }
+.league-row.me { background: rgba(77,214,255,.22); }

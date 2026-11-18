@@ -10,6 +10,7 @@ import { BOARDS, acceptableKeys, dayKey, weekKey, dailyConfig, deepConfig, block
 import { cleanName, nameProblem } from '../public/js/storage.js';
 import { createAccounts, MAX_SAVE_BYTES } from './accounts.js';
 import { verifyArcade, gameForBoard } from '../public/js/arcade/index.js';
+import * as L from '../public/js/league.js';
 import { sanitize as ugcSanitize, replay as ugcReplay } from '../public/js/maker/engine.js';
 
 const MAX_BODY = 64 * 1024;
@@ -125,6 +126,57 @@ export function createApi(store, { now = () => new Date(), origin = process.env.
     store.dirty();
     const rank = ranking(id).findIndex(([pid]) => pid === playerId) + 1;
     return { score: board[playerId]?.score ?? score, best: board[playerId]?.score, rank, improved };
+  }
+
+  // ---- weekly leagues: groups of up to 30 in the same division
+  function leagueWeek(week) {
+    db.leagues ||= {};
+    for (const k of Object.keys(db.leagues)) if (k < weekKey(new Date(now().getTime() - 28 * 86400000))) delete db.leagues[k];
+    return (db.leagues[week] ||= { groups: [], of: {} });
+  }
+  /** Settles last week for a player (once): division moves and the reward to collect. */
+  function settle(p, playerId, week) {
+    if (p.leagueWeek === week) return;
+    const prevWeek = p.leagueWeek;
+    p.leagueWeek = week;
+    const lw = prevWeek && db.leagues?.[prevWeek];
+    const gi = lw?.of?.[playerId];
+    if (gi === undefined) return;
+    const group = L.standings(lw.groups[gi].members);
+    const rank = group.findIndex((m) => m.pid === playerId) + 1;
+    const div = p.division || 0;
+    const move = L.movement(rank, group.length, div);
+    p.division = Math.max(0, Math.min(L.DIVISIONS.length - 1, div + move));
+    p.leagueResult = { week: prevWeek, rank, size: group.length, division: div, move, shells: L.weekReward(rank, group.length), claimed: false };
+  }
+  function addLeaguePoints(playerId, improved) {
+    const p = db.players[playerId];
+    if (!p) return;
+    const week = weekKey(now());
+    settle(p, playerId, week);
+    const lw = leagueWeek(week);
+    let gi = lw.of[playerId];
+    if (gi === undefined) {
+      const div = p.division || 0;
+      gi = lw.groups.findIndex((g) => g.division === div && g.members.length < L.GROUP_SIZE);
+      if (gi < 0) { lw.groups.push({ division: div, members: [] }); gi = lw.groups.length - 1; }
+      lw.groups[gi].members.push({ pid: playerId, pts: 0, at: now().getTime() });
+      lw.of[playerId] = gi;
+    }
+    const me = lw.groups[gi].members.find((m) => m.pid === playerId);
+    p.leagueDay ||= {};
+    const pts = L.pointsFor(p.leagueDay, dayKey(now()), improved);
+    if (pts) { me.pts += pts; me.at = now().getTime(); }
+    store.dirty();
+  }
+  function leagueView(playerId) {
+    const p = db.players[playerId];
+    const week = weekKey(now());
+    if (p) settle(p, playerId, week);
+    const lw = db.leagues?.[week];
+    const gi = lw?.of?.[playerId];
+    const group = gi === undefined ? [] : L.standings(lw.groups[gi].members).map((m) => ({ name: db.players[m.pid]?.name || 'Player', pts: m.pts, me: m.pid === playerId }));
+    return { week, division: p?.division || 0, group, joined: gi !== undefined, last: p?.leagueResult || null };
   }
 
   // anonymous usage counts the app may send (see /privacy.html)
@@ -353,6 +405,7 @@ export function createApi(store, { now = () => new Date(), origin = process.env.
     if (typeof body.score === 'number' && body.score !== score) throw fail(422, 'score mismatch');
     // Daily Dive: only the first finished attempt of the day is ranked.
     const res = record(boardId(board, key), body.playerId, score, { keepFirst: board === 'daily' || !!BOARDS[board].firstOnly });
+    addLeaguePoints(body.playerId, res.improved);
     // endless arcade runs also count towards this week's tournament
     if (BOARDS[board].arcade && !BOARDS[board].daily && !BOARDS[board].firstOnly && !gameForBoard(board)?.special) {
       const wk = record(boardId(board + 'Week', weekKey(now())), body.playerId, score);
@@ -367,6 +420,9 @@ export function createApi(store, { now = () => new Date(), origin = process.env.
     try {
       if (req.method === 'GET' && url.pathname === '/api/health') {
         return send(res, 200, { ok: true, v: ENGINE_VERSION }, origin);
+      }
+      if (req.method === 'GET' && url.pathname === '/api/league') {
+        return send(res, 200, leagueView(url.searchParams.get('playerId')), origin);
       }
       if (req.method === 'GET' && url.pathname === '/api/metrics') {
         // daily tallies for the team (needs ADMIN_KEY); nothing per player is ever stored
@@ -409,6 +465,15 @@ export function createApi(store, { now = () => new Date(), origin = process.env.
       }
       if (req.method !== 'POST') throw fail(404, 'not found');
       if (!limit(ip)) throw fail(429, 'slow down a little');
+      if (url.pathname === '/api/league/claim') {
+        const body = await readBody(req, 2048);
+        const p = auth(body);
+        const r = p.leagueResult;
+        if (!r || r.claimed) return send(res, 200, { ok: true, shells: 0 }, origin);
+        r.claimed = true;
+        store.dirty();
+        return send(res, 200, { ok: true, shells: r.shells, result: r }, origin);
+      }
       if (url.pathname === '/api/event') {
         // anonymous usage counts: an event name and a coarse bucket, tallied per day
         const body = await readBody(req, 512);
