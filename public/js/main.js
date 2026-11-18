@@ -74,6 +74,17 @@ async function boot() {
   });
   startCloud().catch(() => {});
   showHub();
+  // anonymous counts: one "open" a day with how long since install (for retention), and share landings
+  {
+    const today = dayKey();
+    if (s.lastOpenDay !== today) {
+      const age = Math.floor((Date.now() - (s.createdAt || Date.now())) / 86400000);
+      api.track('open', age === 0 ? 'd0' : age === 1 ? 'd1' : age < 7 ? 'd2-6' : age < 14 ? 'd7-13' : age < 30 ? 'd14-29' : 'd30');
+      update((d) => { d.lastOpenDay = today; });
+    }
+    const ref = new URLSearchParams(location.search).get('ref');
+    if (ref) api.track('ref', ref);
+  }
   const ch = parseChallenge(location.hash);
   if (!s.onboarded) await onboarding();
   else if (!ch) { await maybeDailyReward(); maybeSuggestCozy(); }
@@ -687,6 +698,7 @@ async function showRecoveryCode(code, first) {
 }
 
 async function openSignUp() {
+  if ((await askAge()) === 'u13') { toast('Accounts are for players 13 and older – your progress stays safe on this device'); return null; }
   const r = await authForm({
     title: '☁️ Create your account',
     intro: '<p class="small muted">Free. Keeps your levels, scores and shells safe, and lets you play on any phone, tablet or computer. No email needed.</p>',
@@ -850,14 +862,29 @@ function accountNudgeHtml(s) {
 }
 
 // ------------------------------------------------------------------ onboarding
+/** Asks the age band once (under 13 → random names only, no publishing or accounts). */
+async function askAge() {
+  if (load().ageBand) return load().ageBand;
+  const r = await modal(`<h2>👋 Quick question</h2><p>How old are you? This keeps Tidepop safe and friendly – we don't store your birthday.</p>`, {
+    dismissable: false, row: true,
+    buttons: [{ label: 'Under 13', value: 'u13', cls: 'blue' }, { label: '13 or older', value: '13+', cls: 'green' }],
+  });
+  update((d) => { d.ageBand = r; if (r === 'u13') d.name = randomNickname(); });
+  return r;
+}
+const isKid = () => load().ageBand === 'u13';
+
 async function onboarding() {
+  await askAge();
   let name = load().name;
+  const kid = isKid();
   const res = await modal(`
     <div class="logo">Tide<span>pop</span></div>
     <p>Welcome to <b>Tidepop</b> – a cozy arcade by the sea. A new shared puzzle every day, match-3, block puzzles, chess and ludo with friends, and more.</p>
     <p class="small muted">Free to play · plays offline</p>
-    <div class="tip name-tip"><label for="nf-input"><b>Choose your name</b></label>${nameFieldHtml(name)}</div>
-    ${api.inArtifact() ? '' : '<p class="small center" id="ob-login-row" style="display:none">Played before? <a href="#" id="ob-login">Log in to your account</a></p>'}
+    <div class="tip name-tip"><label for="nf-input"><b>${kid ? 'Your player name' : 'Choose your name'}</b></label>${nameFieldHtml(name)}${kid ? '<p class="small muted">Tap 🎲 for a new one.</p>' : ''}</div>
+    ${api.inArtifact() || kid ? '' : '<p class="small center" id="ob-login-row" style="display:none">Played before? <a href="#" id="ob-login">Log in to your account</a></p>'}
+    <p class="small muted center"><a href="privacy.html" target="_blank" rel="noopener">Privacy &amp; terms</a></p>
   `, {
     dismissable: false,
     buttons: [{ label: "Let's play!", value: 'go' }],
@@ -865,6 +892,7 @@ async function onboarding() {
       const go = $$('.modal.open .btn', document).find((b) => /Let's play/.test(b.textContent));
       const check = wireNameField(sheet, (ok) => { if (go) go.disabled = !ok; });
       const input = $('#nf-input', sheet);
+      if (kid) input.readOnly = true;
       input.addEventListener('change', () => { const v = check(); if (v) name = v; });
       input.addEventListener('input', () => { const v = check(); if (v) name = v; });
       $('#nf-roll', sheet).addEventListener('click', () => { name = cleanName(input.value); });
@@ -1522,6 +1550,8 @@ function noteGameEnd(id, isBest, kind) {
   const hot = id === hotGameId();
   const day = dayKey();
   const season = live.seasonAt(day);
+  api.track('game', id);
+  if (kind === 'tide') api.track('tide', 'solved');
   const before = live.tierOfXp(live.passState(load(), season).xp);
   let sticker = null;
   update((d) => {
@@ -2923,6 +2953,7 @@ function editGame(spec0, id, version, fromTest) {
     playUgc({ id, version, owner: load().name, spec: clean, specs: {}, hero: clean.hero }, { test: true });
   };
   $('#ed-publish', el).onclick = async () => {
+    if ((await askAge()) === 'u13') { toast('Publishing is for creators 13 and older – you can still build and test-play your games!'); return; }
     let clean;
     try { clean = ugcSanitize(spec); } catch (e) { toast(e.message); return; }
     if (!(await api.ugc.available())) { toast(api.inArtifact() ? 'Sign in to Claude to publish' : "Can't reach the server – your draft is saved"); return; }
@@ -3221,6 +3252,7 @@ function wireSwitches(root) {
 }
 
 async function shareText(text) {
+  api.track('share', /tide=/.test(text) ? 'tide' : /code/i.test(text) ? 'code' : 'score');
   try {
     if (navigator.share) { await navigator.share({ text }); return; }
   } catch { return; }
@@ -3243,6 +3275,7 @@ function showSettings() {
       <div id="s-account"></div>
       <h3 style="margin-top:18px">Your name</h3>
       <div class="name-settings">${nameFieldHtml(s.name)}<button class="btn sm" id="s-save-name">Save name</button></div>
+      ${isKid() ? '<p class="small muted">Players under 13 get a random friendly name – tap 🎲 to pick another.</p>' : ''}
       <h3 style="margin-top:18px">Sound & feel</h3>
       ${sw('sfx', '🔊 Sound effects')}${sw('music', '🎵 Music')}${sw('haptics', '📳 Vibration')}
       ${sw('reducedMotion', '🧘 Reduced motion', 'Calmer animations, no screen shake')}
@@ -3259,6 +3292,7 @@ function showSettings() {
       ${cozySleeping() ? '<button class="btn sm blue" id="s-wake" style="margin-top:8px">🌧️ Bring the rain back</button>' : ''}
       <h3 style="margin-top:18px">Leaderboards</h3>
       ${sw('leaderboard', '🏆 Take part in online leaderboards', 'Only your name and scores are shared')}
+      ${sw('analytics', '📊 Send anonymous usage counts', 'No IDs, no cookies – just tallies like "a game ended"')}
       <div class="row" style="margin-top:10px;flex-wrap:wrap;gap:10px">
         <button class="btn sm ghost" id="s-forget">Delete my online scores</button>
       </div>
@@ -3290,6 +3324,7 @@ function showSettings() {
   $('#s-back', el).onclick = () => { sfx.tap(); showHub(); };
   $('#s-help', el).onclick = () => howToPlay();
   const checkName = wireNameField(el, (ok) => { $('#s-save-name', el).disabled = !ok; });
+  if (isKid()) $('#nf-input', el).readOnly = true;
   $('#s-save-name', el).onclick = async () => {
     const name = checkName();
     if (!name) { sfx.bad?.(); return; }
@@ -3331,18 +3366,18 @@ function showSettings() {
     showHub();
     onboarding();
   };
-  $('#s-privacy', el).onclick = () => modal(`<h2>🔒 Privacy</h2><div class="tip">
+  $('#s-privacy', el).onclick = () => modal(`<h2>🔒 Privacy</h2><p class="small"><a href="privacy.html" target="_blank" rel="noopener">Read the full privacy policy &amp; terms</a></p><div class="tip">
     • Accounts are optional and need no email. With one, we store your username, a salted hash of your password (never the password itself) and your game save, so you can play on any device. Delete it any time in Settings.<br>
     • Without an account, your progress stays on your device.<br>
     • Inside claude.ai, your save is kept privately in your Claude account's area of this game's database.<br>
     • If online leaderboards are on, only the name you chose, a random player ID and your game moves/scores are sent – to verify scores fairly.<br>
     • Daily boards are deleted after 30 days, weekly boards after 12 weeks.<br>
-    • You can delete your online scores at any time in Settings.</div>`, { buttons: [{ label: 'OK', value: null }] });
+    • You can delete your online scores at any time in Settings.<br>
+    • Anonymous usage counts carry no ID or cookie and can be switched off above.</div>`, { buttons: [{ label: 'OK', value: null }] });
 }
 
-// keep the game safe from accidental pinch-zoom on iOS
-document.addEventListener('gesturestart', (e) => e.preventDefault());
-document.addEventListener('dblclick', (e) => e.preventDefault(), { passive: false });
+// double-tap zoom is off on game boards via touch-action; pinch-zoom stays available (WCAG 1.4.4)
+document.addEventListener('dblclick', (e) => { if (e.target.closest?.('canvas')) e.preventDefault(); }, { passive: false });
 
 // handy for debugging from the console
 window.tidepop = { load, save, getLevel, SPECIAL, view: () => view };

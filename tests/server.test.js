@@ -234,3 +234,16 @@ test('online ludo: the server rolls the dice; both players rebuild the same game
   await call(host, { action: 'move', code: 'LUD2X', moves: m.hostMoves });
   assert.equal((await view(host)).hostDice.length, before);
 });
+
+test('anonymous usage counts: only known events, tallied per day, team-only read', async () => {
+  assert.equal((await post('/api/event', { e: 'game', b: 'puffer' })).status, 200);
+  assert.equal((await post('/api/event', { e: 'game', b: 'puffer' })).status, 200);
+  assert.equal((await post('/api/event', { e: 'whoami', b: 'x' })).status, 400);
+  assert.equal((await post('/api/event', { e: 'open', b: '<script>' })).status, 400);
+  assert.equal((await get('/api/metrics?key=nope')).status, 403);
+  process.env.ADMIN_KEY = 'team-key';
+  const m = (await get('/api/metrics?key=team-key')).body.metrics;
+  delete process.env.ADMIN_KEY;
+  assert.equal(m[dayKey()].game.puffer, 2);
+  assert.ok(!JSON.stringify(m).includes('playerId'), 'no ids stored');
+});

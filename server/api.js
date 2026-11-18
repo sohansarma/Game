@@ -127,6 +127,9 @@ export function createApi(store, { now = () => new Date(), origin = process.env.
     return { score: board[playerId]?.score ?? score, best: board[playerId]?.score, rank, improved };
   }
 
+  // anonymous usage counts the app may send (see /privacy.html)
+  const METRIC_EVENTS = new Set(['open', 'game', 'share', 'ref', 'tide', 'chest', 'signup', 'publish']);
+
   // ---- community games (Creator Studio)
   function ugcSummary(rec, me) {
     const spec = rec.specs[rec.version];
@@ -365,6 +368,11 @@ export function createApi(store, { now = () => new Date(), origin = process.env.
       if (req.method === 'GET' && url.pathname === '/api/health') {
         return send(res, 200, { ok: true, v: ENGINE_VERSION }, origin);
       }
+      if (req.method === 'GET' && url.pathname === '/api/metrics') {
+        // daily tallies for the team (needs ADMIN_KEY); nothing per player is ever stored
+        if (!process.env.ADMIN_KEY || url.searchParams.get('key') !== process.env.ADMIN_KEY) throw fail(403, 'team only');
+        return send(res, 200, { metrics: db.metrics || {} }, origin);
+      }
       if (req.method === 'GET' && url.pathname === '/api/leaderboard') {
         const board = url.searchParams.get('board');
         if (!BOARDS[board]) throw fail(400, 'unknown board');
@@ -401,6 +409,20 @@ export function createApi(store, { now = () => new Date(), origin = process.env.
       }
       if (req.method !== 'POST') throw fail(404, 'not found');
       if (!limit(ip)) throw fail(429, 'slow down a little');
+      if (url.pathname === '/api/event') {
+        // anonymous usage counts: an event name and a coarse bucket, tallied per day
+        const body = await readBody(req, 512);
+        const e = String(body.e || ''), b = String(body.b || '-');
+        if (!METRIC_EVENTS.has(e) || !/^[a-z0-9_-]{1,16}$/.test(b)) throw fail(400, 'bad event');
+        const day = dayKey(now());
+        db.metrics ||= {};
+        for (const k of Object.keys(db.metrics)) if (k < dayKey(new Date(now().getTime() - 120 * 86400000))) delete db.metrics[k];
+        const d = (db.metrics[day] ||= {});
+        const ev = (d[e] ||= {});
+        ev[b] = (ev[b] || 0) + 1;
+        store.dirty();
+        return send(res, 200, { ok: true }, origin);
+      }
       const body = await readBody(req, url.pathname === '/api/account/save' ? MAX_SAVE_BYTES + 8192 : MAX_BODY);
       if (url.pathname.startsWith('/api/account/')) return send(res, 200, await accounts.handle(url.pathname.slice(13), body), origin);
 
