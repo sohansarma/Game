@@ -60,9 +60,13 @@ test('health and static files', async () => {
   assert.equal(spa.status, 200, 'unknown routes fall back to app shell');
 });
 
-test('registration only accepts word-list names', async () => {
-  assert.equal((await post('/api/register', { name: 'BadWord 99' })).status, 400);
-  assert.equal((await post('/api/register', { name: '<script>' })).status, 400);
+test('registration accepts custom names but rejects unsafe ones', async () => {
+  for (const bad of ['<script>', 'ab', 'x'.repeat(21), 'visit www.spam.com', 'call 9876543210', 'Admin', 'f u c k', 'Sh1t head', '  spaced  ']) {
+    assert.equal((await post('/api/register', { name: bad })).status, 400, bad);
+  }
+  for (const ok of ['Sohan', 'Priya_07', 'Señor Gato', 'Calm Seal 33', "O'Neil", 'राहुल']) {
+    assert.equal((await post('/api/register', { name: ok })).status, 200, ok);
+  }
   const a = await register();
   assert.ok(a.token && a.playerId);
   // re-registering with an existing id never hands it out again
@@ -148,7 +152,7 @@ test('adventure stars: verified level wins add up', async () => {
 
 test('rename, forget and persistence', async () => {
   const me = await register('Sunny Seal 15');
-  assert.equal((await post('/api/rename', { playerId: me.playerId, token: me.token, name: 'not ok' })).status, 400);
+  assert.equal((await post('/api/rename', { playerId: me.playerId, token: me.token, name: 'visit www.spam.com' })).status, 400);
   assert.equal((await post('/api/rename', { playerId: me.playerId, token: me.token, name: 'Golden Orca 99' })).status, 200);
   assert.equal((await post('/api/forget', { playerId: me.playerId, token: me.token })).status, 200);
   assert.equal((await post('/api/rename', { playerId: me.playerId, token: me.token, name: 'Golden Orca 98' })).status, 401);

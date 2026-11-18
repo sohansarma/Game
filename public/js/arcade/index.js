@@ -77,13 +77,26 @@ export function tierOf(game, best) {
 }
 
 // Challenge links: #ch-<game>-<seed36>-<score36>-<adjIdx>-<animalIdx>-<num>
-export function challengeHash(gameId, seed, score, nameParts) {
-  return `ch-${gameId}-${(seed >>> 0).toString(36)}-${Math.max(0, score).toString(36)}-${nameParts.join('-')}`;
+const b64u = {
+  enc: (str) => btoa(String.fromCharCode(...new TextEncoder().encode(str))).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, ''),
+  dec: (s) => new TextDecoder().decode(Uint8Array.from(atob(s.replace(/-/g, '+').replace(/_/g, '/')), (c) => c.charCodeAt(0))),
+};
+
+/** Challenge link fragment. The sender's name travels as base64url text ("n.<name>"). */
+export function challengeHash(gameId, seed, score, name) {
+  const who = Array.isArray(name) ? name.join('-') : `n.${b64u.enc(String(name).slice(0, 20))}`;
+  return `ch-${gameId}-${(seed >>> 0).toString(36)}-${Math.max(0, score).toString(36)}-${who}`;
 }
+/** name is a string (new links) or [adjective, animal, number] indexes (older links). */
 export function parseChallenge(hash) {
-  const m = /^#?ch-([a-z]+)-([0-9a-z]{1,7})-([0-9a-z]{1,9})-(\d{1,2})-(\d{1,2})-(\d{2})$/.exec(hash || '');
+  const m = /^#?ch-([a-z]+)-([0-9a-z]{1,7})-([0-9a-z]{1,9})-(?:(\d{1,2})-(\d{1,2})-(\d{2})|n\.([A-Za-z0-9_-]{1,64}))$/.exec(hash || '');
   if (!m || !ARCADE_BY_ID[m[1]]) return null;
   const seed = parseInt(m[2], 36), score = parseInt(m[3], 36);
   if (!(seed >= 0 && seed <= 0xffffffff) || !(score >= 0)) return null;
+  if (m[7]) {
+    let name = null;
+    try { name = b64u.dec(m[7]); } catch { /* bad link */ }
+    return { game: m[1], seed, score, name: typeof name === 'string' ? name : '' };
+  }
   return { game: m[1], seed, score, name: [Number(m[4]), Number(m[5]), Number(m[6])] };
 }

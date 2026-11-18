@@ -10,7 +10,7 @@ import { ChessVersus, ChessCasual, LudoVersus, TIME_CONTROLS, newCode, validCode
 import { CASUAL_LEVELS } from './arcade/chess.js';
 import { tableBackgroundCSS } from './arcade/table.js';
 import { TEMPLATES, RULE_INFO, EMOJI, PALETTES, sanitize as ugcSanitize, starterSpec, createSim as ugcCreate } from './maker/engine.js';
-import { load, update, save, totalStars, highestUnlocked, exportSave, importSave, resetSave, randomNickname, ADJECTIVES, ANIMALS } from './storage.js';
+import { load, update, save, totalStars, highestUnlocked, exportSave, importSave, resetSave, randomNickname, cleanName, nameProblem, NAME_MIN, NAME_MAX, ADJECTIVES, ANIMALS } from './storage.js';
 import { MatchView } from './matchview.js';
 import { BlocksView } from './blocksview.js';
 import { iconURL, PALETTE, clearSpriteCache } from './creatures.js';
@@ -80,20 +80,54 @@ function leaveGame() {
   if (reloadPending) location.reload();
 }
 
+// ------------------------------------------------------------------ player name field
+/** A text box for any name the player likes, with a 🎲 for a random one. */
+function nameFieldHtml(value) {
+  return `<div class="name-field">
+      <div class="name-row">
+        <input class="name-input" id="nf-input" maxlength="${NAME_MAX}" value="${esc(value)}" autocomplete="nickname" autocapitalize="words" spellcheck="false" aria-label="Your name" aria-describedby="nf-msg">
+        <button class="btn sm ghost name-roll" id="nf-roll" type="button" aria-label="Random name">🎲</button>
+      </div>
+      <p class="name-msg small muted" id="nf-msg">Shown on leaderboards · ${NAME_MIN}–${NAME_MAX} characters · no personal info</p>
+    </div>`;
+}
+
+/** Wires a name field; returns () => the cleaned name, or null (with the reason shown) if it isn't allowed. */
+function wireNameField(root, onValid) {
+  const input = $('#nf-input', root), msg = $('#nf-msg', root);
+  const hint = msg.textContent;
+  const check = () => {
+    const p = nameProblem(input.value);
+    msg.textContent = p || hint;
+    msg.classList.toggle('bad', !!p);
+    input.classList.toggle('bad', !!p);
+    onValid?.(!p);
+    return p ? null : cleanName(input.value);
+  };
+  input.oninput = check;
+  $('#nf-roll', root).onclick = () => { input.value = randomNickname(); sfx.tap(); check(); };
+  return check;
+}
+
 // ------------------------------------------------------------------ onboarding
 async function onboarding() {
   let name = load().name;
   const res = await modal(`
     <div class="logo">Tide<span>pop</span></div>
     <p>Welcome to the reef! Match sea creatures, explore an endless reef of levels, take on the <b>Daily Dive</b> and build reefs in <b>Reef Blocks</b>.</p>
-    <p class="small muted">Free forever · no ads · no purchases · plays offline</p>
-    <div class="tip">Your leaderboard name (no personal info needed):<br><b id="ob-name" style="font-size:1.2rem">${esc(name)}</b>
-      <button class="btn sm ghost" id="ob-roll" style="margin-left:6px">🎲 New name</button></div>
+    <p class="small muted">Free to play · plays offline</p>
+    <div class="tip name-tip"><label for="nf-input"><b>Choose your name</b></label>${nameFieldHtml(name)}</div>
   `, {
     dismissable: false,
     buttons: [{ label: "Let's play!", value: 'go' }],
     onOpen: (sheet) => {
-      $('#ob-roll', sheet).onclick = () => { name = randomNickname(); $('#ob-name', sheet).textContent = name; sfx.tap(); };
+      const go = $$('.modal.open .btn', document).find((b) => /Let's play/.test(b.textContent));
+      const check = wireNameField(sheet, (ok) => { if (go) go.disabled = !ok; });
+      const input = $('#nf-input', sheet);
+      input.addEventListener('change', () => { const v = check(); if (v) name = v; });
+      input.addEventListener('input', () => { const v = check(); if (v) name = v; });
+      $('#nf-roll', sheet).addEventListener('click', () => { name = cleanName(input.value); });
+      input.onkeydown = (e) => { if (e.key === 'Enter' && check()) go?.click(); };
     },
   });
   if (res === 'go') {
@@ -757,7 +791,7 @@ function showHub() {
           ${g.id === hot.id ? '<span class="tag">🔥 2×</span>' : g.played ? `<span class="tag done">${rk ? '#' + rk : '✓'} today</span>` : '<span class="tag">Daily!</span>'}
           <span class="game-icon">${g.icon}</span><b>${esc(g.title)}</b><span class="sub">${esc(g.tagline)}</span><span class="sub">Best: <b>${g.best}</b></span></button>`;
       }).join('')}</div>
-      <p class="center small muted" style="margin-top:14px">${games.length} games · free forever · no ads · playing as <b>${esc(s.name)}</b></p>
+      <p class="center small muted" style="margin-top:14px">${games.length} games · free to play · playing as <b>${esc(s.name)}</b></p>
     </div>`);
   const on = (id, fn) => { const b = $(id, el); if (b) b.onclick = () => { sfx.tap(); fn(); }; };
   on('#u-lb', () => showLeaderboard());
@@ -827,16 +861,13 @@ async function claimWeeklyPrizes() {
   }
 }
 
-function nameParts(name) {
-  const [a, n, num] = String(name).split(' ');
-  return [Math.max(0, ADJECTIVES.indexOf(a)), Math.max(0, ANIMALS.indexOf(n)), Number(num) >= 10 && Number(num) <= 99 ? Number(num) : 10];
-}
-const nameFromParts = ([a, n, num]) => `${ADJECTIVES[a] || 'Mystery'} ${ANIMALS[n] || 'Fish'} ${num}`;
+const nameFromParts = ([a, n, num]) => `${ADJECTIVES[a] || 'Mystery'} ${ANIMALS[n] || 'Fish'} ${num}`; // older challenge links
 
 async function acceptChallenge(ch) {
   try { history.replaceState(null, '', location.pathname + location.search); } catch { /* sandboxed */ }
   const g = ARCADE_BY_ID[ch.game];
-  const who = nameFromParts(ch.name);
+  // names from links are re-checked: anything not allowed shows as "A friend"
+  const who = typeof ch.name === 'string' ? (nameProblem(ch.name) ? 'A friend' : cleanName(ch.name)) : nameFromParts(ch.name);
   const r = await modal(`<h2>⚔️ Challenge!</h2>
     <p><b>${esc(who)}</b> challenges you to beat</p>
     <div class="big-score">${fmt(ch.score)}</div>
@@ -1545,7 +1576,7 @@ async function endArcade(run) {
   if (r === 'again') playArcade(run.id, { daily: run.daily });
   else if (r === 'rematch') playArcade(run.id, { daily: false, seed: run.playSeed, challenge: run.challenge });
   else if (r === 'challenge') {
-    const link = `${location.origin}${location.pathname}#${challengeHash(run.id, run.playSeed, score, nameParts(load().name))}`;
+    const link = `${location.origin}${location.pathname}#${challengeHash(run.id, run.playSeed, score, load().name)}`;
     await shareText(`${g.icon} I scored ${fmt(score)} in ${g.title} on Tidepop. Same run, can you beat me? ${link}`);
     showHub();
   }
@@ -2162,24 +2193,17 @@ async function shareText(text) {
 function showSettings() {
   leaveGame();
   const s = load();
-  const [adj, animal, num] = s.name.split(' ');
   const sw = (k, label, sub = '') => `<div class="setting"><span>${label}${sub ? `<br><span class="small muted">${sub}</span>` : ''}</span><button class="switch" role="switch" aria-label="${label}" data-k="${k}" aria-checked="${!!s.settings[k]}"></button></div>`;
   const el = showScreen('settings', `
     <div class="topbar"><button class="icon-btn" id="s-back" aria-label="Back">←</button><h2 class="grow">Settings</h2></div>
     <div class="scroll">
       <h3>Your name</h3>
-      <p class="small muted">Names are built from friendly words so the leaderboard stays kind and nobody shares personal info.</p>
-      <div class="row" style="flex-wrap:wrap">
-        <select id="s-adj" aria-label="Adjective">${ADJECTIVES.map((a) => `<option ${a === adj ? 'selected' : ''}>${a}</option>`).join('')}</select>
-        <select id="s-animal" aria-label="Animal">${ANIMALS.map((a) => `<option ${a === animal ? 'selected' : ''}>${a}</option>`).join('')}</select>
-        <select id="s-num" aria-label="Number">${Array.from({ length: 90 }, (_, i) => i + 10).map((x) => `<option ${String(x) === num ? 'selected' : ''}>${x}</option>`).join('')}</select>
-        <button class="btn sm" id="s-save-name">Save</button>
-      </div>
+      <div class="name-settings">${nameFieldHtml(s.name)}<button class="btn sm" id="s-save-name">Save name</button></div>
       <h3 style="margin-top:18px">Sound & feel</h3>
       ${sw('sfx', '🔊 Sound effects')}${sw('music', '🎵 Music')}${sw('haptics', '📳 Vibration')}
       ${sw('reducedMotion', '🧘 Reduced motion', 'Calmer animations, no screen shake')}
       <h3 style="margin-top:18px">Leaderboards</h3>
-      ${sw('leaderboard', '🏆 Take part in online leaderboards', 'Only your nickname and scores are shared')}
+      ${sw('leaderboard', '🏆 Take part in online leaderboards', 'Only your name and scores are shared')}
       <div class="row" style="margin-top:10px;flex-wrap:wrap;gap:10px">
         <button class="btn sm ghost" id="s-forget">Delete my online scores</button>
       </div>
@@ -2192,13 +2216,16 @@ function showSettings() {
       </div>
       <h3 style="margin-top:18px">About</h3>
       <div class="row" style="flex-wrap:wrap;gap:10px"><button class="btn sm ghost" id="s-help">❓ How to play</button><button class="btn sm ghost" id="s-privacy">🔒 Privacy</button></div>
-      <p class="small muted">Tidepop v1.0 (engine ${ENGINE_VERSION}) · free, open & ad-free · no tracking.</p>
+      <p class="small muted">Tidepop v1.0 (engine ${ENGINE_VERSION}) · free to play.</p>
     </div>`);
   wireSwitches(el);
   $('#s-back', el).onclick = () => { sfx.tap(); showHub(); };
   $('#s-help', el).onclick = () => howToPlay();
+  const checkName = wireNameField(el, (ok) => { $('#s-save-name', el).disabled = !ok; });
   $('#s-save-name', el).onclick = async () => {
-    const name = `${$('#s-adj', el).value} ${$('#s-animal', el).value} ${$('#s-num', el).value}`;
+    const name = checkName();
+    if (!name) { sfx.bad?.(); return; }
+    if (name === load().name) { toast('That is already your name'); return; }
     update((d) => { d.name = name; });
     sfx.coin();
     toast(`You are now ${name}`);
@@ -2237,9 +2264,9 @@ function showSettings() {
     onboarding();
   };
   $('#s-privacy', el).onclick = () => modal(`<h2>🔒 Privacy</h2><div class="tip">
-    • No accounts, emails, ads, trackers or analytics.<br>
+    • No accounts or emails needed.<br>
     • Your progress stays on your device.<br>
-    • If online leaderboards are on, only your word-list nickname, a random player ID and your game moves/scores are sent – to verify scores fairly.<br>
+    • If online leaderboards are on, only the name you chose, a random player ID and your game moves/scores are sent – to verify scores fairly.<br>
     • Daily boards are deleted after 30 days, weekly boards after 12 weeks.<br>
     • You can delete your online scores at any time in Settings.</div>`, { buttons: [{ label: 'OK', value: null }] });
 }

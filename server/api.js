@@ -7,7 +7,7 @@ import { replay } from '../public/js/engine.js';
 import { replayBlocks } from '../public/js/blocks.js';
 import { getLevel, MAX_LEVEL } from '../public/js/levels.js';
 import { BOARDS, acceptableKeys, dayKey, weekKey, dailyConfig, deepConfig, blocksSeed, ENGINE_VERSION } from '../public/js/modes.js';
-import { ADJECTIVES, ANIMALS } from '../public/js/storage.js';
+import { cleanName, nameProblem } from '../public/js/storage.js';
 import { verifyArcade } from '../public/js/arcade/index.js';
 import { sanitize as ugcSanitize, replay as ugcReplay } from '../public/js/maker/engine.js';
 
@@ -16,10 +16,9 @@ const LIMITS = { daily: 60, deep: 600, blocksDaily: 3000, blocks: 5000, stars: 4
 const TOP_N = 50;
 const KEEP_PER_BOARD = 1000;
 
-const NAME_RE = new RegExp(`^(${ADJECTIVES.join('|')}) (${ANIMALS.join('|')}) ([1-9][0-9])$`);
-
+/** Same rules as the game uses (public/js/storage.js), stored in cleaned form. */
 export function validName(name) {
-  return typeof name === 'string' && NAME_RE.test(name);
+  return typeof name === 'string' && cleanName(name) === name && !nameProblem(name);
 }
 
 const sha = (s) => createHash('sha256').update(s).digest('hex');
@@ -379,7 +378,7 @@ export function createApi(store, { now = () => new Date(), origin = process.env.
 
       switch (url.pathname) {
         case '/api/register': {
-          if (!validName(body.name)) throw fail(400, 'pick a name from the list');
+          if (!validName(body.name)) throw fail(400, nameProblem(body.name) || 'invalid name');
           let playerId = typeof body.playerId === 'string' && /^[\w-]{8,64}$/.test(body.playerId) ? body.playerId : randomUUID();
           if (db.players[playerId]) playerId = randomUUID(); // never hand out someone else's id
           const token = randomBytes(24).toString('hex');
@@ -390,7 +389,7 @@ export function createApi(store, { now = () => new Date(), origin = process.env.
         }
         case '/api/rename': {
           const p = auth(body);
-          if (!validName(body.name)) throw fail(400, 'pick a name from the list');
+          if (!validName(body.name)) throw fail(400, nameProblem(body.name) || 'invalid name');
           p.name = body.name;
           store.dirty();
           return send(res, 200, { ok: true }, origin);

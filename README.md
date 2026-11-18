@@ -4,7 +4,7 @@
 
 The original game: Swap cute sea creatures in an **endless match-3 adventure**, take on a **Daily Dive** where everyone gets the same board, chase a **weekly endless Deep Dive**, or relax with **Reef Blocks**, a block puzzle. Each mode has a **fair leaderboard**: the server replays every submitted game, so scores can't be faked.
 
-- 💸 Free forever: no ads, no real-money purchases, no lives or timers. Boosters are bought with shells you earn by playing.
+- 💸 Free to play: no real-money purchases, no lives or timers. Boosters are bought with shells you earn by playing.
 - 📱 Installable PWA: add it to the home screen on iOS or Android and play offline.
 - 🧒 Built for all ages: colourblind-friendly shapes, reduced-motion mode, nicknames built from a word list, and no personal data collected.
 - 🏆 End-to-end leaderboards: daily, weekly and all-time boards, each score checked by replaying the game on the server.
