@@ -44,7 +44,10 @@ export default class SortView {
   }
 
   layout() {
-    const n = this.sim.tubes.length;
+    return this.layoutFor(this.sim.tubes.length);
+  }
+
+  layoutFor(n) {
     const perRow = n <= 6 ? n : Math.ceil(n / 2);
     const rows = Math.ceil(n / perRow);
     const tw = Math.min(64, (this.W - 16) / perRow - 10);
@@ -90,6 +93,7 @@ export default class SortView {
   }
 
   select(i) {
+    if (this.hold && performance.now() - this.hold.t0 < 900) return; // admiring the solved puzzle
     if (this.sim.over || i >= this.sim.tubes.length) return;
     if (this.sel === null) {
       if (!this.sim.tubes[i].length) return;
@@ -116,6 +120,8 @@ export default class SortView {
       haptic(40);
       this.banner = { text: `Level clear! +${res.reward}`, t0: performance.now() };
       this.flying = null;
+      // hold the finished puzzle so you see the last tube close
+      this.hold = { tubes: res.solvedTubes, t0: performance.now() };
     }
     this.renderControls();
     this.hooks.onChange?.(this.sim);
@@ -130,11 +136,13 @@ export default class SortView {
     const s = this.sim;
     this.controls.innerHTML = `<div class="row" style="gap:8px;flex-wrap:wrap;justify-content:center">
       <button class="btn sm ghost" data-a="undo" ${s.history.length ? '' : 'disabled'}>↶ Undo</button>
+      <button class="btn sm ghost" data-a="hint" ${s.oxygen > 3 && !s.over ? '' : 'disabled'}>💡 Hint (−3 O₂)</button>
       <button class="btn sm blue" data-a="tube" ${s.extraUsed || s.oxygen <= 5 ? 'disabled' : ''}>🧪 +1 tube (−5 O₂)</button>
       <button class="btn sm ghost" data-a="quit">🏁 Surface</button></div>`;
     for (const b of this.controls.querySelectorAll('[data-a]')) {
       b.onclick = () => {
         if (b.dataset.a === 'undo') this.doUndo();
+        else if (b.dataset.a === 'hint') { const h = this.sim.hint(); if (h.ok) { this.hintMove = { a: h.move[0], b: h.move[1], t0: performance.now() }; sfx.special(); this.renderControls(); this.hooks.onChange?.(this.sim); } else sfx.bad(); }
         else if (b.dataset.a === 'tube') { if (this.sim.extraTube().ok) { sfx.special(); this.renderControls(); this.hooks.onChange?.(this.sim); } }
         else this.hooks.onQuit?.();
       };
@@ -167,12 +175,27 @@ export default class SortView {
     const ctx = this.ctx, s = this.sim;
     ctx.setTransform(this.dpr, 0, 0, this.dpr, 0, 0);
     ctx.clearRect(0, 0, this.W, this.H);
-    const L = this.layout();
+    const holding = this.hold && now - this.hold.t0 < (this.reduced ? 300 : 900);
+    if (!holding) this.hold = null;
+    const tubesNow = holding ? this.hold.tubes : s.tubes;
+    const L = holding ? this.layoutFor(tubesNow.length) : this.layout();
     const fly = this.flying && now - this.flying.t0 < (this.reduced ? 1 : 260) ? this.flying : null;
     if (!fly) this.flying = null;
-    s.tubes.forEach((tube, i) => {
+    tubesNow.forEach((tube, i) => {
       const t = L[i];
       const done = tube.length === CAP && tube.every((b) => b === tube[0]);
+      // solved: tubes flash green one after another
+      if (holding && done) {
+        const k = (now - this.hold.t0) / 120 - i;
+        if (k > 0 && k < 3) { ctx.fillStyle = `rgba(124,255,178,${0.35 * Math.max(0, 1 - Math.abs(k - 1))})`; roundRect(ctx, t.x - 4, t.y - 4, t.w + 8, t.h + 8, t.w * 0.5); ctx.fill(); }
+      }
+      // hint: pulse the suggested from/to tubes
+      if (this.hintMove && now - this.hintMove.t0 < 2200 && !holding && (i === this.hintMove.a || i === this.hintMove.b)) {
+        ctx.strokeStyle = `rgba(255,212,94,${0.5 + 0.5 * Math.sin(now / 120)})`;
+        ctx.lineWidth = 3;
+        roundRect(ctx, t.x - 5, t.y - 5, t.w + 10, t.h + 10, t.w * 0.5);
+        ctx.stroke();
+      }
       // glass
       ctx.fillStyle = done ? 'rgba(124,255,178,0.18)' : 'rgba(255,255,255,0.10)';
       roundRect(ctx, t.x, t.y, t.w, t.h, t.w * 0.45);
@@ -182,9 +205,11 @@ export default class SortView {
       ctx.stroke();
       // balls (bottom up); hide the ones still "in flight"
       const hide = fly && fly.to === i ? fly.n : 0;
+      let run = 0;
+      if (this.sel === i && !holding) for (let k = tube.length - 1; k >= 0 && tube[k] === tube[tube.length - 1]; k--) run++;
       for (let b = 0; b < tube.length - hide; b++) {
         let bx = t.x + t.w / 2, by = t.y + t.h - t.w * 0.25 - (b + 0.5) * t.ball;
-        if (this.sel === i && b === tube.length - 1) by = t.y - t.ball * 0.6 + (this.reduced ? 0 : Math.sin(now / 150) * 3);
+        if (run && b >= tube.length - run) by = t.y - t.ball * (0.6 + (tube.length - 1 - b) * 0.95) + (this.reduced ? 0 : Math.sin(now / 150) * 3);
         this.drawBall(bx, by, t.ball * 0.44, tube[b]);
       }
       ctx.fillStyle = 'rgba(255,255,255,0.5)';

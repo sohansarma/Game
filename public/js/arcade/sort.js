@@ -87,12 +87,23 @@ class SortSim {
       this.solved++;
       res.solved = true;
       res.reward = reward;
+      res.solvedTubes = this.tubes.map((t) => t.slice()); // the view shows the finished puzzle for a moment
       this.nextLevel();
     } else if (this.oxygen <= 0) {
       this.over = true;
       this.overReason = 'Out of oxygen!';
     }
     return res;
+  }
+
+  /** A hint costs 3 oxygen: the first pour of a solution (or null). */
+  hint() {
+    if (this.over || this.oxygen <= 3) return { ok: false };
+    const path = solve(this.tubes, 15000);
+    if (!path || !path.length) return { ok: false };
+    this.log.push(['h']);
+    this.oxygen -= 3;
+    return { ok: true, move: path[0] };
   }
 
   undo() {
@@ -174,6 +185,7 @@ function replay(seed, log) {
     if (a[0] === 'p') r = sim.pour(a[1], a[2]);
     else if (a[0] === 'u') r = sim.undo();
     else if (a[0] === 'e') r = sim.extraTube();
+    else if (a[0] === 'h') r = sim.hint();
     else if (a[0] === 'q') { sim.quit(); r = { ok: true }; }
     else return { ok: false, reason: 'unknown action', sim };
     if (!r.ok) return { ok: false, reason: 'invalid action', sim };
