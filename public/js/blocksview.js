@@ -86,6 +86,9 @@ export class BlocksView {
         if (res.ok) this.afterPlace(res, color);
       } else {
         haptic(20);
+        sfx.bad?.();
+        const [sx, sy] = this.slotCenter(d.slot);
+        this.returning = { slot: d.slot, x0: d.x, y0: d.y - d.lift, x1: sx, y1: sy, t0: performance.now() };
       }
     };
     // keyboard: 1/2/3 pick piece, arrows move ghost, Enter place
@@ -132,9 +135,19 @@ export class BlocksView {
     const p = PIECES[t.piece];
     const C = this.cell;
     const px = d.x - (p.w * C) / 2, py = d.y - d.lift - (p.h * C) / 2;
-    const c = Math.round((px - this.bx) / C), r = Math.round((py - this.by) / C);
+    const fx = (px - this.bx) / C, fy = (py - this.by) / C;
+    const c = Math.round(fx), r = Math.round(fy);
     if (r < -1 || c < -1 || r > SIZE || c > SIZE) return null;
-    return [r, c];
+    if (this.game.canPlace(t.piece, r, c)) return [r, c];
+    // forgiving drops: the nearest legal spot close to where the piece is
+    let best = null, bestD = 0.75;
+    for (let dr = -1; dr <= 1; dr++) for (let dc = -1; dc <= 1; dc++) {
+      const rr = Math.floor(fy) + dr + (fy % 1 > 0.5 ? 1 : 0), cc = Math.floor(fx) + dc + (fx % 1 > 0.5 ? 1 : 0);
+      if (!this.game.canPlace(t.piece, rr, cc)) continue;
+      const dist = Math.hypot(rr - fy, cc - fx);
+      if (dist < bestD) { bestD = dist; best = [rr, cc]; }
+    }
+    return best || [r, c];
   }
 
   afterPlace(res, color) {
@@ -149,10 +162,17 @@ export class BlocksView {
         this.flashes.push({ r, c, color: col, t0: now });
         this.burst(this.bx + (c + 0.5) * C, this.by + (r + 0.5) * C, PALETTE[col]?.base || '#fff', this.reduced ? 1 : 3);
       }
-      const label = res.lines > 1 ? `${res.lines} lines!` : '';
-      if (label) this.popup(label, '#7FD4FF');
+      const power = res.lines + (res.combo - 1);
+      const call = power >= 6 ? 'UNREAL!' : power >= 4 ? 'Amazing!' : power >= 3 ? 'Great!' : power >= 2 ? 'Good!' : '';
+      if (call) this.popup(call, power >= 4 ? '#FF9AD5' : '#7FD4FF');
       if (res.combo > 1) this.popup(`Combo x${res.combo}`, '#FFD45E', 0.4);
-      if (res.perfect) { this.popup('Perfect Clear!', '#7CFFB2', -0.4); sfx.win(); }
+      if (!this.reduced && res.lines >= 2) this.shake = Math.min(1, 0.35 + res.lines * 0.15);
+      if (res.perfect) {
+        this.popup('✨ Perfect Clear! ✨', '#7CFFB2', -0.4);
+        sfx.win();
+        haptic(60);
+        if (!this.reduced) for (let i = 0; i < 40; i++) this.burst(this.bx + Math.random() * SIZE * C, this.by + Math.random() * SIZE * C, PALETTE[i % 6]?.base || '#fff', 2);
+      }
     }
     this.popups.push({ x: this.W / 2, y: this.by + SIZE * C * 0.15, text: `+${res.points}`, t0: now, small: true, color: '#fff' });
     if (res.refilled) this.trayAnim = [1, 1, 1];
@@ -200,6 +220,10 @@ export class BlocksView {
     const ctx = this.ctx, C = this.cell, g = this.game;
     ctx.setTransform(this.dpr, 0, 0, this.dpr, 0, 0);
     ctx.clearRect(0, 0, this.canvas.width, this.canvas.height);
+    if (this.shake > 0) {
+      ctx.translate((Math.random() - 0.5) * 9 * this.shake, (Math.random() - 0.5) * 9 * this.shake);
+      this.shake = Math.max(0, this.shake - 0.05);
+    }
 
     // board background
     ctx.fillStyle = 'rgba(8,30,70,0.45)';
@@ -212,6 +236,30 @@ export class BlocksView {
         ctx.fill();
       }
 
+    // danger: the board is nearly full
+    const filledN = g.board.flat().filter((v) => v !== -1).length;
+    if (filledN > 44) {
+      const k = Math.min(1, (filledN - 44) / 12) * (0.5 + 0.5 * Math.sin(now / 260));
+      ctx.strokeStyle = `rgba(255,90,90,${0.25 + k * 0.45})`;
+      ctx.lineWidth = 4;
+      roundRect(ctx, this.bx - 6, this.by - 6, C * SIZE + 12, C * SIZE + 12, 14);
+      ctx.stroke();
+    }
+    // combo window: dots show how many placements you have left to keep it alive
+    if (g.combo > 0 && g.state === 'playing') {
+      const left = Math.max(0, 3 - g.sinceClear);
+      const y = this.by - 16, x0 = this.bx + C * SIZE / 2 - 60;
+      ctx.font = '800 12px ui-rounded, system-ui, sans-serif';
+      ctx.textAlign = 'left';
+      ctx.textBaseline = 'middle';
+      ctx.fillStyle = '#FFD45E';
+      ctx.fillText(`Combo x${g.combo}`, x0, y);
+      for (let i = 0; i < 3; i++) {
+        ctx.fillStyle = i < left ? '#FFD45E' : 'rgba(255,255,255,0.18)';
+        ctx.beginPath(); ctx.arc(x0 + 82 + i * 14, y, 4.5, 0, Math.PI * 2); ctx.fill();
+      }
+    }
+
     // ghost preview + would-clear highlight
     let ghost = null;
     const active = this.drag || (this.kb && { slot: this.kb.slot });
@@ -219,7 +267,7 @@ export class BlocksView {
       const t = g.tray[active.slot];
       const pos = this.drag ? this.dropCell(this.drag) : [this.kb.r, this.kb.c];
       if (t && pos && g.canPlace(t.piece, pos[0], pos[1])) ghost = { t, pos };
-      else if (t && pos && this.kb) ghost = { t, pos, bad: true };
+      else if (t && pos) ghost = { t, pos, bad: true };
     }
     let clearRows = new Set(), clearCols = new Set();
     if (ghost && !ghost.bad) {
@@ -268,6 +316,7 @@ export class BlocksView {
     for (let i = 0; i < 3; i++) {
       const t = g.tray[i];
       if (!t || (this.drag && this.drag.slot === i)) continue;
+      if (this.returning && this.returning.slot === i) continue;
       const p = PIECES[t.piece];
       const fits = g.fitsAnywhere(t.piece);
       if (this.trayAnim[i] > 0) this.trayAnim[i] = Math.max(0, this.trayAnim[i] - 0.06);
@@ -282,6 +331,18 @@ export class BlocksView {
       }
       for (const [dr, dc] of p.cells) {
         this.drawBlock(cx - (p.w * s) / 2 + dc * s, cy - (p.h * s) / 2 + dr * s, s, t.color, fits ? 1 : 0.3);
+      }
+    }
+    // a rejected piece slides back to its slot
+    if (this.returning) {
+      const r = this.returning, t = g.tray[r.slot];
+      const k = Math.min(1, (now - r.t0) / 220);
+      if (!t || k >= 1) this.returning = null;
+      else {
+        const e = 1 - (1 - k) * (1 - k), p = PIECES[t.piece];
+        const s2 = C + (this.trayCell - C) * e;
+        const x = r.x0 + (r.x1 - r.x0) * e - (p.w * s2) / 2, y = r.y0 + (r.y1 - r.y0) * e - (p.h * s2) / 2;
+        for (const [dr, dc] of p.cells) this.drawBlock(x + dc * s2, y + dr * s2, s2, t.color, 0.95);
       }
     }
     // dragged piece

@@ -76,15 +76,67 @@ export class BlockGame {
   }
 
   refill() {
-    // Ensure at least one piece in the new tray fits, so a fresh tray is
-    // never instantly game over unless the board is truly packed.
-    for (let attempt = 0; attempt < 6; attempt++) {
+    // Fair trays: the three pieces must be placeable one after another in
+    // SOME order (line clears included). On a crowded board one piece is
+    // nudged toward something that finishes a line – like a kind dealer.
+    const filled = this.board.flat().filter((v) => v !== -1).length;
+    let fallback = null;
+    for (let attempt = 0; attempt < 12; attempt++) {
       const tray = [0, 1, 2].map(() => ({ piece: this.randomPiece(), color: this.rng.int(6) }));
-      if (attempt === 5 || tray.some((t) => this.fitsAnywhere(t.piece))) {
-        this.tray = tray;
-        return;
+      if (filled > 26 && this.rng.next() < 0.5) {
+        const helper = this.lineFinisher();
+        if (helper !== null) tray[this.rng.int(3)].piece = helper;
+      }
+      if (!fallback && tray.some((t) => this.fitsAnywhere(t.piece))) fallback = tray;
+      if (this.solvableTray(tray.map((t) => t.piece))) { this.tray = tray; return; }
+    }
+    this.tray = fallback || [0, 1, 2].map(() => ({ piece: this.randomPiece(), color: this.rng.int(6) }));
+  }
+
+  /** Can these pieces all be placed, in some order? (bounded search; clears included) */
+  solvableTray(pieces) {
+    let budget = 3000;
+    const place = (board, pid, r0, c0) => {
+      const b = board.map((row) => row.slice());
+      for (const [dr, dc] of PIECES[pid].cells) b[r0 + dr][c0 + dc] = 0;
+      const rows = [], cols = [];
+      for (let r = 0; r < SIZE; r++) if (b[r].every((v) => v !== -1)) rows.push(r);
+      for (let c = 0; c < SIZE; c++) if (b.every((row) => row[c] !== -1)) cols.push(c);
+      for (const r of rows) b[r].fill(-1);
+      for (const c of cols) for (let r = 0; r < SIZE; r++) b[r][c] = -1;
+      return b;
+    };
+    const fits = (board, pid, r0, c0) => PIECES[pid].cells.every(([dr, dc]) => { const r = r0 + dr, c = c0 + dc; return r >= 0 && c >= 0 && r < SIZE && c < SIZE && board[r][c] === -1; });
+    const go = (board, left) => {
+      if (!left.length) return true;
+      for (let i = 0; i < left.length; i++) {
+        const pid = left[i], rest = left.filter((_, k) => k !== i);
+        for (let r = 0; r < SIZE; r++) for (let c = 0; c < SIZE; c++) {
+          if (!fits(board, pid, r, c)) continue;
+          if (--budget <= 0) return true; // too many options to doubt it
+          if (go(place(board, pid, r, c), rest)) return true;
+        }
+      }
+      return false;
+    };
+    return go(this.board, pieces);
+  }
+
+  /** A piece that fits and completes a row or column right now, if any. */
+  lineFinisher() {
+    const ids = PIECES.map((p) => p.id).filter((id) => PIECES[id].cells.length <= 5);
+    for (let k = 0; k < ids.length; k++) {
+      const pid = ids[(k + this.rng.int(ids.length)) % ids.length];
+      for (let r = 0; r < SIZE; r++) for (let c = 0; c < SIZE; c++) {
+        if (!this.canPlace(pid, r, c)) continue;
+        const cells = new Set(PIECES[pid].cells.map(([dr, dc]) => (r + dr) * SIZE + c + dc));
+        const full = (rr, cc) => this.board[rr][cc] !== -1 || cells.has(rr * SIZE + cc);
+        for (let i = 0; i < SIZE; i++) {
+          if ([...Array(SIZE).keys()].every((j) => full(i, j)) || [...Array(SIZE).keys()].every((j) => full(j, i))) return pid;
+        }
       }
     }
+    return null;
   }
 
   canPlace(pieceId, r0, c0) {
