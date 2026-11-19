@@ -37,7 +37,8 @@ export default class ChessView {
     this.flip = sim.mySide === 'b';
     this.destroyed = false;
     this.endSent = false;
-    this.resize();
+    this.resize(); // re-measure whenever the layout changes (controls rendering, rotation), not just on window resize
+    if (typeof ResizeObserver !== 'undefined') { this.sizeObs = new ResizeObserver(() => { if (!this.destroyed) this.resize(); }); this.sizeObs.observe(this.canvas); }
     this.bind();
     this.renderControls();
     this.loop = this.loop.bind(this);

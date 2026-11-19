@@ -656,3 +656,10 @@ body.cozy .btn, body.cozy .game-card .tag, body.cozy .seg-btn.on { filter: none;
 .card .tag, .game-card .tag { background: #b3261e; color: #fff; }
 .game-card .tag.hot { background: #ffd23f; color: #3a2400; }
 .game-card .tag.new, .card .tag.new { background: #e8f3ff; color: #0b2a55; }
+
+.more-games { margin-top: 10px; }
+.more-games > summary { cursor: pointer; font-weight: 800; padding: 12px 14px; border-radius: var(--radius); background: var(--panel); border: 2px solid var(--line); list-style: none; text-align: center; min-height: 44px; }
+.more-games > summary::-webkit-details-marker { display: none; }
+.more-games[open] > summary { margin-bottom: 10px; }
+.big-stars { display: flex; justify-content: center; gap: 6px; }
+.big-stars .star-off { color: rgba(255,255,255,.28); }

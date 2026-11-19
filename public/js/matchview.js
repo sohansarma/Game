@@ -35,7 +35,8 @@ export class MatchView {
     this.shake = 0;
     this.destroyed = false;
     for (const g of game.snapshot()) this.addSprite(g, g.r);
-    this.resize();
+    this.resize(); // re-measure whenever the layout changes (controls rendering, rotation), not just on window resize
+    if (typeof ResizeObserver !== 'undefined') { this.sizeObs = new ResizeObserver(() => { if (!this.destroyed) this.resize(); }); this.sizeObs.observe(this.canvas); }
     this.bindInput();
     this.loop = this.loop.bind(this);
     this.raf = requestAnimationFrame(this.loop);
@@ -302,9 +303,21 @@ export class MatchView {
     const cv = this.canvas;
     let down = null;
     const onDown = (e) => {
+      if (this.busy && this.game.state !== 'playing') { this.fastForward(); return; } // tap skips the celebration
       if (this.busy && this.mode !== 'swap') return; // swipes are allowed mid-cascade (fast-forward)
-      const cell = this.cellAt(e.clientX, e.clientY);
+      let cell = this.cellAt(e.clientX, e.clientY);
       if (!cell) return;
+      if (this.busy) {
+        // mid-cascade: grab the gem drawn under your finger, wherever it lands
+        const rect = this.canvas.getBoundingClientRect();
+        const fx = (e.clientX - rect.left - this.ox) / this.cell, fy = (e.clientY - rect.top - this.oy) / this.cell;
+        let hit = null;
+        for (const [id, sp] of this.sprites) if (Math.abs(sp.x + 0.5 - fx) < 0.5 && Math.abs(sp.y + 0.5 - fy) < 0.5) { hit = id; break; }
+        if (hit === null) return;
+        cell = null;
+        for (let r = 0; r < this.game.rows && !cell; r++) for (let c = 0; c < this.game.cols; c++) if (this.game.gems[r][c]?.id === hit) { cell = [r, c]; break; }
+        if (!cell) return; // that gem is about to be cleared
+      }
       try { cv.setPointerCapture?.(e.pointerId); } catch { /* synthetic or lost pointer */ }
       down = { cell, x: e.clientX, y: e.clientY, moved: false };
       this.clearHint();

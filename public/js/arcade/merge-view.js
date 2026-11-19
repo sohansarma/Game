@@ -18,7 +18,8 @@ export default class MergeView {
     this.destroyed = false;
     this.controls = controls;
     this.renderControls();
-    this.resize();
+    this.resize(); // re-measure whenever the layout changes (controls rendering, rotation), not just on window resize
+    if (typeof ResizeObserver !== 'undefined') { this.sizeObs = new ResizeObserver(() => { if (!this.destroyed) this.resize(); }); this.sizeObs.observe(this.canvas); }
     this.bind();
     this.loop = this.loop.bind(this);
     this.raf = requestAnimationFrame(this.loop);

@@ -12,7 +12,8 @@ export default class TideView {
     this.reduced = reducedMotion;
     this.wave = null; // { cells: Map(index -> delay), t0 }
     this.destroyed = false;
-    this.resize();
+    this.resize(); // re-measure whenever the layout changes (controls rendering, rotation), not just on window resize
+    if (typeof ResizeObserver !== 'undefined') { this.sizeObs = new ResizeObserver(() => { if (!this.destroyed) this.resize(); }); this.sizeObs.observe(this.canvas); }
     this.onResize = () => this.resize();
     window.addEventListener('resize', this.onResize);
     this.onKey = (e) => { const n = Number(e.key); if (n >= 1 && n <= COLORS && !document.querySelector('.modal.open')) this.pick(n - 1); };

@@ -25,7 +25,8 @@ export default class SerpentView {
       <button class="btn sm" data-dash aria-label="Dash (costs a segment)">⚡ Dash</button></div>`;
     controls.querySelector('[data-dash]').onpointerdown = (e) => { e.preventDefault(); this.dash(); };
     for (const b of controls.querySelectorAll('[data-d]')) b.onpointerdown = (e) => { e.preventDefault(); this.turn(b.dataset.d); };
-    this.resize();
+    this.resize(); // re-measure whenever the layout changes (controls rendering, rotation), not just on window resize
+    if (typeof ResizeObserver !== 'undefined') { this.sizeObs = new ResizeObserver(() => { if (!this.destroyed) this.resize(); }); this.sizeObs.observe(this.canvas); }
     this.bind();
     this.loop = this.loop.bind(this);
     this.raf = requestAnimationFrame(this.loop);

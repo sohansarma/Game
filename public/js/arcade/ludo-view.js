@@ -60,7 +60,8 @@ export default class LudoView {
     this.autoTimer = null;
     const ref = sim.mySide ?? sim.game.players.findIndex((p) => p === 'human');
     this.rot = (3 - Math.max(0, ref) + 4) % 4; // quarter turns so `ref` sits bottom-left
-    this.resize();
+    this.resize(); // re-measure whenever the layout changes (controls rendering, rotation), not just on window resize
+    if (typeof ResizeObserver !== 'undefined') { this.sizeObs = new ResizeObserver(() => { if (!this.destroyed) this.resize(); }); this.sizeObs.observe(this.canvas); }
     this.bind();
     this.renderControls();
     this.mountReactionButton();

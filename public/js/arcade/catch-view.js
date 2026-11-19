@@ -23,7 +23,8 @@ export default class CatchView {
     this.overSent = false;
     this.lastSecond = null;
     controls.innerHTML = '<div class="small muted center">Tap crabs · avoid 🪼 · ⏰ adds time · keys 1–9, 0, -, = too</div>';
-    this.resize();
+    this.resize(); // re-measure whenever the layout changes (controls rendering, rotation), not just on window resize
+    if (typeof ResizeObserver !== 'undefined') { this.sizeObs = new ResizeObserver(() => { if (!this.destroyed) this.resize(); }); this.sizeObs.observe(this.canvas); }
     this.bind();
     this.loop = this.loop.bind(this);
     this.raf = requestAnimationFrame(this.loop);

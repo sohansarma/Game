@@ -97,7 +97,10 @@ async function boot() {
   }
   const ch = parseChallenge(location.hash);
   if (!s.onboarded) await onboarding();
-  else if (!ch) { await maybeDailyReward(); maybeSuggestCozy(); }
+  else if (!ch) {
+    if (dailyStatus().canClaim) setTimeout(() => toast('🎁 Your daily treasure is ready – tap the gift at the top'), 900);
+    maybeSuggestCozy();
+  }
   if (ch) acceptChallenge(ch);
   else if (s.onboarded && new URLSearchParams(location.search).has('tide')) {
     try { history.replaceState(null, '', location.pathname + location.hash); } catch { /* sandboxed */ }
@@ -1317,7 +1320,10 @@ function playMatch(run) {
 
   view = new MatchView($('#g-canvas', el), game, {
     reducedMotion: s.settings.reducedMotion,
-    onUpdate: (score) => refreshHud(score),
+    onUpdate: (score) => {
+      refreshHud(score);
+      if (run.kind === 'level' && game.state === 'won' && !run.win) saveLevelWin(run);
+    },
     onInvalid: () => {},
     onSettled: () => {
       $('#g-coach', el)?.remove();
@@ -1489,6 +1495,33 @@ async function submitRun(entry) {
   }
 }
 
+/** Records a won level once – called as soon as the win happens, before the celebration. */
+function saveLevelWin(run) {
+  if (run.win) return run.win;
+  const game = run.game, n = run.n;
+  recordMatchStats(game);
+  noteGameEnd('tidepop', game.score > (load().levels[n]?.best || 0), 'level');
+  const stars = game.stars();
+  const prev = load().levels[n];
+  const prevStars = prev?.stars || 0;
+  const shells = prevStars === 0 ? 10 + stars * 5 : Math.max(0, stars - prevStars) * 5;
+  let gift = null;
+  if (prevStars === 0 && n % 5 === 0) gift = ['hammer', 'shuffle', 'moves'][(n / 5) % 3];
+  const streak = (load().winStreak || 0) + 1;
+  const streakGift = streak === 3 ? { hammer: 1 } : streak === 5 ? { hammer: 1, moves: 1 } : streak % 10 === 0 ? { hammer: 1, shuffle: 1, moves: 1 } : null;
+  update((d) => {
+    d.winStreak = streak;
+    if (streakGift) for (const [k, v] of Object.entries(streakGift)) d.boosters[k] += v;
+    d.levels[n] = { stars: Math.max(prevStars, stars), best: Math.max(prev?.best || 0, game.score) };
+    d.shells += shells;
+    if (prevStars === 0) d.stats.levelsWon++;
+    if (gift) d.boosters[gift]++;
+  });
+  submitRun({ board: 'stars', level: n, seed: run.cfg.seed, log: game.log });
+  run.win = { stars, prev, shells, gift, streak, streakGift };
+  return run.win;
+}
+
 async function endLevel(run) {
   const game = run.game;
   const n = run.n;
@@ -1522,32 +1555,14 @@ async function endLevel(run) {
     return;
   }
   run.ended = true;
-  recordMatchStats(game);
-  noteGameEnd('tidepop', game.score > (load().levels[n]?.best || 0), 'level');
-  const stars = game.stars();
-  const prev = load().levels[n];
-  const prevStars = prev?.stars || 0;
-  let shells = prevStars === 0 ? 10 + stars * 5 : Math.max(0, stars - prevStars) * 5;
-  let gift = null;
-  if (prevStars === 0 && n % 5 === 0) gift = ['hammer', 'shuffle', 'moves'][(n / 5) % 3];
-  const streak = (load().winStreak || 0) + 1;
-  const streakGift = streak === 3 ? { hammer: 1 } : streak === 5 ? { hammer: 1, moves: 1 } : streak % 10 === 0 ? { hammer: 1, shuffle: 1, moves: 1 } : null;
-  update((d) => {
-    d.winStreak = streak;
-    if (streakGift) for (const [k, v] of Object.entries(streakGift)) d.boosters[k] += v;
-    d.levels[n] = { stars: Math.max(prevStars, stars), best: Math.max(prev?.best || 0, game.score) };
-    d.shells += shells;
-    if (prevStars === 0) d.stats.levelsWon++;
-    if (gift) d.boosters[gift]++;
-  });
+  const { stars, prev, shells, gift, streak, streakGift } = run.win || saveLevelWin(run);
   sfx.win();
   haptic(50);
   announceAchievements();
-  submitRun({ board: 'stars', level: n, seed: run.cfg.seed, log: game.log });
   const next = Math.min(n + 1, MAX_LEVEL);
   const worldEnd = n % 10 === 0;
   const p = modal(`<h2>${worldEnd ? '👑 World complete!' : 'Level complete!'}</h2>
-    <div class="big-stars">${[0, 1, 2].map((i) => `<span class="${i < stars ? 'star-on' : 'star-off'}">★</span>`).join('')}</div>
+    <div class="big-stars" role="img" aria-label="${stars} of 3 stars">${[0, 1, 2].map((i) => `<span class="${i < stars ? 'star-on' : 'star-off'}" aria-hidden="true">★</span>`).join('')}</div>
     <div class="big-score">${fmt(game.score)}</div>
     ${prev?.best && game.score > prev.best ? '<p>🎉 New best!</p>' : ''}
     ${shells ? `<div class="reward">+${shells} 🐚</div>` : ''}${gift ? `<div class="reward">🎁 ${BOOSTER_ICON[gift]} +1</div>` : ''}
@@ -1601,6 +1616,16 @@ function hubGames() {
       return { id: g.id, title: g.title, icon: g.icon, tagline: g.tagline, best: `${fmt(st.best)}${t ? ` · ${t.icon}` : ''}`, played: st.daily[dayKey()] !== undefined, everPlayed: (st.games || 0) > 0, dailyBoard: g.id + 'Daily', open: () => arcadeMenu(g.id) };
     }),
   ];
+}
+
+/** Shell Swap first, then the games you play most (or a good starter set), at most 6 + the hot game. */
+function featuredGames(games, hot) {
+  const s = load();
+  const starters = ['tidepop', 'reef', 'chess', 'ludo', 'miner', 'stack'];
+  const score = (g) => (s.played?.[g.id] || 0) * 10 + (starters.includes(g.id) ? 6 - starters.indexOf(g.id) : 0);
+  const pick = [games.find((g) => g.id === 'tidepop'), ...games.filter((g) => g.id !== 'tidepop').sort((a, b) => score(b) - score(a))].filter(Boolean).slice(0, 6);
+  if (hot && !pick.includes(hot)) pick[pick.length - 1] = hot;
+  return pick;
 }
 
 function hotGameId() {
@@ -1846,13 +1871,14 @@ function showHub() {
       <div class="hub-head"><div class="logo small-logo">Tide<span>pop</span></div><div class="hub-timer" aria-live="off">New challenges in <b id="u-timer">${hms(msToReset())}</b></div></div>
       ${tideCardHtml()}
       <h3 class="hub-h">🎮 Games</h3>
-      <div class="game-grid">${games.map((g) => {
+      <div class="game-grid">${featuredGames(games, hot).map((g) => {
         const rk = ranks[g.dailyBoard + ':' + dayKey()];
-        const fresh = !g.everPlayed;
+        const fresh = !g.everPlayed && games.filter((x) => x.everPlayed).length >= 3;
         const tag = g.id === hot.id ? '<span class="tag hot">🔥 2× today</span>' : g.played ? `<span class="tag done">${rk ? '#' + rk : '✓'} today</span>` : fresh ? '<span class="tag new">New</span>' : '';
         return `<button class="game-card ${g.id === hot.id ? 'hot' : ''}" data-g="${g.id}" aria-label="${esc(g.title)}. ${esc(g.tagline)}. Best ${esc(String(g.best).replace(/<[^>]+>/g, ''))}${g.id === hot.id ? '. Hot game: double shells today' : g.played ? '. Played today' : ''}">
           ${tag}<span class="game-icon" aria-hidden="true">${g.icon}</span><b>${esc(g.title)}</b><span class="sub">${esc(g.tagline)}</span><span class="sub">Best: <b>${g.best}</b></span></button>`;
       }).join('')}</div>
+      ${games.length > featuredGames(games, hot).length ? `<details class="more-games"${load().moreGamesOpen ? ' open' : ''}><summary>🕹️ More games (${games.length - featuredGames(games, hot).length})</summary><div class="game-grid">${games.filter((g) => !featuredGames(games, hot).includes(g)).map((g) => `<button class="game-card" data-g="${g.id}" aria-label="${esc(g.title)}. ${esc(g.tagline)}"><span class="game-icon" aria-hidden="true">${g.icon}</span><b>${esc(g.title)}</b><span class="sub">${esc(g.tagline)}</span><span class="sub">Best: <b>${g.best}</b></span></button>`).join('')}</div></details>` : ''}
       ${accountNudgeHtml(load())}
       ${pipHtml(load())}
       <div class="missions">
