@@ -2797,12 +2797,23 @@ async function showCommunity(tab = 'trending') {
   const el = showScreen('community', `
     <div class="topbar"><button class="icon-btn" id="c-back" aria-label="Back">←</button><h2 class="grow">Community games</h2>
       <button class="icon-btn" id="c-studio" aria-label="Creator Studio">🛠️</button></div>
-    <div class="tabs" role="tablist">${[['trending', '🔥 Trending'], ['top', '⭐ Top rated'], ['jam', '🎨 Jam'], ['new', '🆕 New'], ['mine', '🛠️ Mine']].map(([k, l]) => `<button class="tab ${k === tab ? 'on' : ''}" data-t="${k}">${l}</button>`).join('')}</div>
+    <div class="tabs wrap" role="tablist">${[['trending', '🔥 Trending'], ['top', '⭐ Top'], ['jam', '🎨 Jam'], ['new', '🆕 New'], ['mine', '🛠️ Mine']].map(([k, l]) => `<button class="tab ${k === tab ? 'on' : ''}" data-t="${k}">${l}</button>`).join('')}</div>
     <div class="scroll"><div class="list" id="c-list"><p class="center muted">Loading…</p></div></div>`);
   $('#c-back', el).onclick = () => { sfx.tap(); showHub(); };
   $('#c-studio', el).onclick = () => { sfx.tap(); showStudio(); };
   for (const b of $$('.tab', el)) b.onclick = () => { sfx.tap(); showCommunity(b.dataset.t); };
   const list = $('#c-list', el);
+  if (await api.ugc.canModerate().catch(() => false)) {
+    const tabs = $('.tabs', el);
+    if (tabs && !$('[data-t="held"]', tabs)) { tabs.insertAdjacentHTML('beforeend', `<button class="tab ${tab === 'held' ? 'on' : ''}" data-t="held">⏸ Held</button>`); $('[data-t="held"]', tabs).onclick = () => { sfx.tap(); showCommunity('held'); }; }
+    if (tab === 'held') {
+      const held = await api.ugc.held().catch(() => []);
+      list.innerHTML = held.length ? held.map((g) => `${ugcCard(g)}${g.appeal ? `<p class="small">✉️ Appeal: ${esc(g.appeal.note || '(no note)')}</p>` : ''}<div class="row" style="gap:8px;margin:4px 0 12px"><button class="btn sm green" data-mod="clear" data-id="${g.id}">✓ Clear</button><button class="btn sm red" data-mod="remove" data-id="${g.id}">🗑 Remove</button></div>`).join('') : '<div class="tip">Nothing is waiting for review. 🌊</div>';
+      for (const b of $$('[data-mod]', list)) b.onclick = async () => { try { await api.ugc.moderate(b.dataset.id, b.dataset.mod); toast(b.dataset.mod === 'remove' ? 'Removed' : 'Cleared – back on the shelves'); } catch (e) { toast(e.message); } showCommunity('held'); };
+      for (const b of $$('.ugc-card', list)) b.onclick = () => ugcDetail(b.dataset.id);
+      return;
+    }
+  }
   if (!(await api.ugc.available())) {
     list.innerHTML = `<div class="tip">${api.inArtifact() ? 'Sign in to Claude to browse and play community games.' : "Can't reach the game server right now."}</div>`;
     return;
@@ -2834,7 +2845,8 @@ async function ugcDetail(id) {
     <p class="muted small">by <b>${esc(g.owner)}</b> · ${TEMPLATES[g.template].icon} ${TEMPLATES[g.template].name} · version ${g.version}</p>
     ${g.description ? `<p>${esc(g.description)}</p>` : ''}
     ${g.remix ? `<p class="small">🔁 Remix of <b>${esc(g.remix.title)}</b> by ${esc(g.remix.owner)}</p>` : ''}
-    ${g.underReview && g.mine ? '<div class="tip">⏸ <b>Under review.</b> A few players reported this version, so it is off the shelves until a moderator checks it. Publishing a fixed version starts a fresh review.</div>' : ''}
+    ${g.underReview && g.mine ? `<div class="tip">⏸ <b>Under review.</b> A few players reported this version, so it is off the shelves until a moderator checks it. Publishing a fixed version starts a fresh review.${g.appeal ? '<br>✉️ You asked for a review – a moderator will look.' : ''}</div>` : ''}
+    ${g.remixes ? `<p class="small">🔁 Remixed ${g.remixes} time${g.remixes > 1 ? 's' : ''} by the community</p>` : ''}
     <p><span class="star-on">${stars5(g.rating)}</span> ${g.ratings ? `${g.rating.toFixed(1)} from ${g.ratings} rating${g.ratings > 1 ? 's' : ''}` : 'Not rated yet'} · ▶ ${fmt(g.plays)} plays</p>
     ${g.mine ? '<p class="small muted">🛠️ You made this – players rate it after they play.</p>' : played ? `<div class="rate-row" role="group" aria-label="Your rating">${[1, 2, 3, 4, 5].map((n) => `<button class="rate-star ${n <= (g.myRating || 0) ? 'on' : ''}" data-s="${n}" aria-label="${n} star${n > 1 ? 's' : ''}">★</button>`).join('')}</div><p class="small muted">${g.myRating ? 'Your rating – tap to change' : 'Tap to rate this game'}</p>` : '<p class="small muted">Play once to rate it.</p>'}
     <div class="tip"><b>What's new</b><br>${(g.history || []).slice(-3).reverse().map((h) => `v${h.v} · ${new Date(h.at).toLocaleDateString()} – ${esc(h.note)}`).join('<br>')}</div>
@@ -2842,6 +2854,7 @@ async function ugcDetail(id) {
     buttons: [
       { label: '▶ Play', value: 'play', cls: 'green' },
       ...(g.mine ? [{ label: '✏️ Edit & publish update', value: 'edit', cls: 'blue' }] : [{ label: '🔁 Remix it', value: 'remix', cls: 'blue' }]),
+      ...(g.mine && g.underReview && !g.appeal ? [{ label: '✉️ Ask a moderator to look', value: 'appeal', cls: 'ghost' }] : []),
       ...(!g.mine && played ? [{ label: '🚩 Report', value: 'report', cls: 'ghost' }] : []),
       { label: 'Back', value: 'back', cls: 'ghost' },
     ],
@@ -2850,7 +2863,7 @@ async function ugcDetail(id) {
         const n = Number(b.dataset.s);
         $$('.rate-star', sheet).forEach((x) => x.classList.toggle('on', Number(x.dataset.s) <= n));
         sfx.star(n - 1);
-        try { await api.ugc.rate(id, n); toast(`Rated ${n}★ – thanks!`); } catch { toast("Couldn't save your rating"); }
+        try { await api.ugc.rate(id, n); toast(`Rated ${n}★ – thanks!`); } catch (e) { toast(e?.message ? `Rating not saved: ${e.message}` : "Couldn't save your rating"); }
       };
       api.top('ugc', key).then((d) => {
         const t = $('#u-top', sheet);
@@ -2860,6 +2873,12 @@ async function ugcDetail(id) {
   });
   if (r === 'play') playUgc(g);
   else if (r === 'edit') editGame(g.spec, g.id, g.version);
+  else if (r === 'appeal') {
+    let note = '';
+    const ok = await modal('<h2>✉️ Ask for a review</h2><p class="small">Tell the moderator what your game is about (optional).</p><input id="ap-note" maxlength="200" style="width:100%">', { buttons: [{ label: 'Send', value: true, cls: 'green' }, { label: 'Cancel', value: false, cls: 'ghost' }], row: true, onOpen: (sh) => { $('#ap-note', sh).oninput = (e) => { note = e.target.value; }; } });
+    if (ok) { try { await api.ugc.appeal(id, note); toast('Sent – a moderator will take a look'); } catch (e) { toast(e.message || "Couldn't send"); } }
+    ugcDetail(id);
+  }
   else if (r === 'remix') {
     // start a new draft from this game's rules, crediting the original
     const nid = api.newUgcId();
@@ -2869,7 +2888,10 @@ async function ugcDetail(id) {
   }
   else if (r === 'report') {
     const ok = await modal('<h2>🚩 Report this game?</h2><p>Report games that are mean, scary or inappropriate. When several players report a version it is held for a moderator to check.</p>', { buttons: [{ label: 'Report', value: true, cls: 'red' }, { label: 'Cancel', value: false, cls: 'ghost' }], row: true });
-    if (ok) { await api.ugc.report(id).catch(() => {}); toast('Thanks – our community keeps Tidepop kind.'); }
+    if (ok) {
+      try { await api.ugc.report(id); toast('Thanks – our community keeps Tidepop kind.'); }
+      catch (e) { toast(e?.message ? `Report not sent: ${e.message}` : 'Report not sent – check your connection'); }
+    }
     showCommunity();
   } else if (r === 'back' && currentScreen() !== 'community') showCommunity();
 }
@@ -2925,7 +2947,7 @@ async function endUgc(run) {
     d.shells += shells;
   });
   noteGameEnd('community', score > best);
-  const playedP = api.ugc.played(g.id).catch(() => {});
+  const playedP = api.ugc.played(g.id, { seed: run.seed, log: sim.log, version: g.version }).catch(() => {});
   score > best ? sfx.win() : sfx.lose();
   announceAchievements();
   const p = modal(`<h2>${g.hero} ${esc(sim.overReason || 'Game over')}</h2><div class="big-score">${fmt(score)}</div>
@@ -2939,7 +2961,7 @@ async function endUgc(run) {
         const n = Number(b.dataset.s);
         $$('.rate-star', sheet).forEach((x) => x.classList.toggle('on', Number(x.dataset.s) <= n));
         sfx.star(n - 1);
-        playedP.then(() => api.ugc.rate(g.id, n)).then(() => toast(`Rated ${n}★ – the creator thanks you!`)).catch(() => {});
+        playedP.then(() => api.ugc.rate(g.id, n)).then(() => toast(`Rated ${n}★ – the creator thanks you!`)).catch((e) => toast(e?.message ? `Rating not saved: ${e.message}` : "Rating not saved – check your connection"));
       };
     },
   });

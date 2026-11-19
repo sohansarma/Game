@@ -26,7 +26,7 @@ async function sharedDb() {
     const timeout = new Promise((r) => setTimeout(() => r(null), 10000));
     const [db, user] = await Promise.race([Promise.all([window.claude.use('db'), window.claude.use('user')]), timeout.then(() => [null, null])]);
     const uid = db && user ? await user.id() : null;
-    shared = db && uid ? { db, uid } : null;
+    shared = db && uid ? { db, uid, user } : null;
   } catch {
     shared = null;
   }
@@ -260,12 +260,15 @@ export async function checkServer() {
   return online;
 }
 
+let registering = null;
 async function ensureRegistered() {
   const s = load();
   if (s.token) return s;
-  const r = await req('/register', { method: 'POST', body: JSON.stringify({ playerId: s.playerId, name: s.name }) });
-  update((d) => { d.token = r.token; d.playerId = r.playerId; });
-  return load();
+  // a single in-flight registration: parallel callers share it (two at once used to mint two ids)
+  registering ||= req('/register', { method: 'POST', body: JSON.stringify({ playerId: s.playerId, name: s.name }) })
+    .then((r) => { update((d) => { d.token = r.token; d.playerId = r.playerId; }); return load(); })
+    .finally(() => { registering = null; });
+  return registering;
 }
 
 export async function rename(name) {
@@ -531,12 +534,21 @@ async function sharedUgcAll(sh) {
     for (const [id, ver] of Object.entries(x.rep || {})) (agg[id] ||= { r: {}, p: {}, rep: {} }).rep[d.id] = ver;
   });
   const out = [];
+  const all = {};
+  games.docs.forEach((d) => { for (const rec of Object.values((d.data() || {}).creations || {})) if (rec?.id) all[rec.id] = { rec, owner: String((d.data() || {}).name || 'Creator').slice(0, 40) }; });
   games.docs.forEach((d) => {
     const x = d.data() || {};
     for (const rec of Object.values(x.creations || {})) {
       if (!rec || !UGC_ID.test(rec.id) || !rec.specs?.[rec.version]) continue;
       const a = agg[rec.id] || {};
-      out.push({ ...summarize(rec, String(x.name || 'Creator').slice(0, 40), { ...a, owner: d.id, mine: d.id === sh.uid }), _rec: rec });
+      const g = summarize(rec, String(x.name || 'Creator').slice(0, 40), { ...a, owner: d.id, mine: d.id === sh.uid });
+      // credit comes from the original's own record; unknown originals and old jam tags are dropped
+      const orig = g.remix && all[g.remix.id];
+      g.remix = orig && g.remix.id !== rec.id ? { id: g.remix.id, title: orig.rec.specs?.[orig.rec.version]?.title || 'a game', owner: orig.owner } : null;
+      if (g.jam && g.jam !== weekKey(new Date(rec.updatedAt || Date.now()))) g.jam = null;
+      if (g.underReview && rec.clearedVersion === rec.version) g.underReview = false;
+      g.remixes = Object.values(all).filter((o) => o.rec.specs?.[o.rec.version]?.remix?.id === rec.id).length;
+      out.push({ ...g, _rec: rec });
     }
   });
   return out;
@@ -628,10 +640,12 @@ export const ugc = {
     return req('/ugc', { method: 'POST', body: JSON.stringify({ action: 'rate', id, stars: s, playerId: p.playerId, token: p.token }) });
   },
 
-  async played(id) {
+  /** A finished play; with { seed, log, version } the server replays it so you may rate/report. */
+  async played(id, run = {}) {
     const sh = await sharedDb();
     if (sh) { await myRatingsDoc(sh, (d) => { d.p[id] = (d.p[id] || 0) + 1; d.pt[id] = Date.now(); }); return { ok: true }; }
     const p = await ensureRegistered();
+    if (run.log) return req('/ugc', { method: 'POST', body: JSON.stringify({ action: 'play', id, seed: run.seed, log: run.log, version: run.version, playerId: p.playerId, token: p.token }) });
     return req('/ugc', { method: 'POST', body: JSON.stringify({ action: 'play', id, playerId: p.playerId, token: p.token }) });
   },
 
@@ -644,6 +658,49 @@ export const ugc = {
     }
     const p = await ensureRegistered();
     return req('/ugc', { method: 'POST', body: JSON.stringify({ action: 'report', id, playerId: p.playerId, token: p.token }) });
+  },
+
+  /** Can this viewer moderate? (claude.ai: the artifact's owner) */
+  async canModerate() {
+    const sh = await sharedDb();
+    try { return !!(sh && (await sh.user?.isOwner?.())); } catch { return false; }
+  },
+  /** Games held for review (moderators only, claude.ai shared db). */
+  async held() {
+    const sh = await sharedDb();
+    if (!sh) return [];
+    return (await sharedUgcAll(sh)).filter((g) => g.underReview).map(({ _rec, ...g }) => ({ ...g, appeal: _rec.appeal || null }));
+  },
+  async moderate(id, decision) {
+    const sh = await sharedDb();
+    if (!sh) throw new Error('Moderation runs on the server');
+    const snap = await sh.db.collection('games').get();
+    for (const d of snap.docs) {
+      const doc = d.data() || {};
+      const rec = doc.creations?.[id];
+      if (!rec) continue;
+      if (decision === 'remove') delete doc.creations[id];
+      else rec.clearedVersion = rec.version;
+      await sh.db.collection('games').doc(d.id).set(doc);
+      return { ok: true };
+    }
+    throw new Error('That game was removed');
+  },
+  /** The creator asks a moderator to look again. */
+  async appeal(id, note) {
+    const sh = await sharedDb();
+    const text = String(note || '').slice(0, 200);
+    if (sh) {
+      const ref = sh.db.collection('games').doc(sh.uid);
+      const snap = await ref.get();
+      const doc = snap.exists ? snap.data() : {};
+      if (!doc.creations?.[id]) throw new Error('Not your game');
+      doc.creations[id].appeal = { note: text, at: Date.now() };
+      await ref.set(doc);
+      return { ok: true };
+    }
+    const p = await ensureRegistered();
+    return req('/ugc', { method: 'POST', body: JSON.stringify({ action: 'appeal', id, note: text, playerId: p.playerId, token: p.token }) });
   },
 
   /** Submit a run: verified by replaying with that version's rules. */

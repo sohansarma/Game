@@ -195,7 +195,8 @@ export function createApi(store, { now = () => new Date(), origin = process.env.
       rating: rs.length ? rs.reduce((a, b) => a + b, 0) / rs.length : 0, ratings: rs.length,
       plays: Object.values(rec.plays || {}).reduce((a, b) => a + b, 0), players: Object.keys(rec.plays || {}).length,
       recentPlays: Object.values(rec.playedAt || {}).filter((t) => t > week).length, reports,
-      underReview: !rec.cleared && reports >= 3, remix: spec.remix || null, jam: spec.jam || null,
+      underReview: !rec.cleared && reports >= 3, remix: spec.remix || null, jam: spec.jam || null, appeal: rec.owner === me ? rec.appeal || null : undefined,
+      remixes: Object.values(db.creations || {}).filter((o) => o.specs?.[o.version]?.remix?.id === rec.id).length,
       myRating: rec.ratings?.[me] || 0, mePlayed: !!rec.plays?.[me],
     };
   }
@@ -211,6 +212,13 @@ export function createApi(store, { now = () => new Date(), origin = process.env.
         if (rec && rec.owner !== body.playerId) throw fail(403, "That's someone else's game");
         let spec;
         try { spec = ugcSanitize(body.spec); } catch (e) { throw fail(400, e.message); }
+        // the server writes the remix credit from the original's record, and only takes this week's jam
+        if (spec.remix) {
+          const o = db.creations?.[spec.remix.id];
+          if (!o || spec.remix.id === id) delete spec.remix;
+          else spec.remix = { id: o.id, title: o.specs[o.version].title, owner: db.players[o.owner]?.name || 'Creator' };
+        }
+        if (spec.jam && spec.jam !== weekKey(now())) delete spec.jam;
         if (!rec && Object.values(db.creations).filter((r) => r.owner === body.playerId).length >= 20) throw fail(400, 'You can publish up to 20 games');
         if (!rec && Object.keys(db.creations).length >= 5000) throw fail(503, 'Studio is full right now');
         const r = rec || { id, owner: body.playerId, version: 0, specs: {}, history: [], createdAt: t, ratings: {}, plays: {}, playedAt: {}, reports: {} };
@@ -237,15 +245,32 @@ export function createApi(store, { now = () => new Date(), origin = process.env.
       case 'report': {
         if (!rec) throw fail(404, 'That game was removed');
         if (body.action !== 'play' && rec.owner === body.playerId) throw fail(403, "You can't rate or report your own game");
-        if (body.action !== 'play' && !rec.plays?.[body.playerId]) throw fail(403, 'Play it first');
+        // only a play the server replayed counts
+        if (body.action !== 'play' && !rec.verified?.[body.playerId]) throw fail(403, 'Play it first');
         if (body.action === 'rate') {
           const s = Math.round(Number(body.stars));
           if (!(s >= 1 && s <= 5)) throw fail(400, 'stars must be 1-5');
           (rec.ratings ||= {})[body.playerId] = s;
         } else if (body.action === 'play') {
+          if (Array.isArray(body.log)) {
+            const v = Number(body.version) || rec.version;
+            const sp = rec.specs?.[v];
+            const seed = Number(body.seed);
+            if (!sp || !Number.isInteger(seed) || seed < 0 || seed > 0xffffffff || body.log.length > 20000) throw fail(400, 'bad run');
+            const r = ugcReplay(sp, seed, body.log);
+            if (!r.ok || !r.sim.over) throw fail(422, 'replay failed');
+            (rec.verified ||= {})[body.playerId] = true;
+          }
           (rec.plays ||= {})[body.playerId] = Math.min(99999, (rec.plays[body.playerId] || 0) + 1);
           (rec.playedAt ||= {})[body.playerId] = t;
         } else (rec.reports ||= {})[body.playerId] = rec.version;
+        store.dirty();
+        return { ok: true };
+      }
+      case 'appeal': {
+        if (!rec) throw fail(404, 'That game was removed');
+        if (rec.owner !== body.playerId) throw fail(403, 'Not your game');
+        rec.appeal = { note: String(body.note || '').slice(0, 200), at: t };
         store.dirty();
         return { ok: true };
       }
@@ -379,6 +404,7 @@ export function createApi(store, { now = () => new Date(), origin = process.env.
       const r = ugcReplay(spec, seed, log);
       if (!r.ok) throw fail(422, 'replay failed: ' + r.reason);
       if (typeof body.score === 'number' && body.score !== r.sim.score) throw fail(422, 'score mismatch');
+      (rec.verified ||= {})[body.playerId] = true;
       return { ok: true, ...record(boardId('ugc', key), body.playerId, r.sim.score), verified: r.sim.score };
     }
     if (!acceptableKeys(board, now()).includes(key)) throw fail(422, 'this board is closed');
@@ -454,6 +480,10 @@ export function createApi(store, { now = () => new Date(), origin = process.env.
           return send(res, 200, { ...ugcSummary(rec, me), specs: rec.specs, spec: rec.specs[rec.version] }, origin);
         }
         // games held for review stay visible to their creator (with a note), not to the shelves
+        if (url.searchParams.get('held') && process.env.ADMIN_KEY && url.searchParams.get('key') === process.env.ADMIN_KEY) {
+          // the moderator's queue: held games with any appeal from their creator
+          return send(res, 200, { games: Object.values(db.creations || {}).map((r) => ({ ...ugcSummary(r, me), appeal: r.appeal || null })).filter((g) => g.underReview) }, origin);
+        }
         const games = Object.values(db.creations || {}).map((r) => ugcSummary(r, me)).filter((g) => !g.underReview || g.mine);
         return send(res, 200, { games }, origin);
       }

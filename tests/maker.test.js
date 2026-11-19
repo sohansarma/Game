@@ -112,6 +112,7 @@ test('server: publish, version, play, rate, report, verified scores', async () =
   assert.equal((await as(maker, { action: 'play', id: 'abcd2345' })).status, 200);
   assert.equal((await as(maker, { action: 'rate', id: 'abcd2345', stars: 5 })).status, 403);
   const lurker = (await post('/api/register', { name: 'Shy Crab 20' })).body;
+  assert.equal((await as(lurker, { action: 'play', id: 'abcd2345', seed: 1, log: [['zz']], version: 1 })).status, 422, 'forged play rejected');
   assert.equal((await as(lurker, { action: 'rate', id: 'abcd2345', stars: 1 })).status, 403);
   assert.equal((await as(lurker, { action: 'report', id: 'abcd2345' })).status, 403);
 
@@ -119,6 +120,9 @@ test('server: publish, version, play, rate, report, verified scores', async () =
   for (let i = 0; i < 3; i++) {
     const r = (await post('/api/register', { name: `Calm Seal ${30 + i}` })).body;
     await as(r, { action: 'play', id: 'abcd2345' });
+    assert.equal((await as(r, { action: 'report', id: 'abcd2345' })).status, 403, 'a bare play ping is not enough');
+    const run = botPlay(v1, 300 + i);
+    assert.equal((await as(r, { action: 'play', id: 'abcd2345', seed: 300 + i, log: run.log, version: 1 })).status, 200);
     assert.equal((await as(r, { action: 'report', id: 'abcd2345' })).status, 200);
   }
   assert.equal((await get(`/api/ugc?playerId=${fan.playerId}`)).body.games.length, 0, 'held after 3 reports');
