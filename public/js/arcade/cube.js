@@ -288,10 +288,32 @@ export class CubeFree {
   quit() { if (this.over) return; this.log.push(['q']); this.over = true; this.overReason = 'Stopped'; }
 }
 
-/** Daily scramble: everyone gets the same 3x3 scramble; fewest moves wins (score = 1000 − moves). */
+/** Your moves in face-turn metric: R R = R2 counts once, R R' cancels. */
+export function faceTurns(moves) {
+  const out = [];
+  for (const [a, l, d] of moves) {
+    const top = out[out.length - 1];
+    if (top && top.a === a && top.l === l) {
+      top.q = (top.q + d + 4) % 4;
+      if (top.q === 0) out.pop();
+    } else out.push({ a, l, q: (d + 4) % 4 });
+  }
+  return out;
+}
+
+/**
+ * Daily scramble: everyone gets the same 3x3 state; fewest moves wins
+ * (score = 1000 − face turns). The scramble isn't shown – you solve the cube
+ * itself – and a solve that is just the scramble backwards scores nothing.
+ */
 export class CubeDaily extends CubeFree {
   constructor(seed) { super(seed, 3); this.daily = true; }
-  get score() { return this.solved ? Math.max(1, 1000 - this.cubeMoves) : 0; }
+  get htm() { return faceTurns(this.mine).length; }
+  get reversedScramble() {
+    const mine = faceTurns(this.mine), inv = faceTurns(this.scrambleRaw.slice().reverse().map(inverse));
+    return mine.length === inv.length && mine.every((m, i) => m.a === inv[i].a && m.l === inv[i].l && m.q === inv[i].q);
+  }
+  get score() { return this.solved && !this.reversedScramble ? Math.max(1, 1000 - this.htm) : 0; }
 }
 function replayDaily(seed, log) {
   const sim = new CubeDaily(seed);

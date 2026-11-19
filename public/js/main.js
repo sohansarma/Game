@@ -395,6 +395,8 @@ async function playCubeFree(n, { daily = false } = {}) {
     return showLeaderboard('scrambleDaily');
   }
   const sim = daily ? new CubeDaily(arcadeSeed('scramble', true, key, 0)) : new CubeFree(randSeed(), n);
+  // one try: the daily counts as used the moment it starts (a reload can't fish for a second go)
+  if (daily) update((d) => { d.cubeDaily = { ...(d.cubeDaily || {}), [key]: { solved: false, moves: 0, started: true } }; });
   const run = { kind: 'free', id: 'cube', sim, daily };
   currentRun = run;
   setBackground(ARCADE_BY_ID.cube.color);
@@ -411,10 +413,10 @@ async function playCubeFree(n, { daily = false } = {}) {
   const tkey = 'n' + n;
   const record = (entry) => update((d) => { d.cubeTimes = { ...(d.cubeTimes || {}) }; d.cubeTimes[tkey] = [...(d.cubeTimes[tkey] || []), entry].slice(-100); });
   const finishDaily = async () => {
-    update((d) => { d.cubeDaily = { ...(d.cubeDaily || {}), [key]: { solved: sim.solved, moves: sim.cubeMoves } }; });
+    update((d) => { d.cubeDaily = { ...(d.cubeDaily || {}), [key]: { solved: sim.solved && sim.score > 0, moves: sim.htm } }; });
     noteGameEnd('cube', false);
     const res = sim.solved ? await submitRun({ board: 'scrambleDaily', key, seed: 0, log: sim.log, score: sim.score }).catch(() => null) : null;
-    const r = await modal(`<h2>📅 Daily Scramble</h2>${sim.solved ? `<div class="big-score">${sim.cubeMoves} moves</div><p class="muted">${(view?.lastTime || 0).toFixed(2)} s${res?.rank ? ` · today's rank <b>#${res.rank}</b>` : ''}</p>` : '<p>Not solved this time – tomorrow brings a new one.</p>'}
+    const r = await modal(`<h2>📅 Daily Scramble</h2>${sim.solved && sim.reversedScramble ? '<p>That was the scramble played backwards – nice memory, but it doesn\'t count. Solve the state your own way tomorrow!</p>' : ''}${sim.solved && !sim.reversedScramble ? `<div class="big-score">${sim.htm} moves</div><p class="muted">${(view?.lastTime || 0).toFixed(2)} s${res?.rank ? ` · today's rank <b>#${res.rank}</b>` : ''}</p>` : '<p>Not solved this time – tomorrow brings a new one.</p>'}
       <p class="small muted">Everyone gets the same scramble; the fewest moves wins (score = 1000 − moves). The server replays every move.</p>`, {
       buttons: [{ label: '🏆 Leaderboard', value: 'lb', cls: 'blue' }, { label: '⏱️ Free solve', value: 'free', cls: 'ghost' }, { label: '🕹️ Arcade', value: null, cls: 'ghost' }],
     });
@@ -426,6 +428,7 @@ async function playCubeFree(n, { daily = false } = {}) {
     const times = () => load().cubeTimes?.[tkey] || [];
     const show = async () => {
       const list = times();
+      if (!list.length) { toast('Session cleared'); return playCubeFree(n); }
       const valid = list.map(solveSecs);
       const best = Math.min(...valid);
       const last = list[list.length - 1];
@@ -464,10 +467,12 @@ async function playCubeFree(n, { daily = false } = {}) {
       onChange: refresh,
       onQuit: () => {
         const started = !!view?.t0;
+        const elapsed = started ? (performance.now() - view.t0) / 1000 : 0;
+        view?.freeze?.();
         sim.quit();
         if (daily) return finishDaily();
         // stopping a started solve records a DNF instead of throwing it away
-        if (started) session({ t: (performance.now() - view.t0) / 1000, p: 'dnf' });
+        if (started) session({ t: elapsed, p: 'dnf' });
         else showHub();
       },
       onOver: async () => {

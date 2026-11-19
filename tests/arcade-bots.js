@@ -22,7 +22,12 @@ export const BOTS = {
   },
   // Daily Scramble: undo the scramble move by move (with the odd wrong turn it then undoes)
   scramble(sim, rng) {
-    if (!sim.plan2) sim.plan2 = sim.scrambleRaw.slice().reverse().map(cubeInverse);
+    if (!sim.plan2) {
+      // (R U R' U') six times is the identity – a detour so it isn't just the scramble backwards
+      const hi = Math.max(...sim.cube.layers);
+      const sexy = [[0, hi, -1], [1, hi, -1], [0, hi, 1], [1, hi, 1]];
+      sim.plan2 = [...Array(6).fill(sexy).flat(), ...sim.scrambleRaw.slice().reverse().map(cubeInverse)];
+    }
     if (sim.mine.length && rng.next() < 0.05) { sim.undo(); return; }
     const done = sim.mine.length;
     if (rng.next() < 0.05) { sim.twist(0, 1, 1); sim.undo(); return; }

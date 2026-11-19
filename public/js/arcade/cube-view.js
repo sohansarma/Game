@@ -120,16 +120,25 @@ export default class CubeView {
       // faces follow what you SEE: R is whatever face is on your right right now
       const cs = (load().settings.cubeKeys || 'letters') === 'cstimer';
       const letters = { r: ['R', 1], l: ['L', 1], u: ['U', 1], d: ['D', 1], f: ['F', 1], b: ['B', 1], m: ['M', 1] };
-      const cstimer = { i: ['R', 1], k: ['R', -1], d: ['L', 1], e: ['L', -1], j: ['U', 1], f: ['U', -1], s: ['D', 1], l: ['D', -1], h: ['F', 1], g: ['F', -1], w: ['B', 1], o: ['B', -1], 5: ['M', 1], 6: ['M', -1], 8: ['M', 1], x: ['M', -1] };
+      const cstimer = { i: ['R', 1], k: ['R', -1], d: ['L', 1], e: ['L', -1], j: ['U', 1], f: ['U', -1], s: ['D', 1], l: ['D', -1], h: ['F', 1], g: ['F', -1], w: ['B', 1], o: ['B', -1], 5: ['M', 1], 6: ['M', -1], 8: ['M', 1], x: ['M', -1],
+        u: ['r', 1], m: ['r', -1], v: ['l', 1], r: ['l', -1] }; // wide moves like csTimer
       const hit = (cs ? cstimer : letters)[k];
       if (hit) {
-        const t = this.viewTwist(hit[0], cs ? hit[1] : e.shiftKey ? -1 : 1);
-        if (t) { this.doTwist(...t); e.preventDefault(); }
+        const p = cs ? hit[1] : e.shiftKey ? -1 : 1;
+        const label = hit[0] + (p < 0 ? "'" : '');
+        if (hit[0] === 'r' || hit[0] === 'l') {
+          // wide = the face plus the middle layer next to it
+          const face = this.viewTwist(hit[0].toUpperCase(), p), mid = this.viewTwist('M', hit[0] === 'r' ? -p : p);
+          if (face && mid) { this.doTwist(...face, false, label); this.doTwist(...mid, false, ''); e.preventDefault(); }
+          return;
+        }
+        const t = this.viewTwist(hit[0], p);
+        if (t) { this.doTwist(...t, false, label); e.preventDefault(); }
         return;
       }
       // y / y': turn the whole cube (just the camera – it isn't a move)
-      if ((cs && k === ';') || (!cs && k === 'y' && !e.shiftKey)) { this.yaw -= Math.PI / 2; e.preventDefault(); return; }
-      if ((cs && k === 'a') || (!cs && k === 'y' && e.shiftKey)) { this.yaw += Math.PI / 2; e.preventDefault(); return; }
+      if ((cs && k === ';') || (!cs && k === 'y' && !e.shiftKey)) { this.yaw -= Math.PI / 2; this.history.push('y'); this.lastWasSingle = false; this.renderControls(); e.preventDefault(); return; }
+      if ((cs && k === 'a') || (!cs && k === 'y' && e.shiftKey)) { this.yaw += Math.PI / 2; this.history.push("y'"); this.lastWasSingle = false; this.renderControls(); e.preventDefault(); return; }
       if (e.key === 'ArrowLeft') this.yaw -= 0.2;
       else if (e.key === 'ArrowRight') this.yaw += 0.2;
       else if (e.key === 'ArrowUp') this.pitch = Math.min(1.3, this.pitch + 0.2);
@@ -200,10 +209,19 @@ export default class CubeView {
     return [best.a, best.s > 0 ? hi : lo, (best.s > 0 ? -1 : 1) * prime];
   }
 
-  pause() { if (this.t0 && !this.pausedAt) this.pausedAt = performance.now(); }
-  resume() { if (this.pausedAt) { this.t0 += performance.now() - this.pausedAt; this.pausedAt = 0; } }
+  pause() { if ((this.t0 || this.inspectT0) && !this.pausedAt) this.pausedAt = performance.now(); }
+  resume() {
+    if (!this.pausedAt) return;
+    const gap = performance.now() - this.pausedAt;
+    if (this.t0) this.t0 += gap;
+    else if (this.inspectT0) this.inspectT0 += gap; // inspection pauses too
+    this.pausedAt = 0;
+  }
+  /** Stop the clock where it is (Stop = DNF keeps the time visible, not counting). */
+  freeze() { if (this.t0) { this.finalTime = (performance.now() - this.t0) / 1000; this.t0 = 0; } }
 
-  doTwist(axis, layer, dir, isUndo = false) {
+  /** label: what you pressed (shown in the moves list); '' = part of a wide move, not listed */
+  doTwist(axis, layer, dir, isUndo = false, label = null) {
     if (this.sim.over) return;
     if (this.anim) this.anim.t0 = -1e9; // finish the previous turn instantly
     const res = this.sim.twist(axis, layer, dir);
@@ -212,12 +230,17 @@ export default class CubeView {
     sfx.swap();
     if (!isUndo) {
       this.undoStack.push([axis, layer, dir]);
-      const m = notation(this.sim.plan.n, axis, layer, dir);
+      if (label === '') { this.lastWasSingle = false; label = null; return this.afterTwistUi(res, axis, layer, dir); }
+      const m = label || notation(this.sim.plan.n, axis, layer, dir);
       // R R shows as R2
       const last = this.history[this.history.length - 1];
       if (last === m && this.lastWasSingle) { this.history[this.history.length - 1] = m[0] + '2'; this.lastWasSingle = false; }
       else { this.history.push(m); this.lastWasSingle = true; }
     }
+    return this.afterTwistUi(res, axis, layer, dir);
+  }
+
+  afterTwistUi(res, axis, layer, dir) {
     if (!this.t0) {
       this.t0 = performance.now();
       // inspection: over 15 s is +2, over 17 s a DNF (WCA)
@@ -272,7 +295,7 @@ export default class CubeView {
     const s = this.sim;
     const hist = this.history.slice(-14).join(' ');
     this.controls.innerHTML = `<div class="col" style="gap:6px;width:100%;align-items:center">
-      ${s.free ? `<div class="cube-scramble small"><b>Scramble:</b> ${s.scramble.join(' ')}</div>` : ''}
+      ${s.free ? (s.daily ? '<div class="cube-scramble small">🔒 The daily scramble is hidden – solve the cube itself, in as few moves as you can (R2 = 1 move).</div>' : `<div class="cube-scramble small"><b>Scramble:</b> ${s.scramble.join(' ')}</div>`) : ''}
       <div class="cube-moves small" aria-label="Your moves">${hist ? `<b>Moves:</b> ${hist}` : '<span class="muted">Your moves appear here in standard notation</span>'}</div>
       <div class="row" style="gap:8px;flex-wrap:wrap;justify-content:center">
       <button class="btn sm ghost" data-a="undo" ${this.undoStack.length && !s.over ? '' : 'disabled'}>↶ Undo (free)</button>
