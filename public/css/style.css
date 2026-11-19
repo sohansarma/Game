@@ -675,3 +675,6 @@ body.cozy .btn, body.cozy .game-card .tag, body.cozy .seg-btn.on { filter: none;
 .rv-row .rv-n { min-width: 26px; color: var(--muted); }
 .rv-row.blunder b { color: #ff7b7b; } .rv-row.mistake b { color: #ffb36b; } .rv-row.inaccuracy b { color: #ffe08a; } .rv-row.best b { color: #7cffb2; }
 .rv-row:not(.mine) { opacity: .75; }
+
+.hub-timer { white-space: normal; max-width: 100%; }
+.sr-only { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }

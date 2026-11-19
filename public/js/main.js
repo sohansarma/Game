@@ -121,6 +121,11 @@ try {
 } catch { /* old browsers */ }
 
 function applySettings() {
+  // until you choose yourself, reduce-motion follows the device – read fresh every start, too
+  try {
+    const dev = matchMedia('(prefers-reduced-motion: reduce)').matches;
+    if (!load().settings.reducedMotionUser && load().settings.reducedMotion !== dev) update((d) => { d.settings.reducedMotion = dev; });
+  } catch { /* no matchMedia */ }
   const s = load();
   configureAudio(s.settings);
   document.body.classList.toggle('reduced-motion', !!s.settings.reducedMotion);
@@ -1050,7 +1055,8 @@ async function onboarding() {
   let name = load().name;
   const kid = isKid();
   const res = await modal(`
-    <div class="logo">Tide<span>pop</span></div>
+    <h2 class="sr-only">Welcome to Tidepop</h2>
+    <div class="logo" aria-hidden="true">Tide<span>pop</span></div>
     <p>Welcome to <b>Tidepop</b> – a cozy arcade by the sea. A new shared puzzle every day, match-3, block puzzles, chess and ludo with friends, and more.</p>
     <p class="small muted">Free to play · plays offline</p>
     <div class="tip name-tip"><label for="nf-input"><b>${kid ? 'Your player name' : 'Choose your name'}</b></label>${nameFieldHtml(name)}${kid ? '<p class="small muted">Tap 🎲 for a new one.</p>' : ''}</div>
