@@ -57,10 +57,20 @@ export default class BreakerView {
       e.preventDefault();
       try { cv.setPointerCapture?.(e.pointerId); } catch { /* synthetic or lost pointer */ }
       this.pointerX = this.worldX(e.clientX);
-      if (this.sim.attached) { if (this.sim.launch()) sfx.swap(); }
+      // serve: hold to aim (the dotted line follows your finger), let go to fire
+      if (this.sim.attached) this.aiming = { y: e.clientY };
     };
-    const move = (e) => { if (e.buttons || e.pointerType !== 'mouse' || this.pointerX !== null) this.pointerX = this.worldX(e.clientX); };
-    const up = () => {};
+    const move = (e) => {
+      if (this.aiming) { this.aimX = this.worldX(e.clientX); return; }
+      if (e.buttons || e.pointerType !== 'mouse' || this.pointerX !== null) this.pointerX = this.worldX(e.clientX);
+    };
+    const up = (e) => {
+      if (!this.aiming) return;
+      const ax = this.aimX ?? this.worldX(e.clientX);
+      this.aiming = null; this.aimX = null;
+      const aim = Math.round(Math.max(-80, Math.min(80, ((ax - this.sim.bx) / 40) * 100)));
+      if (this.sim.attached && this.sim.launch(this.sim.stickOff ? undefined : aim)) sfx.swap();
+    };
     const key = (e) => {
       if (document.querySelector('.modal.open')) return;
       if (e.key === 'ArrowLeft') this.keys.l = e.type === 'keydown';
@@ -105,6 +115,7 @@ export default class BreakerView {
         if (e === 'stick') { sfx.tap(); }
         if (e === 'creep') { sfx.bad(); haptic(20); if (!this.reduced) this.shake = 0.6; this.note('The coral creeps closer!'); }
         if (e === 'lost') { sfx.lose(); haptic(60); changed = true; if (!this.reduced) this.shake = 1; }
+        if (e === 'crush') { sfx.boom(); haptic(80); changed = true; if (!this.reduced) this.shake = 1; this.note('The coral crushed your clam! −1 pearl'); }
         if (e === 'clear') { sfx.win(); haptic(40); changed = true; }
         if (e.startsWith('power:')) {
           sfx.coin(); haptic(15); changed = true;
@@ -180,7 +191,7 @@ export default class BreakerView {
     ctx.fillRect(s.px - pw / 2 + 1.5, PADDLE_Y + 0.5, pw - 3, 0.8);
     // aim line while the pearl waits on the paddle
     if (s.attached && !s.over) {
-      const off = s.stickOff ? Math.max(-1, Math.min(1, s.stickOff / (pw / 2))) * 0.8 : 0.35;
+      const off = s.stickOff ? Math.max(-1, Math.min(1, s.stickOff / (pw / 2))) * 0.8 : this.aiming && this.aimX !== null && this.aimX !== undefined ? Math.max(-0.8, Math.min(0.8, (this.aimX - s.bx) / 40)) : 0.35;
       let x = s.bx, y = s.by, vx = off, vy = -Math.sqrt(1 - off * off);
       ctx.fillStyle = 'rgba(255,255,255,0.55)';
       for (let i = 0; i < 26; i++) {
@@ -252,7 +263,7 @@ export default class BreakerView {
     if (s.attached && !s.over) {
       ctx.textAlign = 'center';
       ctx.font = '800 5px ui-rounded, system-ui';
-      ctx.fillText(s.stickOff ? 'Tap to fire!' : 'Tap to launch!', WW / 2, 110);
+      ctx.fillText(s.stickOff ? 'Tap to fire!' : 'Hold & drag to aim, let go to launch!', WW / 2, 110);
     }
   }
 }
@@ -269,4 +280,4 @@ export const HOW = `<div class="tip">🧱 <b>Drag</b> left and right to move the
 <div class="tip">🎯 Where the pearl hits the paddle sets its angle. Brighter coral needs more hits.</div>
 <div class="tip">★ Some bricks drop power-ups: <b>W</b> wide paddle, <b>+</b> extra life, <b>M</b> multiball, <b>S</b> sticky clam (catch the pearl, then aim and fire), <b>●</b> bonus pearl (+50).</div>
 <div class="tip">🔗 Break several bricks before the pearl comes back for a <b>chain</b> bonus – listen for the notes climbing.</div>
-<div class="tip">⚡ Clear the wall for a big bonus – but don't dawdle: the coral creeps down every 30 seconds. You have 3 pearls.</div>`;
+<div class="tip">⚡ Clear the wall for a big bonus – but don't dawdle: the coral creeps down every 30 seconds, and if it reaches your clam you lose a pearl. <b>Hold and drag</b> before a serve to aim it. You have 3 pearls.</div>`;

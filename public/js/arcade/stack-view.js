@@ -59,7 +59,7 @@ export default class StackView {
       if (this.sim.over) return;
       const res = this.sim.drop();
       if (res.started) { sfx.tap(); return; }
-      if (res.zone) this.popup = { text: `${res.zone.icon} ${res.zone.name}: ${res.zone.tip}`, t0: performance.now(), color: '#9ef0ff' };
+      if (res.zone) this.popup = { text: `${res.zone.icon} ${res.zone.name}: ${res.zone.tip}`, t0: performance.now(), color: '#9ef0ff', zone: true };
       if (res.miss) {
         sfx.boom(); haptic(80);
         if (!this.reduced) this.shake = 1;
@@ -75,7 +75,7 @@ export default class StackView {
       } else if (res.near) {
         sfx.place();
         haptic(10);
-        this.popup = { text: 'So close! Snapped on', t0: performance.now(), color: '#cfe8ff' };
+        if (!this.popup || !this.popup.zone || performance.now() - this.popup.t0 > 1200) this.popup = { text: 'So close! Snapped on', t0: performance.now(), color: '#cfe8ff' };
       } else {
         sfx.place();
         haptic(8);

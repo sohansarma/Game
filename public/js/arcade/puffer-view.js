@@ -18,7 +18,7 @@ export default class PufferView {
     this.floorOff = 0;
     this.destroyed = false;
     this.overSent = false;
-    controls.innerHTML = '<div class="small muted center">Tap anywhere (or press Space) to swim up</div>';
+    controls.innerHTML = '<div class="small muted center">Tap to swim up · <b>hold</b> to puff up and float · this week\'s course: race your 👻 best</div>';
     this.resize(); // re-measure whenever the layout changes (controls rendering, rotation), not just on window resize
     if (typeof ResizeObserver !== 'undefined') { this.sizeObs = new ResizeObserver(() => { if (!this.destroyed) this.resize(); }); this.sizeObs.observe(this.canvas); }
     this.bind();

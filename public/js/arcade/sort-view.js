@@ -94,7 +94,7 @@ export default class SortView {
   }
 
   select(i) {
-    if (this.hold && performance.now() - this.hold.t0 < 900) return; // admiring the solved puzzle
+    if (this.hold && performance.now() - this.hold.t0 < (this.reduced ? 300 : 900)) return; // admiring the solved puzzle
     if (this.sim.over || i >= this.sim.tubes.length) return;
     if (this.sel === null) {
       if (!this.sim.tubes[i].length) return;
@@ -254,4 +254,5 @@ export function hud(sim) {
 export const HOW = `<div class="tip">🧪 <b>Tap a tube</b>, then tap another to pour. You can pour onto the same colour or into an empty tube (4 balls per tube).</div>
 <div class="tip">✅ Fill every tube with a single colour to clear the puzzle – you score points and get oxygen back. Then a harder one appears!</div>
 <div class="tip">🫧 Each pour uses 1 oxygen. <b>Undo</b> is free; an <b>extra tube</b> (once per puzzle) costs 5. When the oxygen runs out, the dive ends.</div>
+<div class="tip">💡 Stuck? <b>Hint</b> shows a good pour for 3 oxygen.</div>
 <div class="tip">⚡ Fewer pours = bonus points.</div>`;

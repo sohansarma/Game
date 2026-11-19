@@ -103,8 +103,8 @@ class CatchSim {
     if (h.kind === 'crab' || h.kind === 'gold') {
       this.streak++;
       this.hits++;
-      // on the beat (within 3 ticks of an eighth note): +5 bonus
-      const e = eighthAt(this.tick), off = Math.min(this.tick % e, e - (this.tick % e));
+      // on the beat (within 3 ticks of a quarter note – the click you hear): +5 bonus
+      const q = eighthAt(this.tick) * 2, off = Math.min(this.tick % q, q - (this.tick % q));
       const beat = off <= 3;
       if (beat) this.onBeat++;
       let pts = ((h.kind === 'gold' ? 50 : 10) + (beat ? 5 : 0)) * this.combo;
@@ -112,7 +112,7 @@ class CatchSim {
       this.points += pts;
       // reaching x5 lights a 5-second fever (once per streak climb)
       let feverStart = false;
-      if (this.streak === 12 && !this.fever) { this.feverUntil = this.tick + FEVER_TICKS; feverStart = true; }
+      if (this.streak % 12 === 0 && !this.fever) { this.feverUntil = this.tick + FEVER_TICKS; feverStart = true; }
       return { ok: true, what: h.kind, pts, beat, feverStart };
     }
     if (h.kind === 'jelly') {

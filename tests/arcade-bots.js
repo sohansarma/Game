@@ -55,7 +55,7 @@ export const BOTS = {
   },
   // Follows the ball with an error that grows over time, so it eventually misses.
   breaker(sim, rng) {
-    if (sim.attached) { if (sim.tick % 30 === 0) sim.launch(); }
+    if (sim.attached) { if (sim.tick % 30 === 0) sim.launch(rng.next() < 0.5 ? undefined : rng.int(161) - 80); }
     else if (sim.tick % 4 === 0) sim.input(sim.bx + (rng.next() - 0.5) * (6 + sim.tick / 400));
     sim.step();
     if (sim.tick > 60 * 60 * 15) sim.quit();

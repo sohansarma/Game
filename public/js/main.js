@@ -2789,7 +2789,7 @@ async function endArcade(run) {
     ],
   });
   let rank = null;
-  submitRun({ board, key: run.daily ? run.key : 'all', seed: run.seed, log: run.sim.log, score }).then((res) => {
+  (score > 0 ? submitRun({ board, key: run.daily ? run.key : 'all', seed: run.seed, log: run.sim.log, score }) : Promise.resolve({ error: 'Score some points to get on the leaderboard.' })).then((res) => {
     rank = res?.rank;
     if (res?.rank && run.daily) update((d) => { d.lastRanks = { ...(d.lastRanks || {}), [`${board}:${run.key}`]: res.rank }; });
     const el = $('#r-rank');

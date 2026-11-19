@@ -88,13 +88,15 @@ class BreakerSim {
     return true;
   }
 
-  launch() {
+  /** aim: -80..80 (percent sideways); omitted = the classic serve / sticky angle */
+  launch(aim) {
     if (this.over || !this.attached) return false;
-    this.log.push(['l', this.tick]);
+    const a = Number.isInteger(aim) ? Math.max(-80, Math.min(80, aim)) : null;
+    this.log.push(a === null ? ['l', this.tick] : ['l', this.tick, a]);
     this.attached = false;
     // caught on a sticky paddle: launch at the angle where it sits
     const off = Math.max(-1, Math.min(1, this.stickOff / (this.paddleW / 2)));
-    this.vx = this.stickOff ? this.speed * off * 0.8 : this.speed * 0.35;
+    this.vx = a !== null ? this.speed * (a / 100) : this.stickOff ? this.speed * off * 0.8 : this.speed * 0.35;
     this.vy = -Math.sqrt(this.speed * this.speed - this.vx * this.vx);
     this.stickOff = 0;
     this.events.push('launch');
@@ -137,9 +139,16 @@ class BreakerSim {
     // the coral creeps down a row every 30 s (never closer than row 17)
     if (!this.attached) {
       this.levelTick++;
-      if (this.levelTick % 1800 === 0 && this.bricks.length && Math.max(...this.bricks.map((b) => b.r)) < 17) {
+      if (this.levelTick % 1800 === 0 && this.bricks.length) {
         for (const b of this.bricks) b.r++;
         this.events.push('creep');
+        // the coral reached your clam: lose a pearl, and it's pushed back up
+        if (BRICK_TOP + (Math.max(...this.bricks.map((b) => b.r)) + 1) * BRICK_H >= PADDLE_Y - 6) {
+          for (const b of this.bricks) b.r = Math.max(0, b.r - 5);
+          this.lives--;
+          this.events.push('crush');
+          if (this.lives <= 0) { this.over = true; this.overReason = `The coral reached you! Level ${this.level}`; return; }
+        }
       }
     }
     // extra pearls move first (they never cost a life)
@@ -190,6 +199,15 @@ class BreakerSim {
   }
 
   moveBall(f) {
+    // last few bricks: the pearl drifts gently towards the nearest one on the way up
+    if (this.bricks.length && this.bricks.length <= 3 && this.vy < 0) {
+      const bw = WW / COLS;
+      let best = null;
+      for (const b of this.bricks) { const dx = (b.c + 0.5) * bw - this.bx; if (best === null || Math.abs(dx) < Math.abs(best)) best = dx; }
+      this.vx += Math.sign(best) * 0.012 * f;
+      const sp = Math.hypot(this.vx, this.vy) || 1;
+      this.vx *= this.speed / sp; this.vy *= this.speed / sp;
+    }
     // x axis
     let nx = this.bx + this.vx * f;
     if (nx < BALL_R) { nx = BALL_R; this.vx = Math.abs(this.vx); this.events.push('wall'); }
@@ -206,6 +224,8 @@ class BreakerSim {
     if (this.vy > 0 && this.by + BALL_R >= PADDLE_Y && this.by + BALL_R <= PADDLE_Y + 4 && Math.abs(this.bx - this.px) <= half + BALL_R) {
       const off = Math.max(-1, Math.min(1, (this.bx - this.px) / half));
       this.vx = this.speed * off * 0.8;
+      // never straight up and down forever
+      if (Math.abs(this.vx) < this.speed * 0.15) this.vx = this.speed * 0.15 * (this.tick % 2 ? 1 : -1);
       this.vy = -Math.sqrt(this.speed * this.speed - this.vx * this.vx);
       this.by = PADDLE_Y - BALL_R;
       this.chain = 0;
@@ -248,7 +268,7 @@ function replay(seed, log) {
     while (sim.tick < a[1] && !sim.over) sim.step();
     if (sim.over || sim.tick !== a[1]) return { ok: false, reason: 'input out of sync', sim };
     if (a[0] === 'x') { if (typeof a[2] !== 'number' || !sim.input(a[2])) return { ok: false, reason: 'bad input', sim }; }
-    else if (a[0] === 'l') { if (!sim.launch()) return { ok: false, reason: 'bad launch', sim }; }
+    else if (a[0] === 'l') { if (a[2] !== undefined && !Number.isInteger(a[2])) return { ok: false, reason: 'bad aim', sim }; if (!sim.launch(a[2])) return { ok: false, reason: 'bad launch', sim }; }
     else if (a[0] === 'q') sim.quit();
     else return { ok: false, reason: 'unknown action', sim };
   }

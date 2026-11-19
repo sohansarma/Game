@@ -193,6 +193,11 @@ const ok = () => ctx && settings.sfx;
 
 // ---------------------------------------------------------------- effects
 export const sfx = {
+  /** a soft woodblock for rhythm games */
+  beat(accent = false) {
+    if (!ok()) return;
+    tone(accent ? 880 : 660, 0.05, { type: 'sine', vol: accent ? 0.07 : 0.045, to: accent ? 700 : 520, verb: 0.08, attack: 0.002 });
+  },
   tap() {
     if (!ok()) return;
     tone(1250, 0.04, { type: 'triangle', vol: 0.12, to: 900, verb: 0.05 });

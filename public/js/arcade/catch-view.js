@@ -122,7 +122,12 @@ export default class CatchView {
       }
       // a soft metronome so the beat is felt
       const s0 = this.sim;
-      if (s0.started && !s0.over && s0.tick % (eighthAt(s0.tick) * 2) === 0) this.beatT0 = performance.now();
+      if (s0.started && !s0.over && s0.tick % (eighthAt(s0.tick) * 2) === 0) {
+        this.beatT0 = performance.now();
+        // an audible click on every beat, a brighter one at the start of each bar
+        this.beatN = (this.beatN || 0) + 1;
+        sfx.beat(this.beatN % 4 === 1);
+      }
     }
     const sec = Math.ceil(this.sim.timeLeft / 60);
     if (sec !== this.lastSecond) {
@@ -252,6 +257,6 @@ export function hud(sim) {
 
 export const HOW = `<div class="tip">🦀 Crabs pop out of the sand – <b>tap them</b> before they hide! <b>+10</b> each.</div>
 <div class="tip">🔥 Catch 3 in a row to raise your <b>combo</b> (up to ×5). Missing, tapping empty sand or letting a crab escape resets it.</div>
-<div class="tip">🎵 Crabs pop on the <b>beat</b> – catch them right on it for a ♪ bonus. Reach ×5 for a 5-second <b>FEVER</b>: double points, no jellyfish.</div>
+<div class="tip">🎵 Crabs pop on the <b>beat</b> – catch them right on it for a ♪ bonus. Every 12 catches in a row lights a 5-second <b>FEVER</b>: double points, no jellyfish. Listen for the click – tap on it.</div>
 <div class="tip">✨ <b>Golden crabs</b> are worth +50 × combo. 🪼 <b>Jellyfish</b> sting: −20! ⏰ <b>Clocks</b> add 3 seconds.</div>
 <div class="tip">⏱️ You have 60 seconds and it gets faster towards the end. Go!</div>`;
