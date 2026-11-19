@@ -7,7 +7,7 @@
 // Storage goes through api.matches (shared artifact database or Node server).
 
 import { Chess, LEVELS, CASUAL_LEVELS, casualMove, searchMove } from './arcade/chess.js';
-import { botMove as botMoveOffThread } from './arcade/chess-ai.js';
+import { botMove as botMoveOffThread, hintMove } from './arcade/chess-ai.js';
 import { LudoGame, aiChoose, COLORS } from './arcade/ludo.js';
 import { Rng } from './rng.js';
 
@@ -226,6 +226,15 @@ export class ChessCasual extends ChessBase {
     if (!this.canMove()) return null;
     this.hintsUsed++;
     return casualMove(this.game, Math.min(6, Math.max(4, this.level)), this.rng);
+  }
+  /** Same hint, thought out in the worker so the board never freezes. */
+  async hintAsync() {
+    if (!this.canMove()) return null;
+    const ply = this.game.ply;
+    const uci = await hintMove(this.game.history.map((h) => h.uci), Math.min(6, Math.max(4, this.level)));
+    if (this.game.ply !== ply) return null;
+    if (uci) { this.hintsUsed++; return uci; }
+    return this.hint();
   }
   /** The bot accepts a draw when it isn't better and the game is old enough. */
   offerDraw() {

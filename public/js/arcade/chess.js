@@ -296,7 +296,7 @@ function isDrawn(g, ply) {
 
 function search(g, depth, alpha, beta, budget, ply) {
   if (budget.stop) return 0;
-  if (++budget.n > budget.max) { budget.stop = true; return 0; }
+  if (++budget.n > budget.max || ((budget.n & 511) === 0 && budget.until && Date.now() > budget.until)) { budget.stop = true; return 0; }
   if (ply > 0 && isDrawn(g, ply)) return 0;
   const me = g.turn, opp = me === 'w' ? 'b' : 'w';
   const check = g.attacked(g.kingSq(me), opp);
@@ -345,7 +345,7 @@ function rootScores(g, depth, noise, max) {
   let moves = ordered(g, g.moves());
   if (!moves.length) return [];
   let done = null;
-  const budget = { n: 0, max, stop: false };
+  const budget = { n: 0, max, stop: false, until: Date.now() + 2500 };
   for (let d = 0; d <= depth; d++) {
     const scores = [];
     let alpha = -Infinity;

@@ -24,7 +24,17 @@ export async function findPuzzleAsync(seed) {
   }
 }
 
+/** How hard a puzzle is (Elo-ish): longer lines, quiet first moves and mates are harder. */
+export function puzzleDifficulty(g0, p) {
+  const yours = Math.ceil(p.line.length / 2);
+  const g = g0.clone();
+  const m = g.moves().find((x) => name(x.from) + name(x.to) + (x.promo || '') === p.line[0]);
+  const quiet = m && !g.board[m.to];
+  return 800 + (yours - 1) * 250 + (quiet ? 250 : 0) + (p.theme === 'Mate' ? 150 : 0);
+}
+
 function* puzzleSteps(seed) {
+  let fallback = null;
   for (let attempt = 0; attempt < 12; attempt++) {
     const rng = new Rng((seed + attempt * 7919) >>> 0);
     const g = new Chess();
@@ -32,7 +42,15 @@ function* puzzleSteps(seed) {
     for (let ply = 0; ply < 80 && !g.result(); ply++) {
       if (ply >= 12) {
         const p = tryPosition(g);
-        if (p) return { start: start.slice(), ...p };
+        // not a plain recapture of the piece that was just taken
+        const last = start[start.length - 1];
+        const recapture = p && last && p.line[0].slice(2, 4) === last.slice(2, 4);
+        if (p && !recapture) {
+          const full = { start: start.slice(), ...p, difficulty: puzzleDifficulty(g, p) };
+          if (p.line.length >= 3) return full; // a real combination: two or more of your moves
+          fallback ||= full;
+          if (attempt >= 3 && fallback) return fallback;
+        }
         yield null;
       }
       // a sloppy-ish game produces natural tactical chances
@@ -42,7 +60,7 @@ function* puzzleSteps(seed) {
       start.push(uci);
     }
   }
-  return null;
+  return fallback;
 }
 
 function tryPosition(g0) {

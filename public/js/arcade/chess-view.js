@@ -107,6 +107,14 @@ export default class ChessView {
       const [x, y] = local(e);
       if (this.promo) return this.pickPromotion(x, y);
       const i = this.squareAt(x, y);
+      if (i >= 0 && this.thinking && this.sim.botSide && !this.sim.over) {
+        const p = this.game.board[i];
+        const mineSide = this.sim.botSide === 'w' ? 'b' : 'w';
+        if (this.premove?.from !== undefined && this.premove.to === undefined && i !== this.premove.from && !(p && colorOf(p) === mineSide)) { this.premove.to = i; sfx.tap(); return; }
+        if (p && colorOf(p) === mineSide) { this.premove = { from: i }; sfx.tap(); return; }
+        this.premove = null; // tap elsewhere cancels it
+        return;
+      }
       if (i < 0 || !this.canAct()) return;
       try { cv.setPointerCapture?.(e.pointerId); } catch { /* synthetic pointer */ }
       const p = this.game.board[i];
@@ -237,8 +245,20 @@ export default class ChessView {
       if (wait) await new Promise((r) => setTimeout(r, wait));
       this.thinking = false;
       if (!res) { this.renderControls(); return; }
-      this.animate(before, res.ai, this.game.board.slice(), false, () => this.afterHalfMove(res, null, true));
+      this.animate(before, res.ai, this.game.board.slice(), false, () => {
+        this.afterHalfMove(res, null, true);
+        this.firePremove();
+      });
     }, delay);
+  }
+
+  /** Play the queued premove if it's still legal; otherwise drop it quietly. */
+  firePremove() {
+    const pm = this.premove;
+    this.premove = null;
+    if (!pm || pm.to === undefined || this.sim.over || !this.canAct()) return;
+    const legal = this.game.moves().some((m) => m.from === pm.from && m.to === pm.to);
+    if (legal) setTimeout(() => { if (!this.destroyed && this.canAct()) this.tryMove(pm.from, pm.to); }, 60);
   }
 
   /** Online: the opponent's move arrived. */
@@ -320,7 +340,12 @@ export default class ChessView {
         const a = b.dataset.a;
         if (a === 'flip') this.toggleFlip();
         else if (a === 'undo') { if (s.takeback()) { this.shown = this.game.board.slice(); this.lastMove = null; this.hint = null; sfx.swap(); this.renderControls(); this.hooks.onChange?.(s); } }
-        else if (a === 'hint') { const h = s.hint(); if (h) { this.hint = [sqIndex(h.slice(0, 2)), sqIndex(h.slice(2, 4))]; sfx.special(); } }
+        else if (a === 'hint') {
+          // the hint thinks in the worker, so the board never freezes
+          b.disabled = true;
+          const done = (h) => { b.disabled = false; if (h) { this.hint = [sqIndex(h.slice(0, 2)), sqIndex(h.slice(2, 4))]; sfx.special(); } };
+          if (s.hintAsync) s.hintAsync().then(done); else done(s.hint());
+        }
         else if (a === 'draw') this.hooks.onDraw?.();
         else if (a === 'resign') this.hooks.onQuit?.();
       };
@@ -439,6 +464,12 @@ export default class ChessView {
       }
     }
     if (this.hint) this.arrow(this.hint[0], this.hint[1], 'rgba(255,170,0,0.8)');
+    // a queued premove: outlined squares (and an arrow once it has a target)
+    if (this.premove) {
+      const mark = (i) => { const [x, y] = this.xy(i); ctx.strokeStyle = 'rgba(80,170,255,0.95)'; ctx.lineWidth = 3; ctx.strokeRect(x + 2, y + 2, C - 4, C - 4); };
+      mark(this.premove.from);
+      if (this.premove.to !== undefined) { mark(this.premove.to); this.arrow(this.premove.from, this.premove.to, 'rgba(80,170,255,0.75)'); }
+    }
     // a moving piece is lifted: bigger, with its shadow left on the board
     if (this.anim) {
       const a = this.anim;

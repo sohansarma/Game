@@ -7,7 +7,7 @@ import { dailyConfig, deepConfig, dayKey, weekKey, blocksSeed, ENGINE_VERSION, B
 import { ARCADE, ARCADE_BY_ID, arcadeSeed, tierOf, challengeHash, parseChallenge } from './arcade/index.js';
 import { hashString } from './rng.js';
 import { ChessVersus, ChessCasual, LudoVersus, TIME_CONTROLS, newCode, validCode, rebuild, describe } from './versus.js';
-import { CASUAL_LEVELS } from './arcade/chess.js';
+import { CASUAL_LEVELS, Chess } from './arcade/chess.js';
 import { tableBackgroundCSS } from './arcade/table.js';
 import { TEMPLATES, RULE_INFO, EMOJI, PALETTES, sanitize as ugcSanitize, starterSpec, createSim as ugcCreate, jamTheme } from './maker/engine.js';
 import { load, update, save, totalStars, highestUnlocked, exportSave, importSave, resetSave, randomNickname, cleanName, nameProblem, NAME_MIN, NAME_MAX, ADJECTIVES, ANIMALS } from './storage.js';
@@ -251,6 +251,7 @@ function puzzleStats() {
   return { rating: p.rating ?? 1000, solved: p.solved || 0, streak: p.streak || 0, best: p.best || 0, days: p.days || {} };
 }
 
+let nextPracticeSeed = null;
 async function playChessPuzzle({ daily }) {
   const key = dayKey();
   if (daily && puzzleStats().days[key]) {
@@ -264,9 +265,12 @@ async function playChessPuzzle({ daily }) {
   const mod = await VIEWS.chess();
   const { puzzleFor } = await import('./arcade/chess-ai.js');
   const { ChessPuzzleSim } = await import('./arcade/chess-puzzles.js');
-  const seed = daily ? hashString('tidepop-chess-puzzle-' + key) : randSeed();
+  const seed = daily ? hashString('tidepop-chess-puzzle-' + key) : (nextPracticeSeed ?? randSeed());
+  if (!daily) nextPracticeSeed = null;
   toast(daily ? '🧩 Setting up today\'s puzzle…' : '🧩 Finding a puzzle…');
   const puzzle = await puzzleFor(seed);
+  // get the next practice puzzle ready in the background
+  if (!nextPracticeSeed) { nextPracticeSeed = randSeed(); puzzleFor(nextPracticeSeed).catch(() => {}); }
   if (!puzzle) { toast("Couldn't find a puzzle – try again"); return arcadeMenu('chess'); }
   leaveGame();
   try { history.pushState({ g: 1 }, ''); } catch { /* sandboxed */ }
@@ -297,7 +301,24 @@ async function playChessPuzzle({ daily }) {
     if (run.ended) return;
     run.ended = true;
     const clean = solved && sim.mistakes === 0 && sim.hintsUsed === 0;
-    const delta = solved ? (clean ? 16 : sim.hintsUsed ? 4 : 8) : -12;
+    // rating moves like Elo: beating a hard puzzle counts more than an easy one
+    const pr = puzzle.difficulty || 1000, me = puzzleStats().rating;
+    const expected = 1 / (1 + Math.pow(10, (pr - me) / 400));
+    const result = solved ? (clean ? 1 : sim.hintsUsed ? 0.35 : 0.65) : 0;
+    const delta = Math.round(32 * (result - expected));
+    // show the answer on the board in normal notation before the summary
+    const answer = (() => {
+      try {
+        const g = new Chess();
+        for (const u of puzzle.start) g.play(u);
+        return puzzle.line.filter((_, i) => i % 2 === 0 || i < puzzle.line.length).map((u) => { const m = g.moves().find((x) => `${'abcdefgh'[x.from & 7]}${8 - (x.from >> 3)}${'abcdefgh'[x.to & 7]}${8 - (x.to >> 3)}${x.promo || ''}` === u); const s = m ? g.toSan(m) : u; g.play(u); return s; });
+      } catch { return puzzle.line; }
+    })();
+    if (!solved && view) {
+      const sq = (u) => (8 - Number(u[1])) * 8 + 'abcdefgh'.indexOf(u[0]);
+      view.hint = [sq(puzzle.line[0].slice(0, 2)), sq(puzzle.line[0].slice(2, 4))];
+      await new Promise((r) => setTimeout(r, 1400));
+    }
     update((d) => {
       const p = { rating: 1000, solved: 0, streak: 0, best: 0, days: {}, ...(d.chessPuzzles || {}) };
       p.rating = Math.max(400, p.rating + delta);
@@ -310,7 +331,8 @@ async function playChessPuzzle({ daily }) {
     solved ? sfx.win() : sfx.lose();
     const st = puzzleStats();
     const r = await modal(`<h2>${solved ? (clean ? '🎯 Solved – first try!' : '✅ Solved!') : '🏳️ Here\'s the answer'}</h2>
-      <p class="muted">${solved ? (clean ? 'Clean and sharp.' : `${sim.mistakes} miss${sim.mistakes === 1 ? '' : 'es'}${sim.hintsUsed ? ` · ${sim.hintsUsed} hint` : ''}`) : `The winning move was <b>${esc(puzzle.line[0])}</b>.`}</p>
+      <p class="muted">${solved ? (clean ? 'Clean and sharp.' : `${sim.mistakes} miss${sim.mistakes === 1 ? '' : 'es'}${sim.hintsUsed ? ` · ${sim.hintsUsed} hint` : ''}`) : `The winning line: <b>${esc(answer.join(' '))}</b>.`}</p>
+      <p class="small muted">Puzzle rating ~${pr}</p>
       ${solved ? `<div class="reward">+${clean ? 20 : 10} 🐚</div>` : ''}
       <div class="tide-stats"><div><b>${st.rating}</b><span>Rating ${delta >= 0 ? '+' : ''}${delta}</span></div><div><b>${st.streak}</b><span>Streak</span></div><div><b>${st.best}</b><span>Best streak</span></div><div><b>${st.solved}</b><span>Solved</span></div></div>`, {
       buttons: [{ label: '🧩 Next puzzle', value: 'next', cls: 'green' }, { label: '♟️ Chess menu', value: 'menu', cls: 'ghost' }],
@@ -2336,6 +2358,41 @@ async function chessSetup(again) {
   playVersus('chess', new ChessCasual({ mySide: opts.side, level: opts.level, clock: opts.clock, name: load().name }), null, { casual: opts });
 }
 
+/** Post-game review: the engine checks every move, marks mistakes and shows the better move. */
+async function chessReview(sim) {
+  const ucis = sim.game.history.map((h) => h.uci);
+  const sans = sim.game.history.map((h) => h.san);
+  const { reviewGame } = await import('./arcade/chess-ai.js');
+  modal('<h2>📈 Reviewing your game…</h2><p class="muted" id="rv-prog">The coach is looking at every move.</p>', { dismissable: false });
+  const rv = await reviewGame(ucis, (p) => { const el = $('#rv-prog'); if (el) el.textContent = `Looking at every move… ${Math.round(p * 100)}%`; });
+  if (!rv) { closeModal(null); toast("Couldn't review this game"); return showHub(); }
+  const sanOf = (i, uci) => {
+    if (!uci) return '';
+    const g = new Chess();
+    for (let k = 0; k < i; k++) g.play(ucis[k]);
+    const m = g.moves().find((x) => `${'abcdefgh'[x.from & 7]}${8 - (x.from >> 3)}${'abcdefgh'[x.to & 7]}${8 - (x.to >> 3)}${x.promo || ''}` === uci);
+    return m ? g.toSan(m) : uci;
+  };
+  const cap = (x) => Math.max(-1000, Math.min(1000, x));
+  const rows = rv.map((r, i) => {
+    const loss = Math.max(0, cap(r.bestScore) - cap(r.played));
+    const tag = r.best === ucis[i] ? 'best' : loss >= 300 ? 'blunder' : loss >= 150 ? 'mistake' : loss >= 70 ? 'inaccuracy' : 'ok';
+    return { i, side: i % 2 ? 'b' : 'w', loss, tag, san: sans[i], better: tag === 'ok' || tag === 'best' ? '' : sanOf(i, r.best) };
+  });
+  const mine = sim.mySide || 'w';
+  const myRows = rows.filter((r) => r.side === mine);
+  const count = (t) => myRows.filter((r) => r.tag === t).length;
+  const acc = Math.round(100 - myRows.reduce((a, r) => a + Math.min(300, r.loss), 0) / Math.max(1, myRows.length) / 3);
+  const key = myRows.slice().sort((a, b) => b.loss - a.loss)[0];
+  const mark = { blunder: '??', mistake: '?', inaccuracy: '?!', best: '★', ok: '' };
+  const list = rows.map((r) => `<div class="rv-row ${r.tag} ${r.side === mine ? 'mine' : ''}" role="listitem"><span class="rv-n">${r.i % 2 ? '' : `${r.i / 2 + 1}.`}</span><b>${esc(r.san)}${mark[r.tag]}</b>${r.better ? `<span class="small">better: ${esc(r.better)}</span>` : ''}</div>`).join('');
+  await modal(`<h2>📈 Game review</h2>
+    <div class="tide-stats"><div><b>${acc}%</b><span>Accuracy</span></div><div><b>${count('blunder')}</b><span>Blunders ??</span></div><div><b>${count('mistake')}</b><span>Mistakes ?</span></div><div><b>${count('best')}</b><span>Best moves ★</span></div></div>
+    ${key && key.loss >= 70 ? `<div class="tip">🔑 <b>Key moment:</b> move ${Math.floor(key.i / 2) + 1}, you played <b>${esc(key.san)}</b>${key.better ? ` – <b>${esc(key.better)}</b> was stronger` : ''}.</div>` : '<div class="tip">🌊 A clean game – no big mistakes!</div>'}
+    <div class="rv-list" role="list">${list}</div>`, { buttons: [{ label: 'Done', value: null, cls: 'green' }] });
+  showHub();
+}
+
 function toPgn(sim) {
   const r = sim.result;
   const res = !r ? '*' : r.winner === 'w' ? '1-0' : r.winner === 'b' ? '0-1' : '1/2-1/2';
@@ -2722,10 +2779,12 @@ async function endVersus(run) {
         ...(run.chessParty ? [{ label: '↻ Rematch (swap colours)', value: 'prematch', cls: 'green' }, { label: '⚙️ Change players', value: 'psetup', cls: 'blue' }] : []),
         ...(run.casual && won && sim.level < 6 ? [{ label: `⬆️ Next level: ${CASUAL_LEVELS[sim.level].name}`, value: 'up', cls: 'blue' }] : []),
         ...(run.chessParty ? [] : [{ label: run.casual ? '⚙️ New game' : '↻ Play again', value: 'again', cls: run.casual ? 'ghost' : 'green' }]),
+        ...(sim.game.history.length >= 4 ? [{ label: '📈 Review the game', value: 'review', cls: 'blue' }] : []),
         { label: '📋 Copy PGN', value: 'pgn', cls: 'ghost' },
         { label: '🕹️ Arcade', value: 'hub', cls: 'ghost' },
       ],
     });
+    if (out === 'review') return chessReview(sim);
     if (out === 'pgn') { await shareText(toPgn(sim)); return showHub(); }
     if (out === 'rematch') return chessSetup(run.casual);
     if (out === 'prematch') return chessParty({ ...run.chessParty, white: run.chessParty.black, black: run.chessParty.white });
