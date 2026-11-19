@@ -291,13 +291,20 @@ export function createApi(store, { now = () => new Date(), origin = process.env.
   // ---- online matches (chess / ludo): each player only writes their own moves
   const MATCH_CODE = /^[A-HJ-NP-Z2-9]{5}$/;
   const MATCH_GAMES = { chess: 400, ludo: 6000 };
+  // Ludo can seat up to 4 people: host, guest (opposite – the host's partner in Team Up), guest2, guest3.
+  const ROLES = ['host', 'guest', 'guest2', 'guest3'];
+  const seatOfRole = (m, role) => { const hs = m.opts.hostColour || 0; return [hs, (hs + 2) % 4, (hs + 1) % 4, (hs + 3) % 4][ROLES.indexOf(role)]; };
+  const sideOf = (m, pid) => (m.host.pid === pid ? m.host : m.guest?.pid === pid ? m.guest : (m.extra || []).find((x) => x.pid === pid) || null);
+  const roleOf = (m, pid) => (m.host.pid === pid ? 'host' : m.guest?.pid === pid ? 'guest' : (() => { const i = (m.extra || []).findIndex((x) => x.pid === pid); return i >= 0 ? ROLES[i + 2] : null; })());
   function matchView(m, playerId) {
+    const sides = [['host', m.host], ['guest', m.guest], ...(m.extra || []).map((x, i) => [ROLES[i + 2], x])].filter(([, x]) => x);
     return {
+      ...(m.game === 'ludo' ? { seats: sides.map(([role, x]) => ({ role, seat: seatOfRole(m, role), name: db.players[x.pid]?.name || 'Player', moves: x.moves, dice: x.dice || [], react: x.react || null })), mySeat: roleOf(m, playerId) ? seatOfRole(m, roleOf(m, playerId)) : null, players: m.opts.players || 2 } : {}),
       code: m.code, game: m.game, seed: m.seed, opts: m.opts,
       hostName: db.players[m.host.pid]?.name || 'Host', guestName: m.guest ? db.players[m.guest.pid]?.name || 'Guest' : null,
       hostMoves: m.host.moves, guestMoves: m.guest?.moves || [], joined: !!m.guest,
       ...(m.game === 'ludo' ? { hostDice: m.host.dice || [], guestDice: m.guest?.dice || [] } : {}),
-      resigned: m.resigned || null, me: playerId === m.host.pid ? 'host' : m.guest && playerId === m.guest.pid ? 'guest' : null,
+      resigned: m.resigned || null, me: roleOf(m, playerId),
       hostReact: m.host.react || null, guestReact: m.guest?.react || null,
     };
   }
@@ -318,8 +325,9 @@ export function createApi(store, { now = () => new Date(), origin = process.env.
         if (!Number.isInteger(seed) || seed < 0 || seed > 0xffffffff) throw fail(400, 'bad seed');
         const hc = Number(body.opts?.hostColour);
         const r = body.opts?.rules || {};
-        const rules = { master: !!r.master, joda: !!r.joda, quick: !!r.quick, teams: !!r.teams && !!body.opts?.bots };
-        const opts = body.game === 'chess' ? { hostSide: body.opts?.hostSide === 'b' ? 'b' : 'w' } : { bots: !!body.opts?.bots, hostColour: Number.isInteger(hc) && hc >= 0 && hc < 4 ? hc : 0, rules };
+        const rules = { master: !!r.master, joda: !!r.joda, quick: !!r.quick, teams: !!r.teams && (!!body.opts?.bots || Number(body.opts?.players) === 4) };
+        const players = Math.max(2, Math.min(4, Number(body.opts?.players) || 2));
+        const opts = body.game === 'chess' ? { hostSide: body.opts?.hostSide === 'b' ? 'b' : 'w' } : { bots: !!body.opts?.bots, hostColour: Number.isInteger(hc) && hc >= 0 && hc < 4 ? hc : 0, rules, players };
         if (Object.keys(db.matches).length > 5000) throw fail(503, 'too many open matches');
         db.matches[code] = { code, game: body.game, seed, opts, host: { pid: body.playerId, moves: [] }, guest: null, at: now };
         store.dirty();
@@ -328,13 +336,20 @@ export function createApi(store, { now = () => new Date(), origin = process.env.
       case 'join': {
         if (!m) throw fail(404, 'No match with that code');
         if (m.host.pid === body.playerId) throw fail(400, "That's your own match – share the code with a friend");
-        if (m.guest && m.guest.pid !== body.playerId) throw fail(409, 'That match already has two players');
-        if (!m.guest) { m.guest = { pid: body.playerId, moves: [] }; m.at = now; store.dirty(); }
+        if (sideOf(m, body.playerId)) return matchView(m, body.playerId); // already in
+        if (!m.guest) { m.guest = { pid: body.playerId, moves: [] }; m.at = now; store.dirty(); return matchView(m, body.playerId); }
+        // Ludo for 3–4: more friends can join the same code
+        const cap = m.game === 'ludo' ? Math.max(2, Math.min(4, m.opts.players || 2)) : 2;
+        m.extra ||= [];
+        if (2 + m.extra.length >= cap) throw fail(409, cap === 2 ? 'That match already has two players' : 'That table is full');
+        m.extra.push({ pid: body.playerId, moves: [] });
+        m.at = now;
+        store.dirty();
         return matchView(m, body.playerId);
       }
       case 'move': {
         if (!m) throw fail(404, 'No match with that code');
-        const side = m.host.pid === body.playerId ? m.host : m.guest?.pid === body.playerId ? m.guest : null;
+        const side = sideOf(m, body.playerId);
         if (!side) throw fail(403, 'not in this match');
         const mv = body.moves;
         const okMove = m.game === 'chess' ? (x) => typeof x === 'string' && /^[a-h][1-8][a-h][1-8][qrbn]?$/.test(x) : (x) => x === 'r' || (Number.isInteger(x) && x >= 0 && x < 4);
@@ -356,7 +371,7 @@ export function createApi(store, { now = () => new Date(), origin = process.env.
       case 'react': {
         // a quick emoji to the other player (rate-limited by the API limiter)
         if (!m) throw fail(404, 'No match with that code');
-        const side = m.host.pid === body.playerId ? m.host : m.guest?.pid === body.playerId ? m.guest : null;
+        const side = sideOf(m, body.playerId);
         if (!side) throw fail(403, 'not in this match');
         if (!['😊', '😂', '😎', '😤', '🎉', '👏', '😭', '🙈', '🦈', '👍', '🙏'].includes(body.emoji)) throw fail(400, 'bad reaction');
         side.react = { e: body.emoji, at: now };
@@ -365,7 +380,7 @@ export function createApi(store, { now = () => new Date(), origin = process.env.
       }
       case 'resign': {
         if (!m) throw fail(404, 'No match with that code');
-        const role = m.host.pid === body.playerId ? 'host' : m.guest?.pid === body.playerId ? 'guest' : null;
+        const role = roleOf(m, body.playerId);
         if (!role) throw fail(403, 'not in this match');
         m.resigned ||= role;
         store.dirty();

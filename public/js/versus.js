@@ -359,6 +359,8 @@ export function rebuild(match, me) {
     if (!v.over && match.resigned) v.resign(match.resigned === 'host' ? match.opts.hostSide : match.opts.hostSide === 'w' ? 'b' : 'w');
     return v;
   }
+  // ludo for 2–4 people: each joiner has a fixed seat (guest opposite the host, then the sides)
+  if (Array.isArray(match.seats)) return rebuildSeats(match, me);
   // ludo: host picks a colour, guest sits opposite; bots optionally fill the other seats
   const hs = Number.isInteger(match.opts.hostColour) ? match.opts.hostColour : 0;
   const gs = (hs + 2) % 4;
@@ -368,6 +370,33 @@ export function rebuild(match, me) {
   const v = new LudoVersus({ seed: match.seed, seats, mine: [me === 'host' ? hs : gs], names, first: hs, dice, rules: match.opts.rules || null });
   const lists = { [hs]: [...(match.hostMoves || [])], [gs]: [...(match.guestMoves || [])] };
   for (let guard = 0; guard < 6000 && !v.over; guard++) {
+    const seat = v.game.turn;
+    const next = lists[seat]?.shift();
+    if (next === undefined) break;
+    if (!v.apply(seat, next).ok) break;
+  }
+  return v;
+}
+
+function rebuildSeats(match, me) {
+  const hs = Number.isInteger(match.opts.hostColour) ? match.opts.hostColour : 0;
+  const players = Math.max(2, Math.min(4, match.players || match.opts.players || 2));
+  const order = [hs, (hs + 2) % 4, (hs + 1) % 4, (hs + 3) % 4];
+  const human = new Set(order.slice(0, players));
+  const seats = [0, 1, 2, 3].map((i) => (human.has(i) ? 'human' : match.opts.bots ? 'ai' : null));
+  const names = {};
+  const lists = {};
+  let dice = null;
+  for (const x of match.seats) {
+    names[x.seat] = x.name;
+    lists[x.seat] = [...(x.moves || [])];
+    if (Array.isArray(x.dice)) (dice ||= {})[x.seat] = [...x.dice];
+  }
+  if (dice) for (const s of human) dice[s] ||= [];
+  const roleSeat = { host: order[0], guest: order[1], guest2: order[2], guest3: order[3] };
+  const mySeat = me && roleSeat[me] !== undefined ? roleSeat[me] : Number.isInteger(match.mySeat) ? match.mySeat : hs;
+  const v = new LudoVersus({ seed: match.seed, seats, mine: [mySeat], names, first: hs, dice, rules: match.opts.rules || null });
+  for (let guard = 0; guard < 8000 && !v.over; guard++) {
     const seat = v.game.turn;
     const next = lists[seat]?.shift();
     if (next === undefined) break;

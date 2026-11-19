@@ -404,20 +404,28 @@ async function writeMine(sh, fn) {
 
 async function sharedFind(sh, code) {
   const snap = await sh.db.collection('players').get();
-  let host = null, guest = null;
+  let host = null;
+  const guests = [];
   snap.docs.forEach((d) => {
     const m = d.data()?.matches?.[code];
     if (!m || Date.now() - (m.at || 0) > MATCH_TTL) return;
     const entry = { pid: d.id, name: String(d.data().name || 'Player').slice(0, 40), ...m };
     if (m.role === 'host') host = entry;
-    else if (m.role === 'guest' && (!guest || entry.at < guest.at)) guest = entry;
+    else if (m.role === 'guest') guests.push(entry);
   });
-  return { host, guest };
+  // first to join is "guest" (the host's partner), then guest2, guest3 – by join time
+  guests.sort((a, b) => (a.joinedAt || a.at) - (b.joinedAt || b.at));
+  const cap = host?.game === 'ludo' ? Math.max(2, Math.min(4, host.opts?.players || 2)) : 2;
+  return { host, guest: guests[0] || null, extra: guests.slice(1, cap - 1) };
 }
+const ROLES = ['host', 'guest', 'guest2', 'guest3'];
+const seatOfRole = (opts, role) => { const hs = opts?.hostColour || 0; return [hs, (hs + 2) % 4, (hs + 1) % 4, (hs + 3) % 4][ROLES.indexOf(role)]; };
 
-function combine(host, guest, me) {
+function combine(host, guest, me, extra = []) {
   if (!host) return null;
+  const sides = [['host', host], ['guest', guest], ...extra.map((x, i) => [ROLES[i + 2], x])].filter(([, x]) => x);
   return {
+    ...(host.game === 'ludo' ? { seats: sides.map(([role, x]) => ({ role, seat: seatOfRole(host.opts, role), name: x.name, moves: x.moves || [], react: x.react || null })), players: host.opts?.players || 2, mySeat: me ? seatOfRole(host.opts, me) : null } : {}),
     code: host.code,
     game: host.game,
     seed: host.seed,
@@ -454,11 +462,13 @@ export const matches = {
   async join(code) {
     const sh = await sharedDb();
     if (sh) {
-      const { host, guest } = await sharedFind(sh, code);
+      const { host, guest, extra } = await sharedFind(sh, code);
       if (!host) throw Object.assign(new Error('No match with that code'), { status: 404 });
       if (host.pid === sh.uid) throw Object.assign(new Error("That's your own match – share the code with a friend"), { status: 400 });
-      if (guest && guest.pid !== sh.uid) throw Object.assign(new Error('That match already has two players'), { status: 409 });
-      if (!guest) await writeMine(sh, (doc) => { doc.matches[code] = { role: 'guest', code, game: host.game, seed: host.seed, opts: host.opts, moves: [], at: Date.now() }; });
+      const inIt = guest?.pid === sh.uid || extra.some((x) => x.pid === sh.uid);
+      const cap = host.game === 'ludo' ? Math.max(2, Math.min(4, host.opts?.players || 2)) : 2;
+      if (!inIt && 1 + (guest ? 1 : 0) + extra.length >= cap) throw Object.assign(new Error(cap === 2 ? 'That match already has two players' : 'That table is full'), { status: 409 });
+      if (!inIt) await writeMine(sh, (doc) => { doc.matches[code] = { role: 'guest', code, game: host.game, seed: host.seed, opts: host.opts, moves: [], at: Date.now(), joinedAt: Date.now() }; });
       return this.get(code);
     }
     const p = await ensureRegistered();
@@ -468,9 +478,10 @@ export const matches = {
   async get(code) {
     const sh = await sharedDb();
     if (sh) {
-      const { host, guest } = await sharedFind(sh, code);
-      const me = host?.pid === sh.uid ? 'host' : guest?.pid === sh.uid ? 'guest' : null;
-      return combine(host, guest, me);
+      const { host, guest, extra } = await sharedFind(sh, code);
+      const xi = extra.findIndex((x) => x.pid === sh.uid);
+      const me = host?.pid === sh.uid ? 'host' : guest?.pid === sh.uid ? 'guest' : xi >= 0 ? ROLES[xi + 2] : null;
+      return combine(host, guest, me, extra);
     }
     const p = load();
     return req('/match?' + new URLSearchParams({ code, playerId: p.playerId }).toString());
@@ -511,7 +522,7 @@ export const matches = {
       if (stopped) return;
       try {
         const m = await this.get(code);
-        const sig = JSON.stringify([m?.hostMoves, m?.guestMoves, m?.joined, m?.resigned, m?.hostReact, m?.guestReact]);
+        const sig = JSON.stringify([m?.hostMoves, m?.guestMoves, m?.joined, m?.resigned, m?.hostReact, m?.guestReact, m?.seats]);
         if (sig !== last) { last = sig; cb(m); }
       } catch { /* offline – try again */ }
       if (!stopped) setTimeout(tick, document.hidden ? ms * 4 : ms);

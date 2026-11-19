@@ -2617,12 +2617,23 @@ async function createOnline(id) {
   } else {
     const me = await pickLudoColour();
     if (me === null) return versusMenu(id);
-    const hr = load().ludoRules || {};
-    const on = LUDO_RULES.filter(([k]) => k !== 'teams' && hr[k]).map(([, n]) => n);
-    const b = await modal(`<h2>🎲 Online Ludo</h2><p>You are <b>${LUDO_COLOURS[me][2]} ${LUDO_COLOURS[me][0]}</b>, your friend sits opposite as <b>${LUDO_COLOURS[(me + 2) % 4][2]} ${LUDO_COLOURS[(me + 2) % 4][0]}</b>. Each of you rolls on your own phone – the server rolls the dice.</p>
-      <p class="small">🏠 Your house rules come along: <b>${on.length ? esc(on.join(', ')) : 'classic rules'}</b> (change them in Vs computer → rules).</p>`, { buttons: [{ label: 'Just the two of us', value: 'n' }, { label: 'Add 2 bots to fill the table', value: 'y', cls: 'blue' }, { label: '🤝 Team up together vs 2 bots', value: 't', cls: 'blue' }] });
+    const hr = { ...(load().ludoRules || {}) };
+    let players = 2, bots = false;
+    const b = await modal(`<h2>🎲 Online Ludo</h2><p class="small">You are <b>${LUDO_COLOURS[me][2]} ${LUDO_COLOURS[me][0]}</b>. Everyone rolls on their own phone – the server rolls the dice. The first friend to join sits opposite you (your partner in Team Up).</p>
+      <div class="seg" role="group" aria-label="How many people"><button class="seg-btn on" data-n="2">2 people</button><button class="seg-btn" data-n="3">3 people</button><button class="seg-btn" data-n="4">4 people</button></div>
+      <label class="rule"><input type="checkbox" id="ol-bots"><span><b>Fill empty seats with bots</b></span></label>
+      <label class="rule"><input type="checkbox" data-rule="teams" ${hr.teams ? 'checked' : ''}><span><b>🤝 Team Up</b><span class="small muted">You and the person opposite play together (4 people, or 2 + bots)</span></span></label>
+      <div class="rule-list">${LUDO_RULES.map(([k, name, desc]) => `<label class="rule"><input type="checkbox" data-rule="${k}" ${hr[k] ? 'checked' : ''}><span><b>${name}</b><span class="small muted">${desc}</span></span></label>`).join('')}</div>`, {
+      buttons: [{ label: '▶ Create the table', value: 'go', cls: 'green' }, { label: 'Back', value: null, cls: 'ghost' }],
+      onOpen: (sheet) => {
+        for (const bt of $$('[data-n]', sheet)) bt.onclick = () => { players = Number(bt.dataset.n); $$('[data-n]', sheet).forEach((x) => x.classList.toggle('on', x === bt)); };
+        $('#ol-bots', sheet).onchange = (e) => { bots = e.target.checked; };
+        for (const cb of $$('[data-rule]', sheet)) cb.onchange = () => { hr[cb.dataset.rule] = cb.checked; };
+      },
+    });
     if (!b) return versusMenu(id);
-    opts = { bots: b !== 'n', hostColour: me, rules: { master: !!hr.master, joda: !!hr.joda, quick: !!hr.quick, teams: b === 't' } };
+    update((d) => { d.ludoRules = { ...(d.ludoRules || {}), ...hr }; });
+    opts = { bots: bots || (hr.teams && players < 4), hostColour: me, players, rules: { master: !!hr.master, joda: !!hr.joda, quick: !!hr.quick, teams: !!hr.teams && (players === 4 || bots || players === 2) } };
   }
   const code = newCode();
   try {
@@ -2647,7 +2658,12 @@ async function joinOnline() {
   if (!validCode(code)) { toast('Codes are 5 letters/numbers, like K7PQX'); return joinOnline(); }
   try {
     const m = await api.matches.join(code);
-    update((d) => { d.versus = { ...(d.versus || {}), [code]: { game: m.game, role: 'guest', at: Date.now() } }; });
+    update((d) => { d.versus = { ...(d.versus || {}), [code]: { game: m.game, role: m.me || 'guest', at: Date.now() } }; });
+    if (m.game === 'ludo') {
+      const r2 = m.opts.rules || {};
+      const on = LUDO_RULES.filter(([k]) => r2[k]).map(([, n, desc]) => `<li><b>${esc(n)}</b> – ${esc(desc)}</li>`);
+      await modal(`<h2>🎲 You're in!</h2><p>${Number.isInteger(m.mySeat) ? `You play <b>${LUDO_COLOURS[m.mySeat][2]} ${LUDO_COLOURS[m.mySeat][0]}</b>.` : ''} ${(m.players || 2) > 2 ? `A table for ${m.players}.` : ''}</p><p class="small"><b>House rules:</b></p><ul class="small">${on.length ? on.join('') : '<li>Classic rules</li>'}</ul>`, { buttons: [{ label: '▶ Play', value: true, cls: 'green' }] });
+    }
     openOnline(code);
   } catch (e) {
     toast(e.message || "Couldn't join that match");
@@ -2669,7 +2685,7 @@ function myMovesOf(sim, id, role, match) {
     return sim.moves.filter((_, i) => (i % 2 === 0 ? 'w' : 'b') === side);
   }
   const hs = Number.isInteger(match.opts.hostColour) ? match.opts.hostColour : 0;
-  const seat = role === 'host' ? hs : (hs + 2) % 4;
+  const seat = Number.isInteger(match.mySeat) ? match.mySeat : role === 'host' ? hs : (hs + 2) % 4;
   return sim.moves.filter(([x]) => x === seat).map(([, t]) => t);
 }
 
@@ -2770,13 +2786,17 @@ async function playVersus(id, sim, online, extra = {}) {
   $('#ar-pause', el).onclick = () => { sfx.tap(); versusPause(run); };
   refresh();
   if (online) {
+    const flush = () => { if (document.hidden) pushMine(); };
+    document.addEventListener('visibilitychange', flush);
+    const stopFlush = () => document.removeEventListener('visibilitychange', flush);
+    run.stopFlush = stopFlush;
     if (online.justCreated) shareCode(online.code, id);
     run.stopWatch = api.matches.watch(online.code, (m) => {
       if (!m || currentRun !== run) return;
       if (m.joined && !online.match.joined) { online.match = m; online.joinedNow = true; toast(`🎉 ${m.me === 'host' ? m.guestName : m.hostName} joined!`); sfx.win(); }
       // the other player's reaction floats up from their name tag
       const theirs = online.role === 'host' ? m.guestReact : m.hostReact;
-      if (id === 'ludo' && theirs && theirs.at !== online.lastReact && view?.react) {
+      if (id === 'ludo' && !Array.isArray(m.seats) && theirs && theirs.at !== online.lastReact && view?.react) {
         if (online.lastReact !== undefined) {
           const hs0 = Number.isInteger(m.opts.hostColour) ? m.opts.hostColour : 0;
           view.react(online.role === 'host' ? (hs0 + 2) % 4 : hs0, theirs.e);
@@ -2791,8 +2811,34 @@ async function playVersus(id, sim, online, extra = {}) {
         const hs = Number.isInteger(m.opts.hostColour) ? m.opts.hostColour : 0;
         sim.names = { [hs]: online.role === 'host' ? 'You' : m.hostName || 'Host', [(hs + 2) % 4]: online.role === 'guest' ? 'You' : m.guestName || 'Guest' };
       }
+      // Ludo for 2–4: play every other person's moves in turn order (bots move by themselves)
+      if (id === 'ludo' && Array.isArray(m.seats)) {
+        const mySeat = sim.mySide;
+        for (const x of m.seats) {
+          if (x.seat === mySeat) continue;
+          if (x.react && x.react.at !== online.reacts?.[x.seat]) {
+            if (online.reacts && online.reacts[x.seat] !== undefined) view?.react?.(x.seat, x.react.e);
+            (online.reacts ||= {})[x.seat] = x.react.at;
+          } else (online.reacts ||= {})[x.seat] ??= x.react?.at ?? null;
+          if (x.name) sim.names[x.seat] = x.name;
+        }
+        for (let guard = 0; guard < 400 && !sim.over; guard++) {
+          const seat = sim.game.turn;
+          if (seat === mySeat) break;
+          const x = m.seats.find((y) => y.seat === seat);
+          if (!x) break; // a bot, or nobody has joined that seat yet
+          const done = sim.moves.filter(([s0]) => s0 === seat).length;
+          const mv = x.moves[done];
+          if (mv === undefined) break;
+          if (sim.dice && Array.isArray(x.dice)) sim.dice[seat] = [...x.dice];
+          const res = sim.apply(seat, mv);
+          if (!res.ok) break;
+          view.remoteEvents(res.events);
+        }
+        refresh();
+      }
       const opp = online.role === 'host' ? m.guestMoves : m.hostMoves;
-      while (applied < opp.length && !sim.over) {
+      while (!(id === 'ludo' && Array.isArray(m.seats)) && applied < opp.length && !sim.over) {
         const mv = opp[applied];
         let res;
         if (id === 'chess') {
@@ -2842,6 +2888,7 @@ async function endVersus(run) {
   if (run.ended) return;
   run.ended = true;
   run.stopWatch?.();
+  run.stopFlush?.();
   const { sim, id, online } = run;
   const firstShow = !run.recorded;
   run.recorded = true;

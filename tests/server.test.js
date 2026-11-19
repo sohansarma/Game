@@ -13,7 +13,7 @@ let srv, store, base, dir;
 
 before(async () => {
   dir = mkdtempSync(path.join(tmpdir(), 'tidepop-'));
-  ({ server: srv, store } = createServer({ dataDir: dir, rate: { capacity: 500 } }));
+  ({ server: srv, store } = createServer({ dataDir: dir, rate: { capacity: 5000 } }));
   await new Promise((r) => srv.listen(0, r));
   base = `http://127.0.0.1:${srv.address().port}`;
 });
@@ -312,4 +312,35 @@ test('online ludo: house rules and Team Up travel with the match; reactions reac
   assert.equal((await call(guest, { action: 'react', code: 'LUD3Y', emoji: '🎉' })).status, 200);
   assert.equal((await call(guest, { action: 'react', code: 'LUD3Y', emoji: '<b>' })).status, 400);
   assert.equal((await get(`/api/match?code=LUD3Y&playerId=${host.playerId}`)).body.guestReact.e, '🎉');
+});
+
+test('online ludo for four: everyone joins one code, seats are fixed, all rebuild the same game', async () => {
+  const { rebuild } = await import('../public/js/versus.js');
+  const ps = [await register('Mum Otter 1'), await register('Dad Otter 2'), await register('Kid Otter 3'), await register('Kid Otter 4')];
+  const call = (who, body) => post('/api/match', { ...body, playerId: who.playerId, token: who.token });
+  assert.equal((await call(ps[0], { action: 'create', code: 'FAM4Z', game: 'ludo', seed: 21, opts: { hostColour: 0, players: 4, rules: { teams: true } } })).status, 200);
+  for (const p of ps.slice(1)) assert.equal((await call(p, { action: 'join', code: 'FAM4Z' })).status, 200);
+  const extra = await register('Late Crab 5');
+  assert.equal((await call(extra, { action: 'join', code: 'FAM4Z' })).status, 409, 'table full');
+  const view = async (p) => (await get(`/api/match?code=FAM4Z&playerId=${p.playerId}`)).body;
+  const m0 = await view(ps[0]);
+  assert.deepEqual(m0.seats.map((x) => x.seat).sort(), [0, 1, 2, 3]);
+  assert.equal(m0.opts.rules.teams, true);
+  const roleOf = ['host', 'guest', 'guest2', 'guest3'];
+  for (let turn = 0; turn < 120; turn++) {
+    const m = await view(ps[0]);
+    const sims = roleOf.map((r) => rebuild(m, r));
+    for (const s of sims.slice(1)) assert.deepEqual(s.game.tokens, sims[0].game.tokens, 'all four phones agree');
+    const g = sims[0].game;
+    if (sims[0].over || g.over) break;
+    const who = m.seats.find((x) => x.seat === g.turn);
+    const p = ps[roleOf.indexOf(who.role)];
+    const s = sims[roleOf.indexOf(who.role)];
+    const mine = s.moves.filter(([x]) => x === g.turn).map(([, t]) => t);
+    const next = g.phase === 'roll' ? 'r' : g.legal()[0];
+    assert.equal((await call(p, { action: 'move', code: 'FAM4Z', moves: [...mine, next] })).status, 200);
+  }
+  const m = await view(ps[3]);
+  assert.equal(m.mySeat, 3);
+  assert.ok(m.seats.every((x) => x.dice.length > 0), 'every person rolled server dice');
 });
