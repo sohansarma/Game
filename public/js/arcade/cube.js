@@ -277,7 +277,7 @@ export class CubeFree {
     return { ok: true, solved: false };
   }
   undo() {
-    if (this.over || !this.mine.length) return { ok: false };
+    if (this.over || this.mine.length <= (this.undoFloor || 0)) return { ok: false };
     const t = this.mine.pop();
     const inv = inverse(t);
     this.cube.twist(...inv);
@@ -286,6 +286,14 @@ export class CubeFree {
     return { ok: true, t: inv };
   }
   quit() { if (this.over) return; this.log.push(['q']); this.over = true; this.overReason = 'Stopped'; }
+  /** x / z: turn the whole cube (all layers) – logged, but not a move */
+  rotate(axis, dir) {
+    if (this.over || ![0, 1, 2].includes(axis) || (dir !== 1 && dir !== -1)) return { ok: false };
+    for (const l of this.cube.layers) this.cube.twist(axis, l, dir);
+    this.log.push(['r', axis, dir]);
+    this.undoFloor = this.mine.length; // moves before a rotation can't be undone (they'd turn the wrong layer now)
+    return { ok: true };
+  }
 }
 
 /** Your moves in face-turn metric: R R = R2 counts once, R R' cancels. */
@@ -323,6 +331,7 @@ function replayDaily(seed, log) {
     if (typeof a === 'number') { const t = decodeTwist(sim.cube.layers, a); r = t ? sim.twist(...t) : { ok: false }; }
     else if (Array.isArray(a) && a[0] === 'q') { sim.quit(); r = { ok: true }; }
     else if (Array.isArray(a) && a[0] === 'u') r = sim.undo();
+    else if (Array.isArray(a) && a[0] === 'r') r = sim.rotate(a[1], a[2]);
     else return { ok: false, reason: 'unknown action', sim };
     if (!r.ok) return { ok: false, reason: 'invalid action', sim };
   }

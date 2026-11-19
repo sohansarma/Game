@@ -136,6 +136,14 @@ export default class CubeView {
         if (t) { this.doTwist(...t, false, label); e.preventDefault(); }
         return;
       }
+      // x / z: turn the whole cube around R or F (logged, not counted as moves)
+      const rot = cs ? { t: ['R', 1, 'x'], y: ['R', 1, 'x'], b: ['R', -1, "x'"], n: ['R', -1, "x'"], p: ['F', 1, 'z'], q: ['F', -1, "z'"] }[k]
+        : k === 'x' ? ['R', e.shiftKey ? -1 : 1, e.shiftKey ? "x'" : 'x'] : k === 'z' ? ['F', e.shiftKey ? -1 : 1, e.shiftKey ? "z'" : 'z'] : null;
+      if (rot && this.sim.rotate) {
+        const t = this.viewTwist(rot[0], rot[1]);
+        if (t && this.sim.rotate(t[0], t[2]).ok) { this.history.push(rot[2]); this.undoStack = []; this.lastWasSingle = false; sfx.swap(); this.renderControls(); e.preventDefault(); }
+        return;
+      }
       // y / y': turn the whole cube (just the camera – it isn't a move)
       if ((cs && k === ';') || (!cs && k === 'y' && !e.shiftKey)) { this.yaw -= Math.PI / 2; this.history.push('y'); this.lastWasSingle = false; this.renderControls(); e.preventDefault(); return; }
       if ((cs && k === 'a') || (!cs && k === 'y' && e.shiftKey)) { this.yaw += Math.PI / 2; this.history.push("y'"); this.lastWasSingle = false; this.renderControls(); e.preventDefault(); return; }
@@ -310,7 +318,7 @@ export default class CubeView {
         else if (b.dataset.a === 'keys') {
           update((d) => { d.settings.cubeKeys = (d.settings.cubeKeys || 'letters') === 'cstimer' ? 'letters' : 'cstimer'; });
           sfx.tap();
-          this.banner = { text: load().settings.cubeKeys === 'cstimer' ? 'csTimer keys: I/K R, D/E L, J/F U, S/L D, H/G F, W/O B, 5/6 M, ;/A y' : 'Letter keys: R L U D F B M (Shift = prime), Y = y', t0: performance.now() };
+          this.banner = { text: load().settings.cubeKeys === 'cstimer' ? 'csTimer keys: I/K R, D/E L, J/F U, S/L D, H/G F, W/O B, 5/6 M, U/M r, V/R l, T/B x, ;/A y, P/Q z' : 'Letter keys: R L U D F B M, X Y Z (Shift = prime)', t0: performance.now() };
           this.renderControls();
         }
         else this.hooks.onQuit?.();
