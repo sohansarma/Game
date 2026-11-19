@@ -17,10 +17,10 @@ import breaker from './breaker.js';
 import crabCatch from './catch.js';
 import chess from './chess.js';
 import ludo from './ludo.js';
-import cube from './cube.js';
+import cube, { scrambleGame } from './cube.js';
 import tide from './tide.js';
 
-export const ARCADE = [chess, ludo, cube, miner, puffer, serpent, merge, stack, sort, breaker, crabCatch, tide];
+export const ARCADE = [chess, ludo, cube, miner, puffer, serpent, merge, stack, sort, breaker, crabCatch, tide, scrambleGame];
 
 export const ARCADE_BY_ID = Object.fromEntries(ARCADE.map((g) => [g.id, g]));
 

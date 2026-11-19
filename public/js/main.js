@@ -329,13 +329,31 @@ const ao = (times, n) => {
   return mid.reduce((a, b) => a + b, 0) / mid.length;
 };
 
-async function playCubeFree(n) {
+// A solve entry: a number (seconds) or { t, p: '+2' | 'dnf' }.
+const solveSecs = (e) => (typeof e === 'number' ? e : e.p === 'dnf' ? Infinity : e.t + (e.p === '+2' ? 2 : 0));
+const solveText = (e) => (typeof e === 'number' ? e.toFixed(2) : e.p === 'dnf' ? `DNF (${e.t.toFixed(2)})` : `${(e.t + (e.p === '+2' ? 2 : 0)).toFixed(2)}${e.p === '+2' ? '+' : ''}`);
+/** WCA average: drop best and worst; more than one DNF = DNF. */
+function aoN(list, n) {
+  if (list.length < n) return null;
+  const xs = list.slice(-n).map(solveSecs).sort((a, b) => a - b);
+  const mid = xs.slice(1, -1);
+  return mid.some((x) => x === Infinity) ? Infinity : mid.reduce((a, b) => a + b, 0) / mid.length;
+}
+const fmtAvg = (x) => (x === null ? '–' : x === Infinity ? 'DNF' : x.toFixed(2));
+
+async function playCubeFree(n, { daily = false } = {}) {
   leaveGame();
   try { history.pushState({ g: 1 }, ''); } catch { /* sandboxed */ }
   const mod = await VIEWS.cube();
-  const { CubeFree } = await import('./arcade/cube.js');
-  const sim = new CubeFree(randSeed(), n);
-  const run = { kind: 'free', id: 'cube', sim };
+  const { CubeFree, CubeDaily } = await import('./arcade/cube.js');
+  const key = dayKey();
+  if (daily && load().cubeDaily?.[key]) {
+    const r = load().cubeDaily[key];
+    toast(`You've done today's scramble: ${r.solved ? `${r.moves} moves` : 'not solved'} – a new one at reset`);
+    return showLeaderboard('scrambleDaily');
+  }
+  const sim = daily ? new CubeDaily(arcadeSeed('scramble', true, key, 0)) : new CubeFree(randSeed(), n);
+  const run = { kind: 'free', id: 'cube', sim, daily };
   currentRun = run;
   setBackground(ARCADE_BY_ID.cube.color);
   const el = showScreen('arcade', `
@@ -345,37 +363,88 @@ async function playCubeFree(n) {
     </div>
     <div class="board-wrap"><canvas id="ar-canvas" aria-label="Cube"></canvas></div>
     <div id="ar-controls" class="arcade-controls"></div>
-    <div class="mode-label" id="ar-label">⏱️ Free solve · ${n}×${n} · not ranked</div>`);
+    <div class="mode-label" id="ar-label">${daily ? `📅 Daily Scramble ${key} · same for everyone · fewest moves wins · one try` : `⏱️ Free solve · ${n}×${n} · not ranked`}</div>`);
   applyTable(el, 'cube');
   const refresh = () => { const box = $('#ar-hud', el); if (box) box.innerHTML = mod.hud(sim).map((h) => `<div class="hstat ${h.big ? 'big' : ''}"><span class="lbl">${esc(String(h.label))}</span><b>${h.value}</b></div>`).join(''); };
+  const tkey = 'n' + n;
+  const record = (entry) => update((d) => { d.cubeTimes = { ...(d.cubeTimes || {}) }; d.cubeTimes[tkey] = [...(d.cubeTimes[tkey] || []), entry].slice(-100); });
+  const finishDaily = async () => {
+    update((d) => { d.cubeDaily = { ...(d.cubeDaily || {}), [key]: { solved: sim.solved, moves: sim.cubeMoves } }; });
+    noteGameEnd('cube', false);
+    const res = sim.solved ? await submitRun({ board: 'scrambleDaily', key, seed: 0, log: sim.log, score: sim.score }).catch(() => null) : null;
+    const r = await modal(`<h2>📅 Daily Scramble</h2>${sim.solved ? `<div class="big-score">${sim.cubeMoves} moves</div><p class="muted">${(view?.lastTime || 0).toFixed(2)} s${res?.rank ? ` · today's rank <b>#${res.rank}</b>` : ''}</p>` : '<p>Not solved this time – tomorrow brings a new one.</p>'}
+      <p class="small muted">Everyone gets the same scramble; the fewest moves wins (score = 1000 − moves). The server replays every move.</p>`, {
+      buttons: [{ label: '🏆 Leaderboard', value: 'lb', cls: 'blue' }, { label: '⏱️ Free solve', value: 'free', cls: 'ghost' }, { label: '🕹️ Arcade', value: null, cls: 'ghost' }],
+    });
+    if (r === 'lb') showLeaderboard('scrambleDaily');
+    else if (r === 'free') playCubeFree(3);
+    else showHub();
+  };
+  const session = async (entry) => {
+    const times = () => load().cubeTimes?.[tkey] || [];
+    const show = async () => {
+      const list = times();
+      const valid = list.map(solveSecs);
+      const best = Math.min(...valid);
+      const last = list[list.length - 1];
+      const pb = solveSecs(last) <= best && solveSecs(last) !== Infinity;
+      const r = await modal(`<h2>🧊 ${last && typeof last === 'object' && last.p === 'dnf' ? 'DNF' : 'Solved!'}</h2><div class="big-score">${last ? solveText(last) : '–'} s</div>
+        <p class="muted">${sim.cubeMoves} moves${pb && list.length > 1 ? ' · 🎉 new personal best!' : ''}</p>
+        <div class="tide-stats"><div><b>${best === Infinity ? '–' : best.toFixed(2)}</b><span>Best</span></div><div><b>${fmtAvg(aoN(list, 5))}</b><span>ao5</span></div><div><b>${fmtAvg(aoN(list, 12))}</b><span>ao12</span></div><div><b>${list.length}</b><span>Solves</span></div></div>
+        <div class="row" style="gap:8px;justify-content:center;margin:8px 0"><button class="btn sm ghost" data-p="ok">OK</button><button class="btn sm ghost" data-p="+2">+2</button><button class="btn sm ghost" data-p="dnf">DNF</button><button class="btn sm ghost" data-p="del">🗑 Delete</button></div>
+        <p class="small muted">Session: ${list.slice(-12).map(solveText).join(' · ') || '–'}</p>`, {
+        buttons: [{ label: '↻ Next scramble', value: 'again', cls: 'green' }, { label: '🕹️ Arcade', value: null, cls: 'ghost' }],
+        onOpen: (sheet) => {
+          for (const b of $$('[data-p]', sheet)) b.onclick = () => {
+            update((d) => {
+              const L = d.cubeTimes[tkey];
+              const e = L[L.length - 1];
+              const t = typeof e === 'number' ? e : e.t;
+              if (b.dataset.p === 'del') L.pop();
+              else L[L.length - 1] = b.dataset.p === 'ok' ? t : { t, p: b.dataset.p };
+            });
+            sfx.tap();
+            closeModal('edit');
+          };
+        },
+      });
+      if (r === 'edit') return show();
+      if (r === 'again') playCubeFree(n);
+      else showHub();
+    };
+    record(entry);
+    if (solveSecs(entry) !== Infinity && solveSecs(entry) <= Math.min(...times().map(solveSecs))) sfx.win();
+    show();
+  };
   view = new mod.default({
     canvas: $('#ar-canvas', el), controls: $('#ar-controls', el), sim, reducedMotion: load().settings.reducedMotion,
     hooks: {
       onChange: refresh,
-      onQuit: () => { sim.quit(); showHub(); },
-      onOver: async () => {
-        if (!sim.solved) return showHub();
-        const t = view?.lastTime || 0;
-        const key = 'n' + n;
-        update((d) => { d.cubeTimes = { ...(d.cubeTimes || {}) }; d.cubeTimes[key] = [...(d.cubeTimes[key] || []), Math.round(t * 100) / 100].slice(-100); });
-        const times = load().cubeTimes[key];
-        const best = Math.min(...times), a5 = ao(times, 5), a12 = ao(times, 12);
-        const pb = t <= best;
-        if (pb) sfx.win();
-        const r = await modal(`<h2>🧊 Solved!</h2><div class="big-score">${t.toFixed(2)} s</div>
-          <p class="muted">${sim.cubeMoves} moves${pb && times.length > 1 ? ' · 🎉 new personal best!' : ''}</p>
-          <div class="tide-stats"><div><b>${best.toFixed(2)}</b><span>Best</span></div><div><b>${a5 ? a5.toFixed(2) : '–'}</b><span>ao5</span></div><div><b>${a12 ? a12.toFixed(2) : '–'}</b><span>ao12</span></div><div><b>${times.length}</b><span>Solves</span></div></div>`, {
-          buttons: [{ label: '↻ Next scramble', value: 'again', cls: 'green' }, { label: '🕹️ Arcade', value: null, cls: 'ghost' }],
-        });
-        if (r === 'again') playCubeFree(n);
+      onQuit: () => {
+        const started = !!view?.t0;
+        sim.quit();
+        if (daily) return finishDaily();
+        // stopping a started solve records a DNF instead of throwing it away
+        if (started) session({ t: (performance.now() - view.t0) / 1000, p: 'dnf' });
         else showHub();
+      },
+      onOver: async () => {
+        if (daily) return finishDaily();
+        if (!sim.solved) return showHub();
+        const t = Math.round((view?.lastTime || 0) * 100) / 100;
+        session(view?.penalty ? { t, p: view.penalty } : t);
       },
     },
   });
+  if (load().settings.cubeInspect && !daily) view.inspectT0 = performance.now();
   $('#ar-pause', el).onclick = async () => {
     sfx.tap();
-    const r = await modal('<h2>⏸ Free solve</h2>', { buttons: [{ label: '▶ Keep solving', value: null, cls: 'green' }, { label: '↻ New scramble', value: 'new', cls: 'blue' }, { label: '🕹️ Arcade', value: 'hub', cls: 'ghost' }] });
+    view?.pause();
+    const insp = !!load().settings.cubeInspect;
+    const r = await modal(`<h2>⏸ ${daily ? 'Daily Scramble' : 'Free solve'}</h2><p class="small muted">The timer is paused.</p>`, { buttons: [{ label: '▶ Keep solving', value: null, cls: 'green' }, ...(daily ? [] : [{ label: '↻ New scramble', value: 'new', cls: 'blue' }, { label: insp ? '👀 Inspection: on (15 s)' : '👀 Inspection: off', value: 'insp', cls: 'ghost' }]), { label: '🕹️ Arcade', value: 'hub', cls: 'ghost' }] });
+    view?.resume();
     if (r === 'new') playCubeFree(n);
+    else if (r === 'insp') { update((d) => { d.settings.cubeInspect = !insp; }); toast(`Inspection ${!insp ? 'on – from your next scramble' : 'off'}`); }
     else if (r === 'hub') showHub();
   };
   refresh();
@@ -1971,7 +2040,7 @@ async function arcadeMenu(id) {
       { label: g.board ? '▶ Play the ladder' : '▶ Play', value: 'play', cls: 'green' },
       ...(id === 'ludo' ? [{ label: '👥 Pass & play · 2–4 players (offline)', value: 'party', cls: 'blue' }, { label: '🤖 Quick game vs computer', value: 'cpu', cls: 'blue' }] : []),
       ...(id === 'chess' ? [{ label: `🧩 Daily puzzle${load().chessPuzzles?.days?.[dayKey()] ? ' ✓' : ''}`, value: 'pz-daily', cls: 'green' }, { label: '🧩 Practice puzzles', value: 'pz-more', cls: 'blue' }, { label: '🤖 Play a sea-creature bot', value: 'cpu', cls: 'blue' }, { label: '👥 Pass & play · 2 players (offline)', value: 'party', cls: 'blue' }] : []),
-      ...(id === 'cube' ? [{ label: '⏱️ Free solve · 3×3 (timer, no limit)', value: 'free3', cls: 'blue' }, { label: '⏱️ Free solve · 2×2', value: 'free2', cls: 'blue' }] : []),
+      ...(id === 'cube' ? [{ label: `📅 Daily Scramble – fewest moves${load().cubeDaily?.[dayKey()] ? ' ✓' : ''}`, value: 'dscr', cls: 'blue' }, { label: '⏱️ Free solve · 3×3 (timer, no limit)', value: 'free3', cls: 'blue' }, { label: '⏱️ Free solve · 2×2', value: 'free2', cls: 'blue' }] : []),
       ...(g.board ? [{ label: '👥 Play a friend', value: 'friend', cls: 'blue' }] : []),
       { label: `📅 Daily challenge${today === undefined ? ' (new!)' : ''}`, value: 'daily', cls: 'blue' },
       { label: '🏆 Leaderboard', value: 'lb', cls: 'ghost' },
@@ -1986,6 +2055,7 @@ async function arcadeMenu(id) {
   else if (r === 'cpu') (id === 'chess' ? chessSetup() : ludoVsComputer());
   else if (r === 'party') (id === 'chess' ? chessParty() : ludoParty());
   else if (r === 'free3' || r === 'free2') playCubeFree(r === 'free3' ? 3 : 2);
+  else if (r === 'dscr') playCubeFree(3, { daily: true });
   else if (r === 'pz-daily' || r === 'pz-more') playChessPuzzle({ daily: r === 'pz-daily' });
 }
 

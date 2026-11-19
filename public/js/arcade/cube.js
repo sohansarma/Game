@@ -238,16 +238,22 @@ export class CubeFree {
     this.cube = new Cube(n);
     this.stack = [];
     this.scramble = [];
-    let lastAxis = -1;
     const layers = this.cube.layers.filter((l) => l !== 0); // outer turns only, like a real scramble
+    const faces = [];
+    for (let a = 0; a < 3; a++) for (const l of layers) faces.push([a, l]);
+    const done = []; // [axis, layer] of each scramble move
+    this.scrambleRaw = [];
     while (this.cube.solved() || this.scramble.length < this.plan.depth) {
-      let axis = rng.int(3);
-      if (axis === lastAxis) axis = (axis + 1 + rng.int(2)) % 3;
-      lastAxis = axis;
-      const t = [axis, layers[rng.int(layers.length)], rng.next() < 0.5 ? 1 : -1];
-      this.cube.twist(...t);
-      this.scrambleRaw = [...(this.scrambleRaw || []), t];
-      this.scramble.push(notation(n, ...t));
+      const [axis, layer] = faces[rng.int(faces.length)];
+      const last = done[done.length - 1], prev = done[done.length - 2];
+      if (last && last[0] === axis && last[1] === layer) continue; // same face twice
+      if (last && prev && last[0] === axis && prev[0] === axis) continue; // three on one axis
+      const kind = rng.int(3); // 0: clockwise, 1: counter, 2: half turn
+      const dir = rng.next() < 0.5 ? 1 : -1;
+      const reps = kind === 2 ? 2 : 1;
+      for (let i = 0; i < reps; i++) { this.cube.twist(axis, layer, dir); this.scrambleRaw.push([axis, layer, dir]); }
+      done.push([axis, layer]);
+      this.scramble.push(kind === 2 ? notation(n, axis, layer, dir)[0] + '2' : notation(n, axis, layer, dir));
       if (this.scramble.length > 60) break;
     }
     this.twists = Infinity;
@@ -255,6 +261,7 @@ export class CubeFree {
     this.points = 0;
     this.mine = [];
     this.log = [];
+    this.seed = seed >>> 0;
     this.over = false;
     this.solved = false;
     this.free = true;
@@ -263,6 +270,7 @@ export class CubeFree {
   twist(axis, layer, dir) {
     if (this.over || !this.cube.validTwist(axis, layer, dir)) return { ok: false };
     this.cube.twist(axis, layer, dir);
+    this.log.push(encodeTwist(this.cube.layers, axis, layer, dir));
     this.mine.push([axis, layer, dir]);
     this.cubeMoves++;
     if (this.cube.solved()) { this.over = true; this.solved = true; this.overReason = 'Solved!'; return { ok: true, solved: true, moves: this.cubeMoves, free: true }; }
@@ -273,11 +281,45 @@ export class CubeFree {
     const t = this.mine.pop();
     const inv = inverse(t);
     this.cube.twist(...inv);
+    this.log.push(['u']);
     this.cubeMoves--;
     return { ok: true, t: inv };
   }
-  quit() { this.over = true; this.overReason = 'Stopped'; }
+  quit() { if (this.over) return; this.log.push(['q']); this.over = true; this.overReason = 'Stopped'; }
 }
+
+/** Daily scramble: everyone gets the same 3x3 scramble; fewest moves wins (score = 1000 − moves). */
+export class CubeDaily extends CubeFree {
+  constructor(seed) { super(seed, 3); this.daily = true; }
+  get score() { return this.solved ? Math.max(1, 1000 - this.cubeMoves) : 0; }
+}
+function replayDaily(seed, log) {
+  const sim = new CubeDaily(seed);
+  for (const a of log) {
+    if (sim.over) return { ok: false, reason: 'input after game over', sim };
+    let r;
+    if (typeof a === 'number') { const t = decodeTwist(sim.cube.layers, a); r = t ? sim.twist(...t) : { ok: false }; }
+    else if (Array.isArray(a) && a[0] === 'q') { sim.quit(); r = { ok: true }; }
+    else if (Array.isArray(a) && a[0] === 'u') r = sim.undo();
+    else return { ok: false, reason: 'unknown action', sim };
+    if (!r.ok) return { ok: false, reason: 'invalid action', sim };
+  }
+  return { ok: true, sim };
+}
+export const scrambleGame = {
+  id: 'scramble',
+  title: 'Daily Scramble',
+  icon: '🧊',
+  tagline: 'Same 3×3 scramble for everyone – fewest moves wins',
+  color: ['#ff8a65', '#283593'],
+  maxLog: 3000,
+  shellsPer: 40,
+  milestone: 900,
+  special: true,
+  firstTry: true,
+  create: (seed) => new CubeDaily(seed),
+  replay: replayDaily,
+};
 
 export default {
   id: 'cube',

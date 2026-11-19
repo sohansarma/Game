@@ -4,6 +4,7 @@
 //  • keys: U D L R F B (Shift = counter-clockwise), arrows orbit the view
 import { COLORS, FACE_NORMALS, notation } from './cube.js';
 import { sfx, haptic } from '../audio.js';
+import { load, update } from '../storage.js';
 
 const AXES = [[1, 0, 0], [0, 1, 0], [0, 0, 1]];
 const ease = (t) => 1 - Math.pow(1 - t, 3);
@@ -113,12 +114,22 @@ export default class CubeView {
     };
     const up = (e) => { if (this.drag && this.drag.id === e.pointerId) this.drag = null; };
     const key = (e) => {
-      if (document.querySelector('.modal.open') || this.sim.over) return;
-      const L = this.sim.cube.layers, hi = L[L.length - 1], lo = L[0];
-      const map = { u: [1, hi, -1], d: [1, lo, 1], r: [0, hi, -1], l: [0, lo, 1], f: [2, hi, -1], b: [2, lo, 1] };
+      if (document.querySelector('.modal.open') || this.sim.over || e.ctrlKey && e.key.toLowerCase() !== 'z') return;
       const k = e.key.toLowerCase();
-      if (map[k]) { const [a, l, dir] = map[k]; this.doTwist(a, l, e.shiftKey ? -dir : dir); e.preventDefault(); }
-      else if (e.key === 'ArrowLeft') this.yaw -= 0.2;
+      // faces follow what you SEE: R is whatever face is on your right right now
+      const cs = (load().settings.cubeKeys || 'letters') === 'cstimer';
+      const letters = { r: ['R', 1], l: ['L', 1], u: ['U', 1], d: ['D', 1], f: ['F', 1], b: ['B', 1], m: ['M', 1] };
+      const cstimer = { i: ['R', 1], k: ['R', -1], d: ['L', 1], e: ['L', -1], j: ['U', 1], f: ['U', -1], s: ['D', 1], l: ['D', -1], h: ['F', 1], g: ['F', -1], w: ['B', 1], o: ['B', -1], 5: ['M', 1], 6: ['M', -1], 8: ['M', 1], x: ['M', -1] };
+      const hit = (cs ? cstimer : letters)[k];
+      if (hit) {
+        const t = this.viewTwist(hit[0], cs ? hit[1] : e.shiftKey ? -1 : 1);
+        if (t) { this.doTwist(...t); e.preventDefault(); }
+        return;
+      }
+      // y / y': turn the whole cube (just the camera – it isn't a move)
+      if ((cs && k === ';') || (!cs && k === 'y' && !e.shiftKey)) { this.yaw -= Math.PI / 2; e.preventDefault(); return; }
+      if ((cs && k === 'a') || (!cs && k === 'y' && e.shiftKey)) { this.yaw += Math.PI / 2; e.preventDefault(); return; }
+      if (e.key === 'ArrowLeft') this.yaw -= 0.2;
       else if (e.key === 'ArrowRight') this.yaw += 0.2;
       else if (e.key === 'ArrowUp') this.pitch = Math.min(1.3, this.pitch + 0.2);
       else if (e.key === 'ArrowDown') this.pitch = Math.max(-1.3, this.pitch - 0.2);
@@ -169,6 +180,28 @@ export default class CubeView {
     this.doTwist(bestAxis, hit.p[bestAxis], bestDot > 0 ? 1 : -1);
   }
 
+  /** Face as seen from the camera (R = right of the screen, U = up, F = towards you) -> world twist. */
+  viewTwist(face, prime) {
+    const L = this.sim.cube.layers, hi = L[L.length - 1], lo = L[0];
+    const want = { R: [0, 1], L: [0, -1], U: [1, 1], D: [1, -1], F: [2, 1], B: [2, -1], M: [0, -1] }[face];
+    if (!want) return null;
+    let best = null;
+    for (let a = 0; a < 3; a++) for (const s of [1, -1]) {
+      const v = [0, 0, 0]; v[a] = s;
+      const d = this.viewDir(v)[want[0]] * want[1];
+      if (!best || d > best.d) best = { a, s, d };
+    }
+    if (face === 'M') {
+      if (L.indexOf(0) < 0) return null;
+      // M turns like L: same direction as the left face
+      return [best.a, 0, (best.s > 0 ? -1 : 1) * prime];
+    }
+    return [best.a, best.s > 0 ? hi : lo, (best.s > 0 ? -1 : 1) * prime];
+  }
+
+  pause() { if (this.t0 && !this.pausedAt) this.pausedAt = performance.now(); }
+  resume() { if (this.pausedAt) { this.t0 += performance.now() - this.pausedAt; this.pausedAt = 0; } }
+
   doTwist(axis, layer, dir, isUndo = false) {
     if (this.sim.over) return;
     if (this.anim) this.anim.t0 = -1e9; // finish the previous turn instantly
@@ -176,13 +209,29 @@ export default class CubeView {
     if (!res.ok) { sfx.bad(); return; }
     haptic(8);
     sfx.swap();
-    if (!isUndo) { this.undoStack.push([axis, layer, dir]); this.history.push(notation(this.sim.plan.n, axis, layer, dir)); }
-    if (!this.t0) this.t0 = performance.now();
+    if (!isUndo) {
+      this.undoStack.push([axis, layer, dir]);
+      const m = notation(this.sim.plan.n, axis, layer, dir);
+      // R R shows as R2
+      const last = this.history[this.history.length - 1];
+      if (last === m && this.lastWasSingle) { this.history[this.history.length - 1] = m[0] + '2'; this.lastWasSingle = false; }
+      else { this.history.push(m); this.lastWasSingle = true; }
+    }
+    if (!this.t0) {
+      this.t0 = performance.now();
+      // inspection: over 15 s is +2, over 17 s a DNF (WCA)
+      if (this.inspectT0) {
+        const ins = (this.t0 - this.inspectT0) / 1000;
+        this.penalty = ins > 17 ? 'dnf' : ins > 15 ? '+2' : null;
+        this.inspectT0 = 0;
+      }
+    }
     if (res.solved) {
       // show the finished cube for a moment, then the next scramble
       this.anim = null;
       this.undoStack = [];
       this.lastTime = (performance.now() - (this.t0 || performance.now())) / 1000;
+      this.finalTime = this.lastTime;
       this.history = [];
       this.t0 = 0;
       this.banner = { text: res.free ? `Solved in ${this.lastTime.toFixed(2)} s · ${res.moves} moves!` : `Solved in ${res.moves} twists · ${this.lastTime.toFixed(1)} s! +${res.reward}`, t0: performance.now(), good: true };
@@ -201,7 +250,8 @@ export default class CubeView {
     const res = this.sim.undo?.();
     if (!res?.ok) return;
     this.undoStack.pop();
-    this.history.pop();
+    const h = this.history[this.history.length - 1];
+    if (h && h.endsWith('2')) { this.history[this.history.length - 1] = h[0]; this.lastWasSingle = true; } else this.history.pop();
     if (this.anim) this.anim.t0 = -1e9;
     const [axis, layer, dir] = res.t;
     this.anim = { axis, layer, dir, t0: performance.now(), dur: this.reduced ? 1 : 150 };
@@ -226,12 +276,19 @@ export default class CubeView {
       <div class="row" style="gap:8px;flex-wrap:wrap;justify-content:center">
       <button class="btn sm ghost" data-a="undo" ${this.undoStack.length && !s.over ? '' : 'disabled'}>↶ Undo (free)</button>
       <button class="btn sm ghost" data-a="view">🔄 Reset view</button>
+      <button class="btn sm ghost" data-a="keys" title="Keyboard layout">⌨️ ${(load().settings.cubeKeys || 'letters') === 'cstimer' ? 'csTimer keys' : 'Letter keys'}</button>
       <button class="btn sm ghost" data-a="quit">🏁 Stop</button></div>
       <div class="small center muted">Swipe a sticker to turn its layer · drag around the cube to look around</div></div>`;
     for (const b of this.controls.querySelectorAll('[data-a]')) {
       b.onclick = () => {
         if (b.dataset.a === 'undo') this.undo();
         else if (b.dataset.a === 'view') { this.yaw = -0.62; this.pitch = 0.52; sfx.tap(); }
+        else if (b.dataset.a === 'keys') {
+          update((d) => { d.settings.cubeKeys = (d.settings.cubeKeys || 'letters') === 'cstimer' ? 'letters' : 'cstimer'; });
+          sfx.tap();
+          this.banner = { text: load().settings.cubeKeys === 'cstimer' ? 'csTimer keys: I/K R, D/E L, J/F U, S/L D, H/G F, W/O B, 5/6 M, ;/A y' : 'Letter keys: R L U D F B M (Shift = prime), Y = y', t0: performance.now() };
+          this.renderControls();
+        }
         else this.hooks.onQuit?.();
       };
     }
@@ -317,7 +374,15 @@ export default class CubeView {
     if (!a) this.lastHits = hits;
     this.drawBanner(now);
     // live solve timer + move counter
-    const secs = this.t0 ? (now - this.t0) / 1000 : 0;
+    const secs = this.t0 ? ((this.pausedAt || now) - this.t0) / 1000 : this.finalTime || 0;
+    if (this.inspectT0 && !this.t0) {
+      const left = 15 - (now - this.inspectT0) / 1000;
+      ctx.font = '900 30px ui-rounded, system-ui, sans-serif';
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'top';
+      ctx.fillStyle = left > 3 ? '#fff' : left > -2 ? '#ffd23f' : '#ff7b7b';
+      ctx.fillText(left > 0 ? `Inspect ${Math.ceil(left)}` : left > -2 ? '+2' : 'DNF', this.W / 2, 12);
+    }
     ctx.font = '800 15px ui-monospace, Menlo, monospace';
     ctx.textAlign = 'right';
     ctx.textBaseline = 'top';
@@ -368,7 +433,7 @@ function roundedPoly(ctx, pts, r) {
 
 export function hud(sim) {
   const p = sim.plan;
-  if (sim.free) return [{ label: 'Mode', value: 'Free solve', big: true }, { label: 'Cube', value: `${p.n}×${p.n}` }, { label: 'Moves', value: sim.cubeMoves }];
+  if (sim.free) return [{ label: 'Mode', value: sim.daily ? '📅 Daily' : 'Free solve', big: true }, { label: 'Cube', value: `${p.n}×${p.n}` }, { label: 'Moves', value: sim.cubeMoves }];
   return [
     { label: 'Score', value: sim.score.toLocaleString('en-US'), big: true },
     { label: 'Twists', value: `🔄 ${sim.twists}`, warn: sim.twists <= 10 },

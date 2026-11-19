@@ -20,6 +20,16 @@ export const BOTS = {
     if (rng.next() < 0.3) sim.twist(rng.int(3), layers[rng.int(layers.length)], rng.next() < 0.5 ? 1 : -1);
     else sim.twist(...cubeInverse(sim.stack[sim.stack.length - 1]));
   },
+  // Daily Scramble: undo the scramble move by move (with the odd wrong turn it then undoes)
+  scramble(sim, rng) {
+    if (!sim.plan2) sim.plan2 = sim.scrambleRaw.slice().reverse().map(cubeInverse);
+    if (sim.mine.length && rng.next() < 0.05) { sim.undo(); return; }
+    const done = sim.mine.length;
+    if (rng.next() < 0.05) { sim.twist(0, 1, 1); sim.undo(); return; }
+    const t = sim.plan2[done];
+    if (!t) { sim.quit(); return; }
+    sim.twist(...t);
+  },
   ludo(sim, rng) {
     if (!sim.log.length) sim.setColour(rng.int(4));
     if (sim.canRoll()) sim.roll();
