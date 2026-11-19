@@ -109,6 +109,7 @@ export default class LudoView {
     for (const b of box.querySelectorAll('.lr-e')) b.onclick = () => {
       const seat = this.sim.mySide ?? this.game.turn;
       this.react(seat, b.textContent);
+      this.hooks.onReact?.(b.textContent); // online: send it to the other phone
       haptic(8);
       row.hidden = true;
       btn.setAttribute('aria-expanded', 'false');
@@ -517,8 +518,14 @@ export default class LudoView {
       ctx.textBaseline = 'middle';
       ctx.fillStyle = '#fff';
       ctx.font = '800 14px ui-rounded, system-ui, sans-serif';
-      const nm = this.label(seat);
+      // Team Up: a 🤝 badge with your partner's colour
+      const nm = (g.rules?.teams ? '🤝 ' : '') + this.label(seat);
       ctx.fillText(nm, tx, p.y + p.h * 0.36, p.w - 62);
+      if (g.rules?.teams) {
+        const partner = (seat + 2) % 4;
+        ctx.fillStyle = ['#e53935', '#43a047', '#fdd835', '#1e88e5'][partner] || '#fff';
+        ctx.beginPath(); ctx.arc(p.right ? tx - Math.min(p.w - 62, ctx.measureText(nm).width) - 10 : tx + Math.min(p.w - 62, ctx.measureText(nm).width) + 10, p.y + p.h * 0.36, 5, 0, Math.PI * 2); ctx.fill();
+      }
       ctx.font = '600 12px system-ui, sans-serif';
       ctx.fillStyle = active ? '#ffd45e' : 'rgba(255,255,255,0.7)';
       const home = g.tokens[seat].filter((x) => x === HOME).length;

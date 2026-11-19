@@ -428,6 +428,8 @@ function combine(host, guest, me) {
     guestMoves: guest?.moves || [],
     joined: !!guest,
     resigned: host.resigned ? 'host' : guest?.resigned ? 'guest' : null,
+    hostReact: host.react || null,
+    guestReact: guest?.react || null,
     me,
   };
 }
@@ -484,6 +486,13 @@ export const matches = {
     return req('/match', { method: 'POST', body: JSON.stringify({ action: 'move', code, moves, playerId: p.playerId, token: p.token }) });
   },
 
+  async react(code, emoji) {
+    const sh = await sharedDb();
+    if (sh) { await writeMine(sh, (doc) => { if (doc.matches[code]) doc.matches[code].react = { e: emoji, at: Date.now() }; }); return { ok: true }; }
+    const p = await ensureRegistered();
+    return req('/match', { method: 'POST', body: JSON.stringify({ action: 'react', code, emoji, playerId: p.playerId, token: p.token }) });
+  },
+
   async resign(code) {
     const sh = await sharedDb();
     if (sh) {
@@ -502,7 +511,7 @@ export const matches = {
       if (stopped) return;
       try {
         const m = await this.get(code);
-        const sig = JSON.stringify([m?.hostMoves, m?.guestMoves, m?.joined, m?.resigned]);
+        const sig = JSON.stringify([m?.hostMoves, m?.guestMoves, m?.joined, m?.resigned, m?.hostReact, m?.guestReact]);
         if (sig !== last) { last = sig; cb(m); }
       } catch { /* offline – try again */ }
       if (!stopped) setTimeout(tick, document.hidden ? ms * 4 : ms);

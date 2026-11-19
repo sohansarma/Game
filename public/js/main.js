@@ -2300,6 +2300,13 @@ async function ludoVsComputer() {
     onOpen: (sheet) => {
       wireLudoSetup(sheet);
       for (const b of $$('.actions .btn', sheet)) b.addEventListener('click', () => { setup = readLudoSetup(sheet); }, true);
+      // Team Up always uses the whole table: say so on the buttons
+      const tm = $('[data-rule="teams"]', sheet);
+      const btns = $$('.actions .btn', sheet);
+      const labels = btns.map((b) => b.textContent);
+      const relabel = () => btns.forEach((b, i) => { b.textContent = tm?.checked && i === 0 ? '🤝 Start Team Up (you + a bot partner vs 2 bots)' : labels[i]; b.hidden = !!tm?.checked && i > 0; });
+      tm?.addEventListener('change', relabel);
+      relabel();
     },
   });
   if (!n) return arcadeMenu('ludo');
@@ -2537,9 +2544,12 @@ async function createOnline(id) {
   } else {
     const me = await pickLudoColour();
     if (me === null) return versusMenu(id);
-    const b = await modal(`<h2>🎲 Online Ludo</h2><p>You are <b>${LUDO_COLOURS[me][2]} ${LUDO_COLOURS[me][0]}</b>, your friend sits opposite as <b>${LUDO_COLOURS[(me + 2) % 4][2]} ${LUDO_COLOURS[(me + 2) % 4][0]}</b>. Each of you rolls on your own phone.</p>`, { buttons: [{ label: 'Just the two of us', value: 'n' }, { label: 'Add 2 bots to fill the table', value: 'y', cls: 'blue' }] });
+    const hr = load().ludoRules || {};
+    const on = LUDO_RULES.filter(([k]) => k !== 'teams' && hr[k]).map(([, n]) => n);
+    const b = await modal(`<h2>🎲 Online Ludo</h2><p>You are <b>${LUDO_COLOURS[me][2]} ${LUDO_COLOURS[me][0]}</b>, your friend sits opposite as <b>${LUDO_COLOURS[(me + 2) % 4][2]} ${LUDO_COLOURS[(me + 2) % 4][0]}</b>. Each of you rolls on your own phone – the server rolls the dice.</p>
+      <p class="small">🏠 Your house rules come along: <b>${on.length ? esc(on.join(', ')) : 'classic rules'}</b> (change them in Vs computer → rules).</p>`, { buttons: [{ label: 'Just the two of us', value: 'n' }, { label: 'Add 2 bots to fill the table', value: 'y', cls: 'blue' }, { label: '🤝 Team up together vs 2 bots', value: 't', cls: 'blue' }] });
     if (!b) return versusMenu(id);
-    opts = { bots: b === 'y', hostColour: me };
+    opts = { bots: b !== 'n', hostColour: me, rules: { master: !!hr.master, joda: !!hr.joda, quick: !!hr.quick, teams: b === 't' } };
   }
   const code = newCode();
   try {
@@ -2655,6 +2665,7 @@ async function playVersus(id, sim, online, extra = {}) {
     hooks: {
       onChange: () => { refresh(); pushMine(); },
       onRound: () => { pushMine(); },
+      onReact: online ? (emoji) => { api.matches.react(online.code, emoji).catch(() => {}); } : undefined,
       onOver: () => endVersus(run),
       onDraw: async () => {
         if (sim.offerDraw) {
@@ -2690,6 +2701,15 @@ async function playVersus(id, sim, online, extra = {}) {
     run.stopWatch = api.matches.watch(online.code, (m) => {
       if (!m || currentRun !== run) return;
       if (m.joined && !online.match.joined) { online.match = m; online.joinedNow = true; toast(`🎉 ${m.me === 'host' ? m.guestName : m.hostName} joined!`); sfx.win(); }
+      // the other player's reaction floats up from their name tag
+      const theirs = online.role === 'host' ? m.guestReact : m.hostReact;
+      if (id === 'ludo' && theirs && theirs.at !== online.lastReact && view?.react) {
+        if (online.lastReact !== undefined) {
+          const hs0 = Number.isInteger(m.opts.hostColour) ? m.opts.hostColour : 0;
+          view.react(online.role === 'host' ? (hs0 + 2) % 4 : hs0, theirs.e);
+        }
+        online.lastReact = theirs.at;
+      } else if (online.lastReact === undefined) online.lastReact = theirs?.at ?? null;
       online.match = m;
       if (id === 'chess') {
         const hs = m.opts.hostSide, gs = hs === 'w' ? 'b' : 'w';

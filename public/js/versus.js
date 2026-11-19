@@ -365,7 +365,7 @@ export function rebuild(match, me) {
   const seats = [0, 1, 2, 3].map((i) => (i === hs || i === gs ? 'human' : match.opts.bots ? 'ai' : null));
   const names = { [hs]: match.hostName || 'Host', [gs]: match.guestName || 'Guest' };
   const dice = Array.isArray(match.hostDice) ? { [hs]: [...match.hostDice], [gs]: [...(match.guestDice || [])] } : null;
-  const v = new LudoVersus({ seed: match.seed, seats, mine: [me === 'host' ? hs : gs], names, first: hs, dice });
+  const v = new LudoVersus({ seed: match.seed, seats, mine: [me === 'host' ? hs : gs], names, first: hs, dice, rules: match.opts.rules || null });
   const lists = { [hs]: [...(match.hostMoves || [])], [gs]: [...(match.guestMoves || [])] };
   for (let guard = 0; guard < 6000 && !v.over; guard++) {
     const seat = v.game.turn;

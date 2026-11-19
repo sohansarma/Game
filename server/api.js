@@ -298,6 +298,7 @@ export function createApi(store, { now = () => new Date(), origin = process.env.
       hostMoves: m.host.moves, guestMoves: m.guest?.moves || [], joined: !!m.guest,
       ...(m.game === 'ludo' ? { hostDice: m.host.dice || [], guestDice: m.guest?.dice || [] } : {}),
       resigned: m.resigned || null, me: playerId === m.host.pid ? 'host' : m.guest && playerId === m.guest.pid ? 'guest' : null,
+      hostReact: m.host.react || null, guestReact: m.guest?.react || null,
     };
   }
   function handleMatch(body) {
@@ -316,7 +317,9 @@ export function createApi(store, { now = () => new Date(), origin = process.env.
         const seed = Number(body.seed);
         if (!Number.isInteger(seed) || seed < 0 || seed > 0xffffffff) throw fail(400, 'bad seed');
         const hc = Number(body.opts?.hostColour);
-        const opts = body.game === 'chess' ? { hostSide: body.opts?.hostSide === 'b' ? 'b' : 'w' } : { bots: !!body.opts?.bots, hostColour: Number.isInteger(hc) && hc >= 0 && hc < 4 ? hc : 0 };
+        const r = body.opts?.rules || {};
+        const rules = { master: !!r.master, joda: !!r.joda, quick: !!r.quick, teams: !!r.teams && !!body.opts?.bots };
+        const opts = body.game === 'chess' ? { hostSide: body.opts?.hostSide === 'b' ? 'b' : 'w' } : { bots: !!body.opts?.bots, hostColour: Number.isInteger(hc) && hc >= 0 && hc < 4 ? hc : 0, rules };
         if (Object.keys(db.matches).length > 5000) throw fail(503, 'too many open matches');
         db.matches[code] = { code, game: body.game, seed, opts, host: { pid: body.playerId, moves: [] }, guest: null, at: now };
         store.dirty();
@@ -349,6 +352,16 @@ export function createApi(store, { now = () => new Date(), origin = process.env.
         m.at = now;
         store.dirty();
         return { ok: true, ...(m.game === 'ludo' ? { dice: side.dice } : {}) };
+      }
+      case 'react': {
+        // a quick emoji to the other player (rate-limited by the API limiter)
+        if (!m) throw fail(404, 'No match with that code');
+        const side = m.host.pid === body.playerId ? m.host : m.guest?.pid === body.playerId ? m.guest : null;
+        if (!side) throw fail(403, 'not in this match');
+        if (!['😊', '😂', '😎', '😤', '🎉', '👏', '😭', '🙈', '🦈', '👍', '🙏'].includes(body.emoji)) throw fail(400, 'bad reaction');
+        side.react = { e: body.emoji, at: now };
+        store.dirty();
+        return { ok: true };
       }
       case 'resign': {
         if (!m) throw fail(404, 'No match with that code');

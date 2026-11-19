@@ -136,11 +136,14 @@ export class LudoGame {
     this.sixes = 0;
     this.phase = 'roll';
     if (this.checkOver()) return;
+    let helper = null;
     for (let i = 1; i <= 4; i++) {
       const n = (this.turn + i) % 4;
       if (this.active(n)) { this.turn = n; break; }
+      // Team Up: once you're home, your turns go to your partner (you roll for them)
+      if (this.rules.teams && this.players[n] && this.finished.includes(n) && this.active((n + 2) % 4)) { this.turn = (n + 2) % 4; helper = n; break; }
     }
-    this.events.push({ kind: 'turn', player: this.turn });
+    this.events.push({ kind: 'turn', player: this.turn, ...(helper !== null ? { helper } : {}) });
   }
 
   checkOver() {

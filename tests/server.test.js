@@ -297,3 +297,19 @@ test('daily ghosts: the #1 Daily Reef run can be fetched and raced', async () =>
     assert.deepEqual(gh.body.log, g.log);
   } else assert.ok(gh.status === 200 || gh.status === 404);
 });
+
+test('online ludo: house rules and Team Up travel with the match; reactions reach the other phone', async () => {
+  const { rebuild } = await import('../public/js/versus.js');
+  const host = await register('Kind Ray 91'), guest = await register('Calm Eel 92');
+  const call = (who, body) => post('/api/match', { ...body, playerId: who.playerId, token: who.token });
+  assert.equal((await call(host, { action: 'create', code: 'LUD3Y', game: 'ludo', seed: 9, opts: { hostColour: 1, bots: true, rules: { joda: true, teams: true, evil: 1 } } })).status, 200);
+  assert.equal((await call(guest, { action: 'join', code: 'LUD3Y' })).status, 200);
+  const m = (await get(`/api/match?code=LUD3Y&playerId=${guest.playerId}`)).body;
+  assert.deepEqual(m.opts.rules, { master: false, joda: true, quick: false, teams: true });
+  const sim = rebuild(m, 'guest');
+  assert.equal(sim.game.rules.teams, true);
+  assert.equal(sim.game.partners(1, 3), true, 'host and guest are partners');
+  assert.equal((await call(guest, { action: 'react', code: 'LUD3Y', emoji: '🎉' })).status, 200);
+  assert.equal((await call(guest, { action: 'react', code: 'LUD3Y', emoji: '<b>' })).status, 400);
+  assert.equal((await get(`/api/match?code=LUD3Y&playerId=${host.playerId}`)).body.guestReact.e, '🎉');
+});
