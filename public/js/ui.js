@@ -25,11 +25,30 @@ export function showScreen(id, html) {
     el.className = 'screen';
     app().appendChild(el);
   }
+  // remember where focus was on the screen we're leaving, to return there later
+  const active = document.activeElement;
+  if (current && current !== id && active && active !== document.body) {
+    returnTo[current] = active.id ? '#' + active.id : active.dataset?.g ? `[data-g="${active.dataset.g}"]` : null;
+  }
+  const changed = current !== id;
   if (html !== undefined) el.innerHTML = html;
   for (const s of $$('.screen')) s.classList.toggle('active', s === el);
   current = id;
+  if (changed && !document.querySelector('.modal.open')) {
+    // move focus into the new screen: back to the control you came from, else its heading
+    setTimeout(() => {
+      if (current !== id) return;
+      const back = returnTo[id] && $(returnTo[id], el);
+      const target = back || $('h1, h2', el);
+      if (target) {
+        if (!back && !target.hasAttribute('tabindex')) target.setAttribute('tabindex', '-1');
+        target.focus({ preventScroll: !!back });
+      }
+    }, 0);
+  }
   return el;
 }
+const returnTo = {};
 
 export function currentScreen() {
   return current;
@@ -52,7 +71,11 @@ export function modal(html, { buttons = [], dismissable = true, onOpen, row = fa
     : '');
   m.classList.add('open');
   m.setAttribute('aria-hidden', 'false');
-  lastFocus = document.activeElement;
+  // the dialog is named by its heading, and everything behind it is inert
+  const h = $('h1, h2', sheet);
+  if (h) { h.id = 'modal-title'; m.setAttribute('aria-labelledby', 'modal-title'); } else m.removeAttribute('aria-labelledby');
+  app()?.setAttribute('inert', '');
+  if (!lastFocus || !m.contains(document.activeElement)) lastFocus = document.activeElement;
   return new Promise((resolve) => {
     modalResolve = resolve;
     const openedAt = performance.now();
@@ -64,9 +87,19 @@ export function modal(html, { buttons = [], dismissable = true, onOpen, row = fa
       });
     }
     m.onclick = (e) => { if (dismissable && e.target === m) closeModal(null); };
-    m.onkeydown = (e) => { if (dismissable && e.key === 'Escape') closeModal(null); };
+    m.onkeydown = (e) => {
+      if (dismissable && e.key === 'Escape') closeModal(null);
+      if (e.key === 'Tab') {
+        // keep Tab inside the sheet
+        const f = $$('button:not([disabled]), input:not([disabled]), select, textarea, a[href], [tabindex]:not([tabindex="-1"])', sheet).filter((x) => x.offsetParent !== null);
+        if (!f.length) return;
+        const i = f.indexOf(document.activeElement);
+        if (e.shiftKey && (i <= 0)) { e.preventDefault(); f[f.length - 1].focus(); }
+        else if (!e.shiftKey && i === f.length - 1) { e.preventDefault(); f[0].focus(); }
+      }
+    };
     onOpen?.(sheet);
-    const first = $('button, select, textarea', sheet);
+    const first = $('input:not([readonly]):not([type=checkbox]):not([type=range]), button:not([disabled]), select, textarea', sheet);
     (first || sheet).focus({ preventScroll: true });
   });
 }
@@ -76,6 +109,7 @@ export function closeModal(value) {
   if (!m.classList.contains('open')) return;
   m.classList.remove('open');
   m.setAttribute('aria-hidden', 'true');
+  app()?.removeAttribute('inert');
   const r = modalResolve;
   modalResolve = null;
   lastFocus?.focus?.({ preventScroll: true });

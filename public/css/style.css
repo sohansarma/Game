@@ -644,3 +644,15 @@ body.cozy .btn, body.cozy .game-card .tag, body.cozy .seg-btn.on { filter: none;
 .league-row.me { background: rgba(77,214,255,.22); }
 
 .tabs.wrap { flex-wrap: wrap; overflow: visible; }
+
+/* round 2 accessibility: readable text on the bright sea, reflow at large text */
+.hub-timer { color: #fff; background: rgba(4, 22, 52, .55); border-radius: 999px; padding: 4px 12px; display: inline-block; }
+.hub-head { text-align: center; }
+.topbar { flex-wrap: wrap; row-gap: 6px; }
+.screen .scroll > p.small.muted, .screen .scroll > .intro { background: rgba(4, 22, 52, .6); color: #e8f3ff; padding: 10px 12px; border-radius: 12px; }
+.sticker { color: rgba(255, 255, 255, .88); }
+.sticker[aria-disabled="true"] { opacity: .8; }
+.sticker[aria-disabled="true"] small { color: #e8f3ff; }
+.card .tag, .game-card .tag { background: #b3261e; color: #fff; }
+.game-card .tag.hot { background: #ffd23f; color: #3a2400; }
+.game-card .tag.new, .card .tag.new { background: #e8f3ff; color: #0b2a55; }

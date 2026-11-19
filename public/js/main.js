@@ -105,6 +105,15 @@ async function boot() {
   }
 }
 
+try {
+  const mq = matchMedia('(prefers-reduced-motion: reduce)');
+  mq.addEventListener?.('change', (e) => {
+    if (load().settings.reducedMotionUser) return;
+    update((d) => { d.settings.reducedMotion = e.matches; });
+    applySettings();
+  });
+} catch { /* old browsers */ }
+
 function applySettings() {
   const s = load();
   configureAudio(s.settings);
@@ -1741,10 +1750,10 @@ function showPass() {
         <p class="small muted">${live.seasonDaysLeft(season, day)} days left · always free – there is no paid track. Earn XP by playing anything: +${live.XP.game} per game (up to ${live.XP.gameCapPerDay} games a day), +${live.XP.tide} for solving Tide of the Day, +${live.XP.chest} for the daily mission chest, +${live.XP.weekly} for the weekly chest.</p>
         ${tier > p.claimed ? `<button class="btn wide green" id="ps-claim">🎁 Claim ${tier - p.claimed} reward${tier - p.claimed > 1 ? 's' : ''}</button>` : ''}
       </div>
-      <div class="pass-list">${Array.from({ length: live.TIERS }, (_, i) => {
+      <div class="pass-list" role="list">${Array.from({ length: live.TIERS }, (_, i) => {
         const t = i + 1, r = live.tierReward(season, t);
         const state = t <= p.claimed ? 'got' : t <= tier ? 'ready' : 'locked';
-        return `<div class="pass-tier ${state}"><b>${t}</b><span class="grow">${esc(r.label)}</span><span>${state === 'got' ? '✅' : state === 'ready' ? '🎁' : `${t * live.XP_PER_TIER} XP`}</span></div>`;
+        return `<div class="pass-tier ${state}" role="listitem" aria-label="Tier ${t}: ${esc(r.label)} – ${state === 'got' ? 'claimed' : state === 'ready' ? 'ready to claim' : `unlocks at ${t * live.XP_PER_TIER} XP`}"><b>${t}</b><span class="grow">${esc(r.label)}</span><span>${state === 'got' ? '✅' : state === 'ready' ? '🎁' : `${t * live.XP_PER_TIER} XP`}</span></div>`;
       }).join('')}
       <div class="pass-tier ${tier > live.TIERS ? 'ready' : 'locked'}"><b>∞</b><span class="grow">Bonus tiers: every ${live.XP_PER_TIER} XP after tier ${live.TIERS} – a sticker pack + 50 🐚</span><span>${tier > live.TIERS ? `${tier - live.TIERS} reached` : ''}</span></div></div>
       <p class="small muted">🛍️ This season's limited decor is in your Cozy Cove shop, and its limited sticker page fills from this season's packs.</p>
@@ -1772,9 +1781,10 @@ function showAlbum() {
         if (list[0]?.season && list[0].season !== live.seasonAt(dayKey()).id && !list.some((x) => s.stickers?.[x.id])) return '';
         const have = list.filter((x) => s.stickers?.[x.id]).length;
         return `<div class="album-page"><div class="row"><b class="grow">${esc(name)}</b><span class="small muted">${have}/${list.length} · ${s.albumPaid?.[pi] ? '✅ bonus claimed' : `bonus ${live.PAGE_REWARD[pi]} 🐚`}</span></div>
-          <div class="sticker-grid">${list.map((x) => {
+          <div class="sticker-grid" role="list">${list.map((x) => {
             const n = s.stickers?.[x.id] || 0;
-            return `<div class="sticker ${n ? 'have' : ''} ${x.rarity || ''}" title="${esc(x.name)}"><span aria-hidden="true">${n ? x.icon : '?'}</span><small>${n ? esc(x.name) : x.game ? 'Play it' : esc(x.rarity)}</small>${n > 1 ? `<i>×${n}</i>` : ''}</div>`;
+            const label = n ? `${x.name}: collected${n > 1 ? `, ${n} copies` : ''}` : x.game ? `${x.name}: not yet – play ${x.name} to get it` : `${x.rarity} sticker: not found yet`;
+            return `<div class="sticker ${n ? 'have' : ''} ${x.rarity || ''}" role="listitem" aria-label="${esc(label)}"><span aria-hidden="true">${n ? x.icon : '?'}</span><small aria-hidden="true">${n ? esc(x.name) : x.game ? `Play ${esc(x.name)}` : esc(x.rarity)}</small>${n > 1 ? `<i aria-hidden="true">×${n}</i>` : ''}</div>`;
           }).join('')}</div></div>`;
       }).join('')}
     </div>`);
@@ -3403,7 +3413,7 @@ function wireSwitches(root) {
       const k = sw.dataset.k;
       const v = sw.getAttribute('aria-checked') !== 'true';
       sw.setAttribute('aria-checked', String(v));
-      update((d) => { d.settings[k] = v; });
+      update((d) => { d.settings[k] = v; if (k === 'reducedMotion') d.settings.reducedMotionUser = true; });
       applySettings();
       if (k === 'reducedMotion') clearSpriteCache();
       sfx.tap();
