@@ -63,6 +63,25 @@ export const ITEMS = [
   { id: 'rugRed', slot: 'rug', icon: '🧶', name: 'Woven rug', price: 120, comfort: 4, rug: ['#c0504d', '#f2c14e'] },
   { id: 'rugNight', slot: 'rug', icon: '🌙', name: 'Starry rug', price: 260, comfort: 6, rug: ['#2b3a78', '#ffd45e'] },
 ];
+// Seasonal decor: sold only during its season (you keep it forever) – ~3,800 🐚 a season.
+ITEMS.push(
+  { id: 'lifering', slot: 'pool', icon: '🛟', name: 'Life ring', price: 800, comfort: 6, season: 's0' },
+  { id: 'whaleKite', slot: 'sky', icon: '🐋', name: 'Whale kite', price: 900, comfort: 7, season: 's0' },
+  { id: 'mermaid', slot: 'rockR', icon: '🧜', name: 'Mermaid statue', price: 1200, comfort: 8, season: 's0' },
+  { id: 'bubbleLamp', slot: 'light', icon: '🫧', name: 'Bubble lamp', price: 900, comfort: 7, glow: '#bfe9ff', season: 's0' },
+  { id: 'garland', slot: 'sky', icon: '❄️', name: 'Snowflake garland', price: 800, comfort: 7, season: 's1' },
+  { id: 'tree', slot: 'plantL', icon: '🎄', name: 'Little tree', price: 1000, comfort: 8, glow: '#ffd45e', season: 's1' },
+  { id: 'snowpal', slot: 'rockL', icon: '⛄', name: 'Snow pal', price: 900, comfort: 7, season: 's1' },
+  { id: 'diya', slot: 'light', icon: '🪔', name: 'Oil lamp', price: 1100, comfort: 9, glow: '#ffb35c', flicker: true, season: 's1' },
+  { id: 'squid', slot: 'pool', icon: '🦑', name: 'Squid buddy', price: 900, comfort: 7, season: 's2' },
+  { id: 'deepRug', slot: 'rug', icon: '🌌', name: 'Deep-sea rug', price: 900, comfort: 7, rug: ['#1a1446', '#7e57c2'], season: 's2' },
+  { id: 'orb', slot: 'light', icon: '🔮', name: 'Glow orb', price: 1100, comfort: 9, glow: '#b388ff', season: 's2' },
+  { id: 'anchor', slot: 'rockR', icon: '⚓', name: 'Old anchor', price: 900, comfort: 7, season: 's2' },
+  { id: 'hibiscus', slot: 'plantR', icon: '🌺', name: 'Hibiscus', price: 900, comfort: 7, season: 's3' },
+  { id: 'flamingo', slot: 'seat', icon: '🦩', name: 'Flamingo float', price: 1000, comfort: 8, season: 's3' },
+  { id: 'rainbow', slot: 'sky', icon: '🌈', name: 'Rainbow', price: 1000, comfort: 8, season: 's3' },
+  { id: 'lotus', slot: 'pool', icon: '🪷', name: 'Lotus', price: 900, comfort: 7, season: 's3' },
+);
 export const ITEM = Object.fromEntries(ITEMS.map((i) => [i.id, i]));
 
 /** Comfort points from what's placed, and the matching level (0–5). */

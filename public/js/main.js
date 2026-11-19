@@ -79,12 +79,21 @@ async function boot() {
   {
     const today = dayKey();
     if (s.lastOpenDay !== today) {
-      const age = Math.floor((Date.now() - (s.createdAt || Date.now())) / 86400000);
-      api.track('open', age === 0 ? 'd0' : age === 1 ? 'd1' : age < 7 ? 'd2-6' : age < 14 ? 'd7-13' : age < 30 ? 'd14-29' : 'd30');
-      update((d) => { d.lastOpenDay = today; });
+      // calendar days since install (not 24-hour blocks); each milestone is sent once per player
+      const age = daysBetween(dayKey(new Date(s.createdAt || Date.now())), today);
+      api.track('open', age === 0 ? 'd0' : 'later');
+      const mark = [1, 7, 30].find((n) => age === n || (age > n && !(s.retSent || {})[n] && age < n * 2));
+      update((d) => {
+        d.lastOpenDay = today;
+        if (mark && !(d.retSent || {})[mark]) { d.retSent = { ...(d.retSent || {}), [mark]: 1 }; api.track('ret', 'd' + mark); }
+      });
     }
     const ref = new URLSearchParams(location.search).get('ref');
-    if (ref) api.track('ref', ref);
+    if (ref) {
+      let seen = false;
+      try { seen = sessionStorage.getItem('tp-ref') === ref; sessionStorage.setItem('tp-ref', ref); } catch { /* blocked */ }
+      if (!seen) api.track('ref', `${ref}-${s.onboarded ? 'ret' : 'new'}`);
+    }
   }
   const ch = parseChallenge(location.hash);
   if (!s.onboarded) await onboarding();
@@ -576,7 +585,8 @@ function showPool(slotId = 'sky') {
     $('#p-shells', el).textContent = `🐚 ${fmt(s.shells)}`;
     $('#p-comfort', el).innerHTML = `<b>Comfort ${'⭐'.repeat(c.level)}${'☆'.repeat(5 - c.level)}</b><span class="small">${c.level ? `+${c.level * 5} 🐚 on every daily treasure` : 'Decorate to earn a daily bonus'}${c.next ? ` · next star at ${c.next} comfort (now ${c.pts})` : ' · the coziest cove there is!'}</span>`;
     $('#p-slots', el).innerHTML = POOL_SLOTS.map((sl) => `<button class="seg-btn ${sl.id === selected ? 'on' : ''}" data-slot="${sl.id}">${POOL_ITEM[s.pool.placed[sl.id]]?.icon || '＋'} ${sl.name}</button>`).join('');
-    const items = POOL_ITEMS.filter((i) => i.slot === selected);
+    const seasonNow = live.seasonAt(dayKey()).id;
+    const items = POOL_ITEMS.filter((i) => i.slot === selected && (!i.season || i.season === seasonNow || s.pool.owned[i.id]));
     $('#p-items', el).innerHTML = `<div class="pool-items">${items.map((it) => {
       const owned = !!s.pool.owned[it.id];
       const placed = s.pool.placed[selected] === it.id;
@@ -585,7 +595,7 @@ function showPool(slotId = 'sky') {
         : owned ? '<span class="pi-state">Place</span>'
         : it.find ? (ok ? '<span class="pi-state new">🎁 Found! Collect</span>' : `<span class="pi-state lock">🔍 ${esc(it.find.text)}</span>`)
         : `<span class="pi-state ${s.shells >= it.price ? 'buy' : 'lock'}">🐚 ${it.price}</span>`;
-      return `<button class="pool-item ${placed ? 'placed' : ''}" data-item="${it.id}"><span class="pi-icon">${it.icon}</span><b>${esc(it.name)}</b><span class="small muted">+${it.comfort} comfort${it.glow ? ' · glows' : ''}</span>${state}</button>`;
+      return `<button class="pool-item ${placed ? 'placed' : ''}" data-item="${it.id}"><span class="pi-icon">${it.icon}</span><b>${esc(it.name)}</b><span class="small muted">+${it.comfort} comfort${it.glow ? ' · glows' : ''}${it.season && !owned ? ` · ⏳ ${live.seasonDaysLeft(live.seasonAt(dayKey()), dayKey())} days left` : ''}</span>${state}</button>`;
     }).join('')}</div>${s.pool.placed[selected] ? '<button class="btn sm ghost" id="p-clear" style="margin-top:8px">Leave this spot empty</button>' : ''}`;
     for (const b of $$('[data-slot]', el)) b.onclick = () => { selected = b.dataset.slot; sfx.tap(); render(); };
     for (const b of $$('[data-item]', el)) b.onclick = () => pickItem(b.dataset.item);
@@ -913,6 +923,7 @@ async function onboarding() {
   }
   if (res === 'go') {
     update((d) => { d.name = name; d.onboarded = true; });
+    api.track('onboard', new URLSearchParams(location.search).get('ref') ? 'ref' : 'direct');
     claimDaily(true);
     showHub(); // land on the Tidepop Arcade with every game to pick from
   }
@@ -1385,7 +1396,7 @@ async function endMatch(run) {
   }
   const r = await p;
   if (r === 'share') {
-    await shareText(`🐚 Tidepop Daily Dive ${run.key}\nScore: ${fmt(score)}${rank ? ` · Rank #${rank}` : ''}\nCan you beat me? ${location.origin}${location.pathname}`);
+    await shareText(`🐚 Tidepop Daily Dive ${run.key}\nScore: ${fmt(score)}${rank ? ` · Rank #${rank}` : ''}\nCan you beat me? ${location.origin}${location.pathname}?ref=score`);
     goHome();
   } else if (r === 'lb') showLeaderboard(run.kind === 'daily' ? 'daily' : 'deep');
   else if (r === 'again') playMatch({ kind: 'deep', key: run.key, cfg: deepConfig(run.key) });
@@ -1595,11 +1606,11 @@ function weeklyHtml() {
 function passCardHtml() {
   const day = dayKey(), season = live.seasonAt(day), p = live.passState(load(), season);
   const tier = live.tierOfXp(p.xp), unclaimed = tier - p.claimed;
-  const into = tier >= live.TIERS ? live.XP_PER_TIER : p.xp - tier * live.XP_PER_TIER;
+  const into = p.xp - tier * live.XP_PER_TIER;
   return `<button class="card pass-card" id="u-pass" aria-label="Tide Pass ${esc(season.name)}, tier ${tier} of ${live.TIERS}">
     ${unclaimed > 0 ? `<span class="tag hot">${unclaimed} to claim!</span>` : ''}
     <span class="row" style="gap:10px;width:100%"><span class="emoji" aria-hidden="true">${season.icon}</span>
-    <span class="grow" style="text-align:left"><b>Tide Pass · ${esc(season.name)}</b><span class="sub">Tier ${tier}/${live.TIERS} · ${live.seasonDaysLeft(season, day)} days left · free rewards</span></span></span>
+    <span class="grow" style="text-align:left"><b>Tide Pass · ${esc(season.name)}</b><span class="sub">${tier > live.TIERS ? `Tier ${live.TIERS}/${live.TIERS} + ${tier - live.TIERS} bonus` : `Tier ${tier}/${live.TIERS}`} · ${live.seasonDaysLeft(season, day)} days left · free rewards</span></span></span>
     <span class="pass-bar"><span style="width:${Math.round((into / live.XP_PER_TIER) * 100)}%"></span></span>
   </button>`;
 }
@@ -1665,7 +1676,9 @@ function showPass() {
         const t = i + 1, r = live.tierReward(season, t);
         const state = t <= p.claimed ? 'got' : t <= tier ? 'ready' : 'locked';
         return `<div class="pass-tier ${state}"><b>${t}</b><span class="grow">${esc(r.label)}</span><span>${state === 'got' ? '✅' : state === 'ready' ? '🎁' : `${t * live.XP_PER_TIER} XP`}</span></div>`;
-      }).join('')}</div>
+      }).join('')}
+      <div class="pass-tier ${tier > live.TIERS ? 'ready' : 'locked'}"><b>∞</b><span class="grow">Bonus tiers: every ${live.XP_PER_TIER} XP after tier ${live.TIERS} – a sticker pack + 50 🐚</span><span>${tier > live.TIERS ? `${tier - live.TIERS} reached` : ''}</span></div></div>
+      <p class="small muted">🛍️ This season's limited decor is in your Cozy Cove shop, and its limited sticker page fills from this season's packs.</p>
     </div>`);
   $('#ps-back', el).onclick = () => { sfx.tap(); showHub(); };
   const c = $('#ps-claim', el);
@@ -1687,6 +1700,7 @@ function showAlbum() {
       <p class="small muted">Game stickers come from playing each game. Sea-life stickers come in packs from the Tide Pass and the weekly chest. Spares turn into shells. Finish a page for a bonus!</p>
       ${live.PAGES.map((name, pi) => {
         const list = live.STICKERS.filter((x) => x.page === pi);
+        if (list[0]?.season && list[0].season !== live.seasonAt(dayKey()).id && !list.some((x) => s.stickers?.[x.id])) return '';
         const have = list.filter((x) => s.stickers?.[x.id]).length;
         return `<div class="album-page"><div class="row"><b class="grow">${esc(name)}</b><span class="small muted">${have}/${list.length} · ${s.albumPaid?.[pi] ? '✅ bonus claimed' : `bonus ${live.PAGE_REWARD[pi]} 🐚`}</span></div>
           <div class="sticker-grid">${list.map((x) => {
@@ -1768,6 +1782,7 @@ function showHub() {
         ${ms.claimed ? '<p class="small muted center">Chest claimed – new missions at reset!</p>' : `<button class="btn wide ${allDone ? 'green' : 'ghost'}" id="u-chest" ${allDone ? '' : 'aria-disabled="true"'}>${allDone ? '🎁 Open the mission chest' : 'Complete all 3 to open the chest'}</button>`}
         ${weeklyHtml()}
       </div>
+      ${(() => { const door = live.adventDoor(dayKey()); return door && !load().advent?.[dayKey()] ? `<button class="card pass-card" id="u-advent"><span class="row" style="gap:10px;width:100%"><span class="emoji" aria-hidden="true">🎄</span><span class="grow" style="text-align:left"><b>Advent door ${door.n} is ready!</b><span class="sub">Winter Lights · open one door a day until Dec 24</span></span></span></button>` : ''; })()}
       ${passCardHtml()}
       ${load().settings.leaderboard ? `<button class="card league-card" id="u-league"><span class="row" style="gap:10px;width:100%"><span class="emoji" aria-hidden="true">🏅</span><span class="grow" style="text-align:left"><b>Weekly league</b><span class="sub" id="u-league-sub">Play any game to join a league of up to 30 · top ${PROMOTE} move up</span></span></span></button>` : ''}
       <div class="community-row">
@@ -1792,6 +1807,13 @@ function showHub() {
   on('#u-studio', () => showStudio());
   on('#u-pool', () => showPool());
   on('#u-pass', () => showPass());
+  on('#u-advent', () => {
+    let res = null;
+    update((d) => { res = live.openAdvent(d, dayKey()); });
+    if (!res) return showHub();
+    sfx.win();
+    showRewards(`🎄 Advent door ${res.door.n}`, res.got);
+  });
   on('#u-league', () => showLeague());
   if ($('#u-league', el)) api.league.get().then((lg) => {
     const sub = $('#u-league-sub');
@@ -1812,7 +1834,7 @@ function showHub() {
       if (w.claimed) return;
       w.claimed = true;
       d.shells += R.shells;
-      for (let i = 0; i < R.packs; i++) got.push(...live.openPack(d));
+      for (let i = 0; i < R.packs; i++) got.push(...live.openPack(d, Math.random, live.seasonAt(dayKey()).id));
       live.addXp(d, live.seasonAt(dayKey()), dayKey(), R.xp);
     });
     sfx.win();
@@ -1845,7 +1867,6 @@ function showHub() {
     if (left < 3600000 && !(cozyActive() && isNightTime())) t.closest('.hub-timer')?.classList.add('urgent');
   }, 1000);
   checkRankAlerts(games);
-  claimWeeklyPrizes();
 }
 
 function weekLeft() {
@@ -2471,7 +2492,7 @@ function shareCode(code, id) {
     <div class="big-score" style="letter-spacing:8px">${code}</div>
     <p class="muted small">You can start ${id === 'chess' ? 'if you play White' : 'right away'} – their moves appear here as soon as they play.</p>`, {
     buttons: [{ label: '📤 Share code', value: 'share', cls: 'blue' }, { label: 'Got it', value: null, cls: 'ghost' }], row: true,
-  }).then((r) => { if (r === 'share') shareText(`Play ${g.title} with me on Tidepop! Join code: ${code}\n${location.origin}${location.pathname}`); });
+  }).then((r) => { if (r === 'share') shareText(`Play ${g.title} with me on Tidepop! Join code: ${code}\n${location.origin}${location.pathname}?ref=code`); });
 }
 
 async function versusPause(run) {
@@ -2676,11 +2697,11 @@ async function endArcade(run) {
   if (r === 'again') playArcade(run.id, { daily: run.daily });
   else if (r === 'rematch') playArcade(run.id, { daily: false, seed: run.playSeed, challenge: run.challenge });
   else if (r === 'challenge') {
-    const link = `${location.origin}${location.pathname}#${challengeHash(run.id, run.playSeed, score, load().name)}`;
+    const link = `${location.origin}${location.pathname}?ref=challenge#${challengeHash(run.id, run.playSeed, score, load().name)}`;
     await shareText(`${g.icon} I scored ${fmt(score)} in ${g.title} on Tidepop. Same run, can you beat me? ${link}`);
     showHub();
   }
-  else if (r === 'share') { await shareText(`${g.icon} Tidepop ${g.title} daily ${run.key}\nScore: ${fmt(score)}${rank ? ` · Rank #${rank}` : ''}\nBeat me: ${location.origin}${location.pathname}`); showHub(); }
+  else if (r === 'share') { await shareText(`${g.icon} Tidepop ${g.title} daily ${run.key}\nScore: ${fmt(score)}${rank ? ` · Rank #${rank}` : ''}\nBeat me: ${location.origin}${location.pathname}?ref=score`); showHub(); }
   else if (r === 'lb') showLeaderboard(board);
   else if (r === 'tuck') { showHub(); goodNight(); }
   else showHub();
@@ -3299,12 +3320,13 @@ function wireSwitches(root) {
 }
 
 async function shareText(text) {
-  api.track('share', /tide=/.test(text) ? 'tide' : /code/i.test(text) ? 'code' : 'score');
+  const kind = /ref=(\w+)/.exec(text)?.[1] || 'other';
   try {
-    if (navigator.share) { await navigator.share({ text }); return; }
-  } catch { return; }
+    if (navigator.share) { await navigator.share({ text }); api.track('share', kind); return; }
+  } catch { return; } // cancelled
   try {
     await navigator.clipboard.writeText(text);
+    api.track('share', kind);
     toast('Copied to clipboard!');
   } catch {
     await modal(`<h2>Share</h2><textarea readonly>${esc(text)}</textarea>`, { buttons: [{ label: 'Close', value: null }] });
@@ -3339,7 +3361,7 @@ function showSettings() {
       ${cozySleeping() ? '<button class="btn sm blue" id="s-wake" style="margin-top:8px">🌧️ Bring the rain back</button>' : ''}
       <h3 style="margin-top:18px">Leaderboards</h3>
       ${sw('leaderboard', '🏆 Take part in online leaderboards', 'Only your name and scores are shared')}
-      ${sw('analytics', '📊 Send anonymous usage counts', 'No IDs, no cookies – just tallies like "a game ended"')}
+      ${sw('analytics', '📊 Send anonymous usage counts', 'No player ID, no cookies – just tallies like "a game ended"')}
       <div class="row" style="margin-top:10px;flex-wrap:wrap;gap:10px">
         <button class="btn sm ghost" id="s-forget">Delete my online scores</button>
       </div>

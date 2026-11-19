@@ -20,6 +20,7 @@ export const DIVISIONS = [
 /** Shells for finishing 1st/2nd/3rd, a top-5 spot, or just taking part. */
 export function weekReward(rank, size) {
   if (!rank) return 0;
+  if (size < 10) return size > 1 ? 40 : 0; // podium prizes only in a league of 10+
   if (rank === 1) return 400;
   if (rank === 2) return 300;
   if (rank === 3) return 200;

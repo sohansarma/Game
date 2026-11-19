@@ -180,7 +180,7 @@ export function createApi(store, { now = () => new Date(), origin = process.env.
   }
 
   // anonymous usage counts the app may send (see /privacy.html)
-  const METRIC_EVENTS = new Set(['open', 'game', 'share', 'ref', 'tide', 'chest', 'signup', 'publish']);
+  const METRIC_EVENTS = new Set(['open', 'ret', 'onboard', 'game', 'share', 'ref', 'tide', 'chest', 'signup', 'publish']);
 
   // ---- community games (Creator Studio)
   function ugcSummary(rec, me) {

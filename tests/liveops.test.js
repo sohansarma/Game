@@ -53,9 +53,15 @@ test('Tide Pass: seasons cover every day, game XP is capped per day, tiers pay o
   assert.equal(live.claimTiers(d, season).length, 0, 'no double claims');
   // the final tier gives the season outfit
   d.pass.xp = live.TIERS * live.XP_PER_TIER * 2;
+  const shellsBefore = d.shells;
   live.claimTiers(d, season, () => 0.5);
-  assert.equal(d.pass.claimed, live.TIERS);
+  assert.equal(d.pass.claimed, live.TIERS * 2, 'bonus tiers keep paying past tier 30');
   assert.ok(d.outfits[season.outfit]);
+  assert.ok(d.shells > shellsBefore);
+  // an outfit you already own turns into shells
+  const d2 = { shells: 0, outfits: { [season.outfit]: 1 }, pass: { season: season.id, xp: live.TIERS * live.XP_PER_TIER, claimed: live.TIERS - 1 } };
+  live.claimTiers(d2, season, () => 0.5);
+  assert.ok(d2.shells >= 800);
 });
 
 test('sticker packs, spares turn into shells, pages pay once', () => {
@@ -82,4 +88,15 @@ test('wardrobe: buy with shells, never twice, season outfits not for sale', () =
   assert.equal(live.buyOutfit(d, 'bow'), false);
   d.shells = 99999;
   assert.equal(live.buyOutfit(d, 'scarf'), false);
+});
+
+test('seasonal stickers come only from that season\'s packs; advent doors open once', () => {
+  const d = { shells: 0 };
+  for (let i = 0; i < 200; i++) live.openPack(d, Math.random, 's1');
+  assert.ok(Object.keys(d.stickers).some((k) => k.startsWith('s1-')));
+  assert.ok(!Object.keys(d.stickers).some((k) => /^s[023]-/.test(k)));
+  assert.equal(live.adventDoor('2026-11-30'), null);
+  const r = live.openAdvent(d, '2026-12-21', () => 0.5);
+  assert.ok(d.stickers['s1-0'] >= 1 && r.got.length > 1);
+  assert.equal(live.openAdvent(d, '2026-12-21'), null, 'one door a day');
 });

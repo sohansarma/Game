@@ -73,7 +73,7 @@ export const SEASONS = [
   { id: 's3', name: 'Coral Bloom', icon: '🪸', from: '2027-06-01', to: '2027-08-31', outfit: 'flower' },
 ];
 export const TIERS = 30;
-export const XP_PER_TIER = 120;
+export const XP_PER_TIER = 400;
 export const XP = { game: 10, gameCapPerDay: 30, chest: 60, tide: 30, weekly: 250 };
 
 export function seasonAt(day) {
@@ -85,7 +85,8 @@ export function seasonAt(day) {
   const from = `${y}-${String(q * 3 + 1).padStart(2, '0')}-01`;
   const endMonth = q * 3 + 3;
   const to = `${y}-${String(endMonth).padStart(2, '0')}-${[31, 30, 30, 31][q]}`;
-  return { id: `q${y}${q}`, name: 'Open Sea', icon: '⛵', from, to, outfit: 'captain' };
+  const outfits = ['captain', 'bubble', 'pearl', 'ribbon'];
+  return { id: `q${y}${q}`, name: 'Open Sea', icon: '⛵', from, to, outfit: outfits[(y * 4 + q) % outfits.length] };
 }
 
 /** Days left in the season (inclusive of today). */
@@ -95,6 +96,7 @@ export function seasonDaysLeft(season, day) {
 
 /** Reward for reaching a tier (1-based). Cosmetics on milestones, shells & packs between. */
 export function tierReward(season, tier) {
+  if (tier > TIERS) return { packs: 1, shells: 50, label: 'Bonus tier: sticker pack + 50 🐚' };
   if (tier === TIERS) return { outfit: season.outfit, shells: 300, label: `${OUTFIT[season.outfit]?.icon || '🎁'} ${OUTFIT[season.outfit]?.name || 'Season outfit'} for Pip + 300 🐚` };
   if (tier % 10 === 0) return { packs: 3, shells: 150, label: '3 sticker packs + 150 🐚' };
   if (tier % 5 === 0) return { packs: 2, label: '2 sticker packs' };
@@ -105,7 +107,8 @@ export function tierReward(season, tier) {
 export function passState(d, season) {
   return d.pass?.season === season.id ? d.pass : { season: season.id, xp: 0, claimed: 0, day: '', dayGames: 0 };
 }
-export const tierOfXp = (xp) => Math.min(TIERS, Math.floor(xp / XP_PER_TIER));
+/** Tiers reached; past tier 30 every XP_PER_TIER more is a repeatable bonus tier. */
+export const tierOfXp = (xp) => Math.floor(xp / XP_PER_TIER);
 
 /** Adds XP (game XP is capped per day). Returns the XP actually added. */
 export function addXp(d, season, day, amount, { game = false } = {}) {
@@ -129,8 +132,11 @@ export function claimTiers(d, season, rollPack) {
     const r = tierReward(season, p.claimed);
     got.push({ tier: p.claimed, label: r.label });
     if (r.shells) d.shells += r.shells;
-    if (r.outfit) { d.outfits = { ...(d.outfits || {}), [r.outfit]: 1 }; }
-    if (r.packs) for (let i = 0; i < r.packs; i++) got.push(...openPack(d, rollPack));
+    if (r.outfit) {
+      if (d.outfits?.[r.outfit]) { d.shells += 500; got.push({ label: 'You already have this outfit: +500 🐚 instead' }); }
+      else d.outfits = { ...(d.outfits || {}), [r.outfit]: 1 };
+    }
+    if (r.packs) for (let i = 0; i < r.packs; i++) got.push(...openPack(d, rollPack, season.id));
   }
   return got;
 }
@@ -164,19 +170,29 @@ export const STICKERS = [
   ...[['🦈', 'Shark'], ['🐋', 'Blue whale'], ['🐳', 'Humpback'], ['🧜', 'Merfolk'], ['🔱', 'Trident'], ['💎', 'Deep gem']]
     .map(([icon, name], i) => ({ id: `d${i}`, icon, name, page: 3, rarity: 'epic' })),
 ];
+// One limited sticker page per season: only in that season's packs.
+export const SEASON_PAGES = [
+  { season: 's0', name: 'First Tide', list: [['🛟', 'Life ring'], ['🏄', 'Surfer'], ['🌅', 'Sunrise'], ['🪁', 'Beach kite'], ['🍦', 'Ice cream'], ['🏖️', 'Beach day']] },
+  { season: 's1', name: 'Winter Lights', list: [['🏮', 'Longest-night lantern'], ['❄️', 'Snowflake'], ['⛄', 'Snow pal'], ['🎄', 'Little tree'], ['🧣', 'Cosy scarf'], ['🌟', 'Winter star']] },
+  { season: 's2', name: 'Abyss', list: [['🦑', 'Giant squid'], ['🔦', 'Diver torch'], ['🫧', 'Bubble trail'], ['🐟', 'Lanternfish'], ['🗝️', 'Sunken key'], ['🏺', 'Old amphora']] },
+  { season: 's3', name: 'Coral Bloom', list: [['🌺', 'Hibiscus'], ['🪷', 'Lotus'], ['🦩', 'Flamingo'], ['🌈', 'Sea rainbow'], ['🐝', 'Busy bee'], ['🍉', 'Watermelon']] },
+];
+SEASON_PAGES.forEach((p, i) => p.list.forEach(([icon, name], k) => STICKERS.push({ id: `${p.season}-${k}`, icon, name, page: 4 + i, rarity: 'rare', season: p.season })));
 export const STICKER = Object.fromEntries(STICKERS.map((s) => [s.id, s]));
-export const PAGES = ['The games', 'Shallows', 'Open sea', 'The deep'];
-export const PAGE_REWARD = [200, 300, 500, 1000];
+export const PAGES = ['The games', 'Shallows', 'Open sea', 'The deep', ...SEASON_PAGES.map((p) => `${p.name} (season)`)];
+export const PAGE_REWARD = [200, 300, 500, 1000, ...SEASON_PAGES.map(() => 600)];
 export const DUPE_SHELLS = { common: 5, rare: 15, epic: 40 };
 
 /** Opens one pack of 3 stickers (common 75% / rare 20% / epic 5%). */
-export function openPack(d, roll = Math.random) {
+export function openPack(d, roll = Math.random, seasonId = null) {
   const got = [];
   d.stickers ||= {};
+  const seasonal = STICKERS.filter((s) => s.season && s.season === seasonId);
   for (let i = 0; i < 3; i++) {
     const r = roll();
     const rarity = r < 0.05 ? 'epic' : r < 0.25 ? 'rare' : 'common';
-    const pool = STICKERS.filter((s) => s.rarity === rarity);
+    // a third of the slots in a season's packs are that season's limited stickers
+    const pool = seasonal.length && roll() < 0.33 ? seasonal : STICKERS.filter((s) => s.rarity === rarity && !s.season);
     const s = pool[Math.floor(roll() * pool.length) % pool.length];
     const dupe = !!d.stickers[s.id];
     d.stickers[s.id] = (d.stickers[s.id] || 0) + 1;
@@ -237,4 +253,34 @@ export function buyOutfit(d, id) {
   d.outfits = { ...(d.outfits || {}), [id]: 1 };
   d.pipOutfit = id;
   return true;
+}
+
+// Pip's outfits for the "Open Sea" quarters (after the scripted seasons).
+OUTFITS.push(
+  { id: 'bubble', icon: '🫧', name: 'Bubble helmet', season: 'Open Sea' },
+  { id: 'pearl', icon: '🦪', name: 'Pearl brooch', season: 'Open Sea' },
+  { id: 'ribbon', icon: '🎗️', name: 'Sea ribbon', season: 'Open Sea' },
+);
+for (const o of OUTFITS.slice(-3)) OUTFIT[o.id] = o;
+
+// ---------------------------------------------------------------- timed events
+/** Winter Lights advent: one door a day, Dec 1–24. */
+export function adventDoor(day) {
+  const [y, m, dd] = day.split('-').map(Number);
+  if (m !== 12 || dd > 24) return null;
+  void y;
+  if (dd === 21) return { n: dd, label: 'Longest Night: the 🏮 lantern sticker + a pack', sticker: 's1-0', packs: 1 };
+  if (dd === 24) return { n: dd, label: '2 sticker packs + 200 🐚', packs: 2, shells: 200 };
+  if (dd % 6 === 0) return { n: dd, label: 'A sticker pack', packs: 1 };
+  return { n: dd, label: `${40 + dd * 5} 🐚`, shells: 40 + dd * 5 };
+}
+export function openAdvent(d, day, roll = Math.random) {
+  const door = adventDoor(day);
+  if (!door || d.advent?.[day]) return null;
+  d.advent = { ...(d.advent || {}), [day]: 1 };
+  const got = [];
+  if (door.shells) { d.shells += door.shells; got.push(`+${door.shells} 🐚`); }
+  if (door.sticker) { d.stickers = { ...(d.stickers || {}), [door.sticker]: (d.stickers?.[door.sticker] || 0) + 1 }; got.push(`${STICKER[door.sticker].icon} ${STICKER[door.sticker].name}`); }
+  for (let i = 0; i < (door.packs || 0); i++) got.push(...openPack(d, roll, 's1').map((g) => g.label));
+  return { door, got };
 }
