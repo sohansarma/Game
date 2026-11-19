@@ -125,7 +125,7 @@ export default class PufferView {
   saveGhost() {
     try {
       const old = JSON.parse(localStorage.getItem(this.ghostKey()) || 'null');
-      if (old && old.score >= this.sim.score) return;
+      if (!this.sim.score || (old && old.score >= this.sim.score)) return;
       const acts = this.sim.log.filter((a) => a[0] !== 'q');
       if (acts.length > 20000) return;
       localStorage.setItem(this.ghostKey(), JSON.stringify({ score: this.sim.score, acts }));

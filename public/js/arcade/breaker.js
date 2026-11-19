@@ -139,7 +139,7 @@ class BreakerSim {
     // the coral creeps down a row every 30 s (never closer than row 17)
     if (!this.attached) {
       this.levelTick++;
-      if (this.levelTick % 1800 === 0 && this.bricks.length) {
+      if (this.levelTick % 1200 === 0 && this.bricks.length) {
         for (const b of this.bricks) b.r++;
         this.events.push('creep');
         // the coral reached your clam: lose a pearl, and it's pushed back up

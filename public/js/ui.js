@@ -81,7 +81,7 @@ export function modal(html, { buttons = [], dismissable = true, onOpen, row = fa
     const openedAt = performance.now();
     for (const btn of $$('.actions > [data-i]', sheet)) {
       btn.addEventListener('click', () => {
-        if (performance.now() - openedAt < 250) return; // a key mashed as the modal opened
+        if (performance.now() - openedAt < 450) return; // a key mashed as the modal opened
         sfx.tap();
         closeModal(buttons[Number(btn.dataset.i)].value);
       });
@@ -120,12 +120,21 @@ export function isModalOpen() {
   return $('#modal').classList.contains('open');
 }
 
+// at most two toasts at a time; the rest wait their turn (so they never pile over a result card)
+const toastQueue = [];
 export function toast(text) {
-  const t = document.createElement('div');
-  t.className = 'toast';
-  t.textContent = text;
-  $('#toasts').appendChild(t);
-  setTimeout(() => t.remove(), 2700);
+  toastQueue.push(text);
+  pumpToasts();
+}
+function pumpToasts() {
+  const box = $('#toasts');
+  while (toastQueue.length && box.children.length < 2) {
+    const t = document.createElement('div');
+    t.className = 'toast';
+    t.textContent = toastQueue.shift();
+    box.appendChild(t);
+    setTimeout(() => { t.remove(); pumpToasts(); }, 2400);
+  }
 }
 
 export function starsHtml(n, max = 3) {

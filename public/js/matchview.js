@@ -101,8 +101,10 @@ export class MatchView {
   async play(steps) {
     this.busy = true;
     this.clearHint();
+    const base = this.speed;
     for (const step of steps) {
       if (this.destroyed) return;
+      if (step.type === 'finale' || (this.game.state !== 'playing' && step.type === 'end')) this.speed = base / 3;
       await this.playStep(step);
       this.hooks.onUpdate?.(this.viewScore, step);
     }
@@ -113,6 +115,7 @@ export class MatchView {
     this.viewScore = this.game.score;
     this.busy = false;
     this.ff = false;
+    this.speed = base;
     this.hooks.onUpdate?.(this.viewScore, null);
     this.hooks.onSettled?.();
     this.resetHintTimer();
@@ -419,9 +422,16 @@ export class MatchView {
   // ---------- drawing ----------
   loop(now) {
     if (this.destroyed) return;
-    this.update(now);
-    this.draw(now);
     this.raf = requestAnimationFrame(this.loop);
+    try {
+      this.update(now);
+      this.draw(now);
+    } catch (err) {
+      // finish any animation that was mid-flight so the game never gets stuck
+      for (const sp of this.sprites.values()) if (sp.anim) sp.anim.dur = 1;
+      this.effects = [];
+      if (!this.loggedDrawError) { this.loggedDrawError = true; console.warn('draw recovered', err); }
+    }
   }
 
   update(now) {
@@ -535,7 +545,8 @@ export class MatchView {
 
     // effects
     for (const e of this.effects) {
-      const t = (now - e.t0) / e.dur;
+      if (now < e.t0) continue;
+      const t = Math.max(0, Math.min(1, (now - e.t0) / e.dur));
       ctx.globalAlpha = 1 - t;
       if (e.kind === 'line') {
         const w = (e.width || 1) * C * (0.5 + 0.5 * (1 - t));

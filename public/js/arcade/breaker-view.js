@@ -21,7 +21,7 @@ export default class BreakerView {
     this.destroyed = false;
     this.overSent = false;
     this.pointerX = null;
-    controls.innerHTML = '<div class="small muted center">Drag to move · tap to launch · or ← → and Space</div>';
+    controls.innerHTML = '<div class="small muted center">Drag to move · tap to serve, or hold & drag to aim · ← → and Space</div>';
     this.resize(); // re-measure whenever the layout changes (controls rendering, rotation), not just on window resize
     if (typeof ResizeObserver !== 'undefined') { this.sizeObs = new ResizeObserver(() => { if (!this.destroyed) this.resize(); }); this.sizeObs.observe(this.canvas); }
     this.bind();
@@ -56,9 +56,9 @@ export default class BreakerView {
     const down = (e) => {
       e.preventDefault();
       try { cv.setPointerCapture?.(e.pointerId); } catch { /* synthetic or lost pointer */ }
-      this.pointerX = this.worldX(e.clientX);
       // serve: hold to aim (the dotted line follows your finger), let go to fire
-      if (this.sim.attached) this.aiming = { y: e.clientY };
+      if (this.sim.attached) { this.aiming = { y: e.clientY }; this.aimX = null; return; }
+      this.pointerX = this.worldX(e.clientX);
     };
     const move = (e) => {
       if (this.aiming) { this.aimX = this.worldX(e.clientX); return; }
@@ -66,9 +66,10 @@ export default class BreakerView {
     };
     const up = (e) => {
       if (!this.aiming) return;
-      const ax = this.aimX ?? this.worldX(e.clientX);
+      const ax = this.aimX;
       this.aiming = null; this.aimX = null;
-      const aim = Math.round(Math.max(-80, Math.min(80, ((ax - this.sim.bx) / 40) * 100)));
+      // a plain tap fires along the default line you saw; a drag fires where you aimed
+      const aim = ax === null || ax === undefined ? undefined : Math.round(Math.max(-80, Math.min(80, ((ax - this.sim.bx) / 40) * 100)));
       if (this.sim.attached && this.sim.launch(this.sim.stickOff ? undefined : aim)) sfx.swap();
     };
     const key = (e) => {

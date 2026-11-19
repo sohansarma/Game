@@ -17,7 +17,7 @@ const TRIALS = Number(process.env.TRIALS || 30);
 export function targetWinRate(n) {
   const inWorld = (n - 1) % 10;
   let w = 0.97 - 0.0045 * n - 0.012 * inWorld;
-  if (n % 10 === 0) w -= 0.08;
+  if (n % 10 === 0) w -= 0.16; // boss levels are the real tests
   return Math.max(0.5, Math.min(0.98, w));
 }
 
@@ -40,11 +40,11 @@ function configFor(recipe, t, seed) {
 
 // A "casual human" bot: plays the goal-aware best move most of the time but
 // picks a random legal move 25% of the time.
-function botPlay(cfg) {
+function botPlay(cfg, rand = 0.1) {
   const g = new Game(cfg);
   const noise = new Rng(cfg.seed ^ 0xabcdef);
   while (g.state === 'playing') {
-    const m = noise.next() < 0.25 ? noise.pick(g.allMoves()) : g.smartMove();
+    const m = noise.next() < rand ? noise.pick(g.allMoves()) : g.smartMove();
     if (!m) break;
     g.swap(m[0], m[1]);
   }
@@ -52,6 +52,7 @@ function botPlay(cfg) {
 }
 
 export function tuneLevel(n) {
+  const rand = n % 10 === 0 ? 0 : 0.1;
   const recipe = levelRecipe(n);
   const win = targetWinRate(n);
   const hasScore = recipe.goals.some((g) => g.type === 'score');
@@ -61,23 +62,23 @@ export function tuneLevel(n) {
 
   if (hasScore && recipe.goals.length === 1) {
     t.moves = Math.min(30, 18 + Math.floor(n / 5));
-    const scores = seeds.map((s) => botPlay(configFor(recipe, { ...t, target: 1e12 }, s)).score);
+    const scores = seeds.map((s) => botPlay(configFor(recipe, { ...t, target: 1e12 }, s), rand).score);
     t.target = round(quantile(scores, 1 - win), 500);
   } else {
     // play with "infinite" moves and record when the goal was reached
     const measure = () => seeds.map((s) => {
-      const g = botPlay(configFor(recipe, { ...t, moves: 70 }, s));
+      const g = botPlay(configFor(recipe, { ...t, moves: 70 }, s), rand);
       return g.state === 'won' ? g.movesMade : 999;
     });
     let needed = measure();
     // collect goals grow until a level takes real moves (no 2-move wins)
     const hasCollect = recipe.goals.some((g) => g.type === 'collect');
     while (hasCollect && quantile(needed, win) + 1 < 14 && t.collect < 90) { t.collect += 4; needed = measure(); }
-    t.moves = Math.max(10, Math.min(45, quantile(needed, win) + 1));
+    t.moves = Math.max(7, Math.min(45, quantile(needed, win) + 1));
   }
 
   // star thresholds from a run at the final move count
-  const results = seeds.map((s) => botPlay(configFor(recipe, t, s)));
+  const results = seeds.map((s) => botPlay(configFor(recipe, t, s), rand));
   const winners = results.filter((g) => g.state === 'won').map((g) => g.score);
   const rate = winners.length / results.length;
   const base = hasScore ? t.target : round(quantile(winners.length ? winners : [1000], 0.1), 500);

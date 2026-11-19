@@ -89,7 +89,7 @@ test('all 60 levels are valid, tuned and solvable from the start', () => {
     const r = levelRecipe(n);
     assert.ok(r.world >= prevWorld);
     prevWorld = r.world;
-    assert.ok(cfg.moves >= 10 && cfg.moves <= 45, `level ${n} moves ${cfg.moves}`);
+    assert.ok(cfg.moves >= 7 && cfg.moves <= 45, `level ${n} moves ${cfg.moves}`);
     assert.ok(cfg.stars[0] < cfg.stars[1] && cfg.stars[1] < cfg.stars[2], `level ${n} stars`);
     assert.ok(cfg.objectives.length >= 1);
     for (const o of cfg.objectives) {

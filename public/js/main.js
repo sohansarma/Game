@@ -578,7 +578,11 @@ async function playTide(opts = {}) {
   if (!load().tide?.seenHow) { await arcadeHow('tide'); update((d) => { d.tide = { ...(d.tide || { days: {} }), seenHow: true }; }); }
   const playSeed = hard ? hardSeed(arcadeSeed('tide', true, key, 0)) : arcadeSeed('tide', true, key, 0);
   const sim = hard ? new TideSim(playSeed, true) : g.create(playSeed);
+  const slot = hard ? 'hard' : 'main';
+  const saved = !practice && load().tide?.live?.[slot];
+  if (saved && saved.key === key) { for (const c of saved.moves) sim.pick(c); if (saved.moves.length) toast('🌊 Picking up where you left off'); }
   const run = { kind: 'arcade', id: 'tide', daily: true, key, seed: 0, playSeed, sim, tide: true, practice, hard };
+  const saveLive = () => { if (!practice) update((d) => { d.tide = { ...(d.tide || {}), live: { ...(d.tide?.live || {}), [slot]: { key, moves: sim.moves.slice() } } }; }); };
   currentRun = run;
   setBackground(g.color);
   const el = showScreen('arcade', `
@@ -596,8 +600,9 @@ async function playTide(opts = {}) {
   };
   view = new mod.default({
     canvas: $('#ar-canvas', el), controls: $('#ar-controls', el), sim, reducedMotion: load().settings.reducedMotion,
-    hooks: { onChange: refresh, onOver: () => endTide(run) },
+    hooks: { onChange: () => { refresh(); saveLive(); }, onOver: () => endTide(run) },
   });
+  if (sim.over) setTimeout(() => endTide(run), 50);
   $('#ar-pause', el).onclick = async () => {
     sfx.tap();
     const r = await modal('<h2>🌊 Tide of the Day</h2><p class="small muted">Only your first try counts, so giving up now ends today\'s tide.</p>', {
@@ -613,6 +618,7 @@ async function endTide(run) {
   if (run.ended) return;
   run.ended = true;
   const { sim, key } = run;
+  update((d) => { if (d.tide?.live) delete d.tide.live[run.hard ? 'hard' : 'main']; });
   if (run.practice || run.hard) {
     // archive & hard tides: recorded for you, not ranked
     update((d) => {
@@ -629,10 +635,11 @@ async function endTide(run) {
     const r = await modal(`<h2>${run.hard ? '🔥 Hard tide' : '📚 Archive'} #${n}</h2><div class="big-score">${sim.solved ? `${sim.moves.length}/${sim.limit}` : `X/${sim.limit}`}</div>
       <p class="muted">${sim.solved ? (sim.moves.length <= sim.perfect ? '💎 The perfect line!' : 'Solved!') : `The tide reached ${sim.covered}% – the perfect line was ${sim.perfect}.`}${run.hard && sim.solved ? ' +40 🐚' : ''}</p>
       ${run.practice ? `<p class="small muted">This was Tide #${n} – practice, not ranked. Today's is #${today}.</p>` : '<p class="small muted">Hard tides are just for you (and your share text).</p>'}`, {
-      buttons: [...(run.hard ? [{ label: '📤 Share', value: 'share', cls: 'green' }] : [{ label: '📚 Archive', value: 'arch', cls: 'blue' }]), { label: '🕹️ Arcade', value: null, cls: 'ghost' }],
+      buttons: [...(run.hard ? [{ label: '📤 Share', value: 'share', cls: 'green' }] : [...(tideDays()[dayKey()] ? [] : [{ label: `▶ Play today's Tide #${today}`, value: 'today', cls: 'green' }]), { label: '📚 Archive', value: 'arch', cls: 'blue' }]), { label: '🕹️ Arcade', value: null, cls: 'ghost' }],
     });
+    if (r === 'today') return playTide();
     if (r === 'arch') showTideArchive();
-    if (r === 'share') shareText(`Tidepop 🔥 Hard tide #${n} ${sim.solved ? `${sim.moves.length}/${sim.limit} 💎` : `X/${sim.limit}`}\n${sim.gains.map(moveSquare).join('')}\n${location.origin}${location.pathname}?tide=${n}&ref=share`);
+    if (r === 'share') shareText(tideShareText(key, sim, `${location.origin}${location.pathname}?tide=${n}&ref=share`).replace('Tidepop Tide', 'Tidepop 🔥 Hard tide'));
     return;
   }
   const shells = sim.solved ? 20 + 10 * (sim.limit - sim.moves.length) : 10;
@@ -3478,8 +3485,8 @@ function playBlocks(opts) {
       refresh();
       if (!run.daily && !run.rescue) update((d) => { d.blocksRun = game.state === 'playing' ? { seed, log: game.log } : null; });
       if (res.perfect) update((d) => { d.stats.perfectClears++; });
-      if (res.freed?.length) { sfx.win(); toast(`🐠 ${res.freed.length > 1 ? `${res.freed.length} fish` : 'A fish'} swam free!`); }
-      if (res.tide) { sfx.zap(); toast('🌊 The tide pushed the reef up!'); }
+      if (res.freed?.length) { sfx.win(); view?.popup?.(`🐠 ${res.freed.length > 1 ? `${res.freed.length} fish` : 'Fish'} free!`, '#7CFFB2', 0.6); }
+      if (res.tide) { sfx.zap(); view?.popup?.('🌊 Tide pushed up!', '#7FD4FF', 0.9); }
       if (game.state === 'won') return setTimeout(() => endRescue(run), 700);
       if (game.state === 'over') {
         // an unused undo is offered before the run ends
@@ -3493,7 +3500,7 @@ function playBlocks(opts) {
   });
   $('#b-pause', el).onclick = () => { sfx.tap(); pauseMenu(); };
   $('#b-undo', el).onclick = () => {
-    if (game.undo()) { sfx.swap(); refresh(); if (!run.daily) update((d) => { d.blocksRun = { seed, log: game.log }; }); }
+    if (game.undo()) { sfx.swap(); refresh(); if (!run.daily && !run.rescue) update((d) => { d.blocksRun = { seed, log: game.log }; }); }
   };
   refresh();
   if (!load().blocks.games && !opts.resume) toast('Drag a piece from the tray onto the reef!');

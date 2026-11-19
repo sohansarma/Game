@@ -123,8 +123,10 @@ export default class MergeView {
       this.popups.push({ x: p.c + 0.5, y: p.r + 0.5, text: p.kind === 'ink' ? '🐙 Ink!' : '🦈 Chomp!', t0: performance.now() + 150, color: p.kind === 'ink' ? '#b388ff' : '#7fd4ff', big: true });
       sfx.special();
     }
+    // keep it readable on fast swipes: drop older popups, stack the big ones
+    this.popups = this.popups.filter((p) => performance.now() - p.t0 < 300).slice(-2);
     if (res.bonus) this.popups.push({ x: N / 2, y: N / 2, text: `Combo ×${res.merges.length}! +${res.bonus}`, t0: performance.now() + 120, color: '#ffd23f', big: true });
-    if (res.earned) { this.popups.push({ x: N / 2, y: N / 2 + 0.6, text: `New ${tileEmoji(this.sim.best)}! +1 undo`, t0: performance.now() + 200, color: '#7cffb2', big: true }); sfx.win(); }
+    if (res.earned) { this.popups.push({ x: N / 2, y: N / 2 + (res.bonus ? 0.9 : 0), text: `New ${tileEmoji(this.sim.best)}! +1 undo`, t0: performance.now() + 200, color: '#7cffb2', big: true }); sfx.win(); }
     this.renderControls();
     if (biggest) {
       sfx.match(Math.min(10, Math.log2(biggest) - 1 + (res.merges.length > 1 ? 1 : 0)));

@@ -678,3 +678,5 @@ body.cozy .btn, body.cozy .game-card .tag, body.cozy .seg-btn.on { filter: none;
 
 .hub-timer { white-space: normal; max-width: 100%; }
 .sr-only { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
+
+[hidden] { display: none !important; }

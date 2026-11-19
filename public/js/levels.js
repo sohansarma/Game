@@ -29,7 +29,7 @@ const ROMAN = ['', 'I', 'II', 'III', 'IV', 'V', 'VI', 'VII', 'VIII', 'IX', 'X'];
 export function difficultyOf(n) {
   const inWorld = (n - 1) % 10;
   let w = 0.97 - 0.0045 * Math.min(n, 60) - 0.012 * inWorld;
-  if (n % 10 === 0) w -= 0.08;
+  if (n % 10 === 0) w -= 0.16;
   return n % 10 === 0 && n >= 20 ? 'super' : w < 0.72 ? 'hard' : null;
 }
 
@@ -81,7 +81,7 @@ function cratePattern(kind, n, hp) {
       let on = false;
       switch (kind) {
         // full-width walls would cut the board off from the sky: leave a gap every third column
-        case 'row': on = r === m && c % 3 !== 1; break;
+        case 'row': on = (r === m || r === m + 2) && c % 3 !== 1; break;
         case 'top': on = r <= 1 && c % 3 !== 1; break;
         case 'ring': on = Math.max(Math.abs(r - m), Math.abs(c - m)) === 2; break;
         case 'pillars': on = (c === 1 || c === n - 2) && r >= 2 && r <= n - 3; break;
@@ -95,7 +95,7 @@ function cratePattern(kind, n, hp) {
 
 /** Tide levels from 12 on (every third level, never a boss): a wave every 5 moves, 4 later on. */
 export function tideOf(n) {
-  if (n < 12 || n % 10 === 0 || n % 3 !== 0) return 0;
+  if (n < 9 || n % 10 === 0 || n % 3 !== 0) return 0;
   return n >= 40 ? 4 : 5;
 }
 

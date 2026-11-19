@@ -78,7 +78,7 @@ export default class TideView {
     const left = s.limit - s.moves.length;
     this.controls.innerHTML = `<div class="col" style="gap:8px;width:100%;align-items:center">
       <div class="tide-picks">${PALETTE.map((col, c) => `<button class="tide-pick ${c === s.grid[0] ? 'cur' : ''}" data-c="${c}" style="--c:${col}" aria-label="Colour ${c + 1}" ${s.over || c === s.grid[0] ? 'disabled' : ''}><span>${SYMBOLS[c]}</span></button>`).join('')}</div>
-      <div class="small center ${left <= 2 && !s.over ? 'tide-warn' : 'muted'}">${s.over ? (s.solved ? `🌊 Tide in, ${s.moves.length} moves!` : 'Out of moves') : `${left} move${left === 1 ? '' : 's'} left · par ${s.par} · 💎 ${s.perfect} · ${s.covered}% flooded`}</div>
+      <div class="small center ${left <= 2 && !s.over ? 'tide-warn' : 'muted'}">${s.over ? (s.solved ? `🌊 Tide in, ${s.moves.length} moves!` : 'Out of moves') : `${left} move${left === 1 ? '' : 's'} left · ${s.hard ? '' : `par ${s.par} · `}💎 ${s.perfect} · ${s.covered}% flooded`}</div>
     </div>`;
     for (const b of this.controls.querySelectorAll('[data-c]')) b.onclick = () => this.pick(Number(b.dataset.c));
   }
@@ -156,7 +156,7 @@ function roundRect(ctx, x, y, w, h, r) {
 export function hud(sim) {
   return [
     { label: 'Moves', value: `${sim.moves.length}/${sim.limit}`, big: true },
-    { label: 'Par', value: `⛳ ${sim.par} · 💎 ${sim.perfect}` },
+    { label: sim.hard ? 'Target' : 'Par', value: sim.hard ? `💎 ${sim.perfect} – no spare moves` : `⛳ ${sim.par} · 💎 ${sim.perfect}` },
     { label: 'Flooded', value: `${sim.covered}%` },
   ];
 }
