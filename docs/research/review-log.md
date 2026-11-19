@@ -34,3 +34,24 @@ Critic 5/10. Full findings: `panel-review-2026-11.md`.
 | 24 | Shell Swap: **crates trap** – new gems don't drop through crates; gaps under them fill by diagonal slides; levels re-balanced; ENGINE_VERSION 5 | match-3 gamer, bug list | ✅ |
 | 25 | Launch basics: **privacy & terms** page, **age band** (under 13: random names, no publishing/accounts, contextual-only ads if ever), **cookieless anonymous counts** (open/retention bucket, game, share, ref; opt-out; team-only read), **1200×630 link preview**; iOS pinch-zoom no longer blocked | growth launch blockers, UX | ✅ |
 | 26 | Name filter: separate numbers aren't leetspeak any more ("Kind Fish 17" was rejected); 20,000 random nicknames verified clean | found while testing | ✅ |
+
+## Round 2 (Nov 2026) – re-review by the same panel
+Verdicts as they arrive (score /10, Round 1 → Round 2). 9 of 13 reviews were interrupted by a usage limit and resumed.
+
+| Reviewer | Verdict | Score | Still blocking (their top items) |
+|---|---|---|---|
+| Arcade A (Miner, Puffer, Serpent, Merge) | NOT YET | 5 → 6.5 | Puffer ghost rarely shows (random seeds); hold-to-inflate; serpent ghosts; miner cargo isn't push-your-luck; merge creature abilities |
+| Speedcuber (Cube Twist) | NOT YET | 5 → 6.5 | keys not view-relative / no csTimer layout; no shared daily scramble; no inspection/+2/DNF/session; scrambles without doubles; pause didn't stop timer |
+| Live-ops | NOT YET | 5 → 7 | pass finishes in ~19 days; shells run dry ~day 28; seasons are only a name; Open Sea repeats the same outfit; solo-league 400 🐚 exploit; old top-10 prizes doubling |
+| Growth | NOT YET | 5 → 7 | relative og:image; share funnel unmeasurable; retention in 24 h blocks; (business: GDPR controller/contact, domain, ads.txt, CMP) |
+| Critic, UX, match-3, block puzzle, chess, ludo, daily puzzle, arcade B, creator | pending | | |
+
+### Round 2 work items
+| # | Item | From | Status |
+|---|---|---|---|
+| 27 | Puffer **hold to inflate** (bigger, floaty, replay-verified); Puffer & Serpent endless runs use a **course of the week** so ghosts race you; **Serpent ghost**; Serpent "grow to 5 to dash" hint; modal ignores keys mashed in the first 250 ms | arcade A | ✅ |
+| 28 | Deep Miner **push-your-luck**: stranded = drop half the unbanked bag, lava burns a quarter, cash out keeps it all | arcade A | ✅ |
+| 29 | Shell Merge **creature powers**: 🐙 128 inks the smallest neighbour, 🦈 256 eats neighbouring 🐚 2s | arcade A | ✅ |
+| 30 | Cube: **view-relative keys** + **csTimer layout** (M, y), **WCA-style scrambles with half turns** (R2 shown), optional **15 s inspection** (+2/DNF), session with **+2/DNF/delete**, WCA ao5/ao12, Stop = DNF, **pause stops the timer**, final time stays on screen, **Daily Scramble** (same for everyone, fewest moves, replay-verified, one try) | speedcuber | ✅ (time leaderboard not verifiable by replay – moves board only) |
+| 31 | Tide Pass paced to ~60 days for a regular player (400 XP/tier) + **repeatable bonus tiers**; **seasonal decor shop** (~3,800 🐚 each season) and **limited sticker page** per season; **Winter Lights advent doors** (Dec 1–24, Longest Night lantern on Dec 21); Open Sea outfit rotates (already owned → 500 🐚); league podium only in leagues of 10+; old global top-10 prizes retired | live-ops | ✅ (shared-db league points are client-written – server mode is authoritative) |
+| 32 | Share funnel: `ref=` on every share link, shares counted only when sent, ref split new/returning (once per session), `onboard` event; **calendar-day** retention with one event per D1/D7/D30 milestone; absolute og:url/og:image/twitter:image; robots.txt | growth | ✅ (GDPR controller/contact, domain, ads.txt, CMP: business tasks) |
