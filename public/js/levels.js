@@ -80,8 +80,9 @@ function cratePattern(kind, n, hp) {
     for (let c = 0; c < n; c++) {
       let on = false;
       switch (kind) {
-        case 'row': on = r === m; break;
-        case 'top': on = r <= 1; break;
+        // full-width walls would cut the board off from the sky: leave a gap every third column
+        case 'row': on = r === m && c % 3 !== 1; break;
+        case 'top': on = r <= 1 && c % 3 !== 1; break;
         case 'ring': on = Math.max(Math.abs(r - m), Math.abs(c - m)) === 2; break;
         case 'pillars': on = (c === 1 || c === n - 2) && r >= 2 && r <= n - 3; break;
         case 'corners': on = (r < 2 || r >= n - 2) && (c < 2 || c >= n - 2); break;
@@ -92,13 +93,20 @@ function cratePattern(kind, n, hp) {
   return cells;
 }
 
+/** Tide levels from 12 on (every third level, never a boss): a wave every 5 moves, 4 later on. */
+export function tideOf(n) {
+  if (n < 12 || n % 10 === 0 || n % 3 !== 0) return 0;
+  return n >= 40 ? 4 : 5;
+}
+
 /** The static part of a level: layout + objective kinds. */
 export function levelRecipe(n) {
   const rng = new Rng(n * 7919 + 13);
   const world = Math.min(WORLDS.length - 1, Math.floor((n - 1) / 10));
   const boss = n % 10 === 0;
   const size = n <= 8 ? 8 : 9;
-  const colors = n <= 6 ? 4 : n <= 24 ? 5 : boss || n > 45 ? 6 : 5;
+  // 4 colours only for the first three (tutorial) levels – after that, fewer free cascades so choices matter
+  const colors = n <= 3 ? 4 : n <= 24 ? 5 : boss || n > 45 ? 6 : 5;
   const recipe = { n, world, boss, rows: size, cols: size, colors, holes: [], jelly: [], crates: [], goals: [] };
 
   if (n > 8) recipe.holes = HOLE_PATTERNS[n % HOLE_PATTERNS.length](size);
@@ -129,11 +137,11 @@ export function levelRecipe(n) {
   for (const k of kinds) {
     if (k === 'jelly') {
       const pattern = jellyPick;
-      const layers = n >= 30 && kinds.length === 1 && ['center', 'cross', 'diag', 'bottom'].includes(pattern) && rng.next() < 0.5 ? 2 : 1;
+      const layers = n >= 14 && kinds.length === 1 && ['center', 'cross', 'diag', 'bottom'].includes(pattern) && rng.next() < 0.6 ? 2 : 1;
       recipe.jelly = jellyPattern(pattern, size, rng, layers).filter(free);
       recipe.goals.push({ type: 'jelly' });
     } else if (k === 'crate') {
-      const hp = n >= 16 && !kinds.includes('jelly') && rng.next() < 0.6 ? 2 : 1;
+      const hp = n >= 12 && rng.next() < (kinds.includes('jelly') ? 0.35 : 0.65) ? 2 : 1;
       const jellySet = new Set(recipe.jelly.map(([r, c]) => r * 64 + c));
       recipe.crates = cratePattern(crateKinds[(n * 3) % crateKinds.length], size, hp).filter(
         (p) => free(p) && !jellySet.has(p[0] * 64 + p[1]),
@@ -171,6 +179,8 @@ export function getLevel(n, seed) {
     holes: recipe.holes,
     jelly: recipe.jelly,
     crates: recipe.crates,
+    // Tide levels: every few moves a wave sweeps the bottom row (and fires any specials in it)
+    ...(tideOf(n) ? { tideEvery: tideOf(n) } : {}),
     moves: t.moves,
     stars: t.stars,
     objectives,

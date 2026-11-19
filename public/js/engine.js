@@ -392,8 +392,27 @@ export class Game {
       initial = this.comboActivation(b, ga, a, gb, steps);
     }
     this.resolve(steps, initial, [b, a]);
+    this.tideSweep(steps);
     this.afterMove(steps);
     return { ok: true, steps };
+  }
+
+  /** Moves until the next wave on a Tide level (0 = not a tide level). */
+  get tideIn() {
+    const t = this.cfg.tideEvery || 0;
+    return t ? t - (this.movesMade % t || 0) : 0;
+  }
+
+  /** High tide: every `tideEvery` moves a wave clears the bottom row, specials included. */
+  tideSweep(steps) {
+    const t = this.cfg.tideEvery;
+    if (!t || this.movesMade % t !== 0 || this.state !== 'playing') return;
+    const r = this.rows - 1;
+    const cells = [];
+    for (let c = 0; c < this.cols; c++) if (this.isCell(r, c) && (this.gems[r][c] || this.crate[r][c])) cells.push([r, c]);
+    if (!cells.length) return;
+    steps.push({ type: 'tide', row: r });
+    this.resolve(steps, { cells, spent: new Set() }, null);
   }
 
   // Booster: smash a single gem (or damage a crate). Does not cost a move.

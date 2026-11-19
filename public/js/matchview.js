@@ -161,6 +161,12 @@ export class MatchView {
         await Promise.all(anims);
         return;
       }
+      case 'tide':
+        this.toast('🌊 High tide!', '#7FD4FF', 1.2);
+        sfx.zap();
+        this.tideWave = performance.now();
+        await this.wait(this.reduced ? 80 : 320);
+        return;
       case 'bonus':
         this.toast(`+${step.moves} move${step.moves > 1 ? 's' : ''}!`, '#7CFFB2');
         sfx.coin();
@@ -278,7 +284,9 @@ export class MatchView {
   }
 
   toast(text, color = '#fff', scale = 1) {
-    this.popups.push({ x: this.game.cols / 2, y: this.game.rows / 2, text, t0: performance.now(), color, big: scale, dur: 1100 });
+    const now = performance.now();
+    const live = this.popups.filter((p) => p.big && now - p.t0 < (p.dur || 1100) * 0.7).length;
+    this.popups.push({ x: this.game.cols / 2, y: this.game.rows / 2 + live * 0.9, text, t0: now, color, big: scale, dur: 1100 });
   }
 
   // ---------- hints ----------
@@ -338,11 +346,11 @@ export class MatchView {
       if (!down) return;
       const d = down;
       down = null;
-      if (d.moved || this.busy) return;
+      if (d.moved || (this.busy && this.mode !== 'swap')) return;
       this.tapCell(d.cell);
     };
     const onKey = (e) => {
-      if (this.busy || document.querySelector('.modal.open')) return;
+      if (document.querySelector('.modal.open')) return;
       const k = e.key;
       if (!['ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight', 'Enter', ' '].includes(k)) return;
       e.preventDefault();
@@ -581,6 +589,12 @@ export class MatchView {
       this.flyers = this.flyers.filter((f) => now - f.t0 < 520);
     }
 
+    // high tide wave over the bottom row
+    if (this.tideWave && now - this.tideWave < 700) {
+      const t = (now - this.tideWave) / 700;
+      ctx.fillStyle = `rgba(127, 212, 255, ${0.45 * (1 - t)})`;
+      ctx.fillRect(-C * 0.1 + (t - 0.5) * C * g.cols * 0.4, (g.rows - 1) * C, C * (g.cols + 0.2), C);
+    }
     // particles
     for (const p of this.particles) {
       ctx.globalAlpha = Math.max(0, p.life);

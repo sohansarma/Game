@@ -1260,6 +1260,7 @@ function levelTips(n) {
     2: 'Match <b>4 in a line</b> to make a <b>Wave</b> 🌊 that clears a whole row or column.',
     3: 'Match in an <b>L or T</b> shape to make a <b>Bubble Bomb</b> 🫧. Match <b>5 in a line</b> for a <b>Pearl</b> 🦪!',
     4: 'New goal: <b>collect</b> the creatures shown by matching them.',
+    5: 'Match <b>4 in a 2×2 square</b> to make a <b>Wish Star</b> 🌟 – it swims straight to something you need (algae, a crate or a goal creature) and clears it.',
     6: 'New goal: <b>clean the algae</b> 🌿 by making matches on top of it.',
     9: 'Tip: swap two special pieces together for a giant combo!',
     11: 'New goal: <b>break the barnacle crates</b> 📦 by matching next to them or blasting them.',
@@ -1282,7 +1283,8 @@ async function startLevel(n) {
     <p class="muted small">${esc(world.name)}${n % 10 === 1 && n > 1 && !best ? ' · <b>new world!</b>' : ''}${best?.stars ? ` · best ${starsHtml(best.stars)}` : ''}</p>
     <div class="goal-list">${goals.map((g) => goalHtml(g, true)).join('')}</div>
     <p><b>${cfg.moves}</b> moves</p>
-    ${levelTips(n)}`, { buttons: [{ label: '▶ Play', value: 'play', cls: 'green' }, { label: 'Back', value: 'back', cls: 'ghost' }], row: true });
+    ${levelTips(n)}
+    ${cfg.tideEvery ? `<div class="tip">🌊 <b>Tide level!</b> Every ${cfg.tideEvery} moves a wave sweeps the bottom row – it clears what's there and fires any specials. Set them up low!</div>` : ''}`, { buttons: [{ label: '▶ Play', value: 'play', cls: 'green' }, { label: 'Back', value: 'back', cls: 'ghost' }], row: true });
   if (res !== 'play') { if (currentScreen() !== 'map') showMap(n); return; }
   playMatch({ kind: 'level', n, cfg });
 }
@@ -1328,6 +1330,18 @@ function playMatch(run) {
     if (r.ok) toast('Resumed your dive');
   } else game = new Game(run.cfg);
   run.game = game;
+  // Daily Dive: race today's #1 run, move by move
+  if (run.kind === 'daily' && !run.practice) api.ghost('daily', run.key).then((gh) => {
+    if (!gh || gh.me || currentRun !== run || !Array.isArray(gh.log)) return;
+    const scores = [0];
+    for (let k = 1; k <= gh.log.length && k < 80; k++) {
+      const r = replay(run.cfg, gh.log.slice(0, k), { maxBoosters: 0 });
+      if (!r.ok) break;
+      scores[r.game.movesMade] = r.game.score;
+    }
+    for (let i = 1; i < scores.length; i++) if (scores[i] === undefined) scores[i] = scores[i - 1];
+    run.ghost = { name: gh.name, score: gh.score, scores };
+  }).catch(() => {});
   const isLevel = run.kind === 'level';
   const title = isLevel ? `Level ${run.n}` : run.kind === 'daily' ? `Daily Dive ${run.practice ? '(practice)' : ''}` : 'Deep Dive';
   if (!isLevel) setBackground(run.kind === 'daily' ? ['#ffb07c', '#d1495b'] : ['#3d5afe', '#0d1638']);
@@ -1337,6 +1351,8 @@ function playMatch(run) {
       <button class="icon-btn" id="g-pause" aria-label="Pause">⏸</button>
       <div class="box goals" id="g-goals"></div>
       <div class="box moves" id="g-moves-box"><span class="n" id="g-moves">0</span><span class="lbl">moves</span></div>
+      ${run.cfg.tideEvery ? '<div class="box moves" id="g-tide-box"><span class="n" id="g-tide">0</span><span class="lbl">🌊 tide</span></div>' : ''}
+      ${run.kind === 'daily' && !run.practice ? '<div class="box" id="g-ghost-box" hidden><span class="lbl" id="g-ghost-name">👻</span><b id="g-ghost">–</b></div>' : ''}
     </div>
     <div class="scorebar">
       <div class="score" id="g-score">0</div>
@@ -1353,6 +1369,13 @@ function playMatch(run) {
   const refreshHud = (score = game.score) => {
     $('#g-score', el).textContent = fmt(score);
     $('#g-moves', el).textContent = game.movesLeft;
+    if (run.cfg.tideEvery) { $('#g-tide', el).textContent = game.tideIn; $('#g-tide-box', el).classList.toggle('low', game.tideIn === 1); }
+    if (run.ghost) {
+      const gs = run.ghost.scores[Math.min(game.movesMade, run.ghost.scores.length - 1)];
+      $('#g-ghost-box', el).hidden = false;
+      $('#g-ghost-name', el).textContent = `👻 #1 ${run.ghost.name}`;
+      $('#g-ghost', el).textContent = `${fmt(gs)}${score >= gs ? ' ✓' : ''}`;
+    }
     $('#g-moves-box', el).classList.toggle('low', game.movesLeft <= 3 && game.state === 'playing');
     const prog = game.objectiveProgress();
     $('#g-goals', el).innerHTML = prog.length ? prog.map((g) => goalHtml(g)).join('') : `<span class="lbl">${esc(title)}</span>`;
@@ -1512,6 +1535,7 @@ async function endMatch(run) {
     <div class="big-score">${fmt(score)}</div>
     ${isBest ? '<p>🎉 New weekly best!</p>' : ''}
     ${run.kind === 'deep' ? `<p class="muted small">${game.movesMade} moves played · ${game.stats.bonusMovesEarned} bonus moves earned</p>` : ''}
+    ${run.ghost ? `<p>${score > run.ghost.score ? `👻 You beat today's #1 run by <b>${esc(run.ghost.name)}</b>!` : `👻 Today's #1, <b>${esc(run.ghost.name)}</b>, scored ${fmt(run.ghost.score)}.`}</p>` : ''}
     <div class="reward">+${shells} 🐚</div>
     ${rankLine}`, {
     buttons: [
@@ -1589,7 +1613,7 @@ async function endLevel(run) {
     const haveMoves = s.boosters.moves > 0;
     const affordable = haveMoves || s.shells >= 50;
     const r = await modal(`<h2>Out of moves!</h2>
-      <p class="muted">So close! Still needed:</p>
+      <p class="muted">${prog.every((g) => (g.current || 0) >= (g.target || 1) * 0.8) ? 'So close! Still needed:' : 'Still needed:'}</p>
       <div class="goal-list">${prog.map((g) => goalHtml(g)).join('')}</div>`, {
       dismissable: false,
       buttons: [
@@ -3554,6 +3578,8 @@ function howToPlay() {
   return modal(`<h2>How to play</h2>
     <div class="tip"><b>Match 3+</b> ${ic(0)}${ic(0)}${ic(0)} by swiping a creature into a neighbour's spot (or tap one, then tap its neighbour). Only swaps that make a match count.</div>
     <div class="tip"><b>Specials</b><br>🌊 <b>Wave</b> – match 4 in a line. Clears a whole row or column.<br>🫧 <b>Bubble Bomb</b> – match in an L or T shape. Blasts the 3×3 area.<br>🦪 <b>Pearl</b> – match 5 in a line. Swap it with any creature to clear every one of that kind.</div>
+    <div class="tip">🌟 <b>Wish Star</b> – match 4 in a 2×2 square. It swims to something you need (algae, a crate, a goal creature) and clears it – swap it with another special to carry that special there.</div>
+    <div class="tip">🌊 <b>Tide levels</b> – every few moves a wave sweeps the bottom row and fires any specials in it.</div>
     <div class="tip"><b>Combos</b> – swap two specials together! Wave+Wave = cross, Wave+Bomb = giant cross, Bomb+Bomb = huge blast, Pearl+special = transform them all, Pearl+Pearl = clear the board!</div>
     <div class="tip"><b>Goals</b> – 🎯 reach a score, collect creatures, 🌿 clean algae (match on top of it), 📦 break crates (match next to them). Leftover moves become a <b>Tidal Finale</b> for bonus points.</div>
     <div class="tip"><b>Reef Blocks</b> – drag pieces onto the 8×8 reef. Full rows and columns clear. Keep clearing for combos; one undo per run.</div>

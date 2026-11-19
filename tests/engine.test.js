@@ -190,3 +190,23 @@ test('endless mode awards bonus moves for specials', () => {
   }
   assert.ok(earned > 0);
 });
+
+test('tide levels: a wave sweeps the bottom row every N moves; replays stay exact', async () => {
+  const { getLevel, tideOf } = await import('../public/js/levels.js');
+  const n = [12, 15, 18, 21].find((k) => tideOf(k));
+  assert.ok(n, 'some level is a tide level');
+  const cfg = { ...getLevel(n, 4242), moves: 30, objectives: [{ type: 'score', target: 1e9 }] };
+  assert.equal(cfg.tideEvery, tideOf(n));
+  const g = new Game(cfg);
+  let tides = 0;
+  while (g.state === 'playing') {
+    const m = g.smartMove();
+    if (!m) break;
+    const r = g.swap(m[0], m[1]);
+    tides += r.steps.filter((s) => s.type === 'tide').length;
+  }
+  assert.ok(tides >= 1, `waves happened (${tides})`);
+  const rp = replay(cfg, g.log);
+  assert.ok(rp.ok);
+  assert.equal(rp.game.score, g.score);
+});

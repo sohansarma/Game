@@ -8,7 +8,7 @@
 import { writeFileSync } from 'node:fs';
 import { Game } from '../public/js/engine.js';
 import { Rng } from '../public/js/rng.js';
-import { levelRecipe, LEVEL_COUNT } from '../public/js/levels.js';
+import { levelRecipe, LEVEL_COUNT, tideOf } from '../public/js/levels.js';
 
 const TRIALS = Number(process.env.TRIALS || 30);
 
@@ -31,6 +31,7 @@ function configFor(recipe, t, seed) {
   return {
     mode: 'level', rows: recipe.rows, cols: recipe.cols, colors: recipe.colors,
     holes: recipe.holes, jelly: recipe.jelly, crates: recipe.crates, seed,
+    ...(tideOf(recipe.n) ? { tideEvery: tideOf(recipe.n) } : {}),
     moves: t.moves, stars: [0, 0, 0],
     objectives: recipe.goals.map((g) =>
       g.type === 'collect' ? { ...g, count: t.collect } : g.type === 'score' ? { ...g, target: t.target } : { ...g }),
@@ -64,11 +65,15 @@ export function tuneLevel(n) {
     t.target = round(quantile(scores, 1 - win), 500);
   } else {
     // play with "infinite" moves and record when the goal was reached
-    const needed = seeds.map((s) => {
+    const measure = () => seeds.map((s) => {
       const g = botPlay(configFor(recipe, { ...t, moves: 70 }, s));
       return g.state === 'won' ? g.movesMade : 999;
     });
-    t.moves = Math.max(12, Math.min(45, quantile(needed, win) + 1));
+    let needed = measure();
+    // collect goals grow until a level takes real moves (no 2-move wins)
+    const hasCollect = recipe.goals.some((g) => g.type === 'collect');
+    while (hasCollect && quantile(needed, win) + 1 < 14 && t.collect < 90) { t.collect += 4; needed = measure(); }
+    t.moves = Math.max(10, Math.min(45, quantile(needed, win) + 1));
   }
 
   // star thresholds from a run at the final move count
