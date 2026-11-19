@@ -1,14 +1,13 @@
 // Runs the chess bot off the main thread so the board never freezes.
-import { Chess, casualMoveScored, searchMove } from './chess.js';
+import { Chess, casualMoveScored, scoreAll } from './chess.js';
 import { findPuzzle } from './chess-puzzles.js';
 
 const rngOf = () => ({ next: Math.random });
-const evalPos = (g) => searchMove(g, { depth: 2, budget: 12000 }, { next: () => 0.5 });
 
 self.onmessage = (e) => {
-  const { id, kind, ucis, level, seed } = e.data;
+  const { id, kind, ucis, level, seed, multi } = e.data;
   try {
-    if (kind === 'puzzle') { self.postMessage({ id, puzzle: findPuzzle(seed) }); return; }
+    if (kind === 'puzzle') { self.postMessage({ id, puzzle: findPuzzle(seed, !!multi) }); return; }
     const g = new Chess();
     for (const u of ucis) g.play(u);
     if (kind === 'review') {
@@ -16,13 +15,18 @@ self.onmessage = (e) => {
       const out = [];
       const h = new Chess();
       for (let i = 0; i < ucis.length; i++) {
-        const best = evalPos(h.clone());
+        // every move of the position scored in ONE search (same depth for all) …
+        const sc = scoreAll(h, 3, 60000);
+        const best = sc[0];
+        const mine = sc.find((x) => x.uci === ucis[i]);
+        // … and the played move also gets a deeper look from the position after it, so a sound sacrifice isn't marked as a mistake
         const after = h.clone();
         after.play(ucis[i]);
-        let played;
-        if (!after.moves().length) played = after.inCheck() ? 100000 : 0;
-        else { const r = evalPos(after.clone()); played = r ? -r.score : 0; }
-        out.push({ ply: i, best: best?.uci || null, bestScore: best?.score ?? 0, played });
+        let deeper;
+        if (!after.moves().length) deeper = after.inCheck() ? 100000 : 0;
+        else { const r = scoreAll(after, 3, 60000)[0]; deeper = r ? -r.v : 0; }
+        const played = Math.max(mine ? mine.v : -1e9, deeper);
+        out.push({ ply: i, best: best?.uci || null, bestScore: best?.v ?? 0, played });
         h.play(ucis[i]);
         if (i % 8 === 7) self.postMessage({ id, progress: (i + 1) / ucis.length });
       }

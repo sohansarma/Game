@@ -9,14 +9,14 @@ import { Rng } from '../rng.js';
 const MATE = 50000;
 
 /** { start: [uci…], side, line: [uci…], accept: [[uci…] per your move], theme } */
-export function findPuzzle(seed) {
-  const it = puzzleSteps(seed);
+export function findPuzzle(seed, multi = false) {
+  const it = puzzleSteps(seed, multi);
   for (;;) { const r = it.next(); if (r.done) return r.value; }
 }
 
 /** Same search, but yields to the page between positions (no freezes without a worker). */
-export async function findPuzzleAsync(seed) {
-  const it = puzzleSteps(seed);
+export async function findPuzzleAsync(seed, multi = false) {
+  const it = puzzleSteps(seed, multi);
   for (;;) {
     const r = it.next();
     if (r.done) return r.value;
@@ -33,9 +33,10 @@ export function puzzleDifficulty(g0, p) {
   return 800 + (yours - 1) * 250 + (quiet ? 250 : 0) + (p.theme === 'Mate' ? 150 : 0);
 }
 
-function* puzzleSteps(seed) {
+/** multi: only a real combination will do (the daily puzzle) */
+function* puzzleSteps(seed, multi = false) {
   let fallback = null;
-  for (let attempt = 0; attempt < 12; attempt++) {
+  for (let attempt = 0; attempt < (multi ? 30 : 12); attempt++) {
     const rng = new Rng((seed + attempt * 7919) >>> 0);
     const g = new Chess();
     const start = [];
@@ -49,7 +50,7 @@ function* puzzleSteps(seed) {
           const full = { start: start.slice(), ...p, difficulty: puzzleDifficulty(g, p) };
           if (p.line.length >= 3) return full; // a real combination: two or more of your moves
           fallback ||= full;
-          if (attempt >= 3 && fallback) return fallback;
+          if (!multi && attempt >= 3 && fallback) return fallback;
         }
         yield null;
       }

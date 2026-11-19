@@ -59,13 +59,13 @@ export async function reviewGame(ucis, onProgress) {
 }
 
 /** Today's (or any seed's) puzzle, cached in this browser. */
-export async function puzzleFor(seed) {
-  const key = 'tidepop.puzzle.v2.' + seed;
+export async function puzzleFor(seed, multi = false) {
+  const key = `tidepop.puzzle.v3.${multi ? 'm' : ''}${seed}`;
   try { const c = localStorage.getItem(key); if (c) return JSON.parse(c); } catch { /* storage blocked */ }
   let p = null;
-  const r = await ask({ kind: 'puzzle', seed }, 40000);
+  const r = await ask({ kind: 'puzzle', seed, multi }, 90000);
   if (!r.error) p = r.puzzle;
-  else p = await findPuzzleAsync(seed);
+  else p = await findPuzzleAsync(seed, multi);
   try { if (p) localStorage.setItem(key, JSON.stringify(p)); } catch { /* full */ }
   return p;
 }

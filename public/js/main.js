@@ -273,7 +273,7 @@ async function playChessPuzzle({ daily }) {
   const seed = daily ? hashString('tidepop-chess-puzzle-' + key) : (nextPracticeSeed ?? randSeed());
   if (!daily) nextPracticeSeed = null;
   toast(daily ? '🧩 Setting up today\'s puzzle…' : '🧩 Finding a puzzle…');
-  const puzzle = await puzzleFor(seed);
+  const puzzle = await puzzleFor(seed, daily);
   // get the next practice puzzle ready in the background
   if (!nextPracticeSeed) { nextPracticeSeed = randSeed(); puzzleFor(nextPracticeSeed).catch(() => {}); }
   if (!puzzle) { toast("Couldn't find a puzzle – try again"); return arcadeMenu('chess'); }
@@ -2432,7 +2432,7 @@ async function chessReview(sim) {
   const cap = (x) => Math.max(-1000, Math.min(1000, x));
   const rows = rv.map((r, i) => {
     const loss = Math.max(0, cap(r.bestScore) - cap(r.played));
-    const tag = r.best === ucis[i] ? 'best' : loss >= 300 ? 'blunder' : loss >= 150 ? 'mistake' : loss >= 70 ? 'inaccuracy' : 'ok';
+    const tag = r.best === ucis[i] || loss < 15 ? 'best' : loss >= 300 ? 'blunder' : loss >= 200 ? 'mistake' : loss >= 90 ? 'inaccuracy' : 'ok';
     return { i, side: i % 2 ? 'b' : 'w', loss, tag, san: sans[i], better: tag === 'ok' || tag === 'best' ? '' : sanOf(i, r.best) };
   });
   const mine = sim.mySide || 'w';
@@ -2441,12 +2441,36 @@ async function chessReview(sim) {
   const acc = Math.round(100 - myRows.reduce((a, r) => a + Math.min(300, r.loss), 0) / Math.max(1, myRows.length) / 3);
   const key = myRows.slice().sort((a, b) => b.loss - a.loss)[0];
   const mark = { blunder: '??', mistake: '?', inaccuracy: '?!', best: '★', ok: '' };
-  const list = rows.map((r) => `<div class="rv-row ${r.tag} ${r.side === mine ? 'mine' : ''}" role="listitem"><span class="rv-n">${r.i % 2 ? '' : `${r.i / 2 + 1}.`}</span><b>${esc(r.san)}${mark[r.tag]}</b>${r.better ? `<span class="small">better: ${esc(r.better)}</span>` : ''}</div>`).join('');
+  const list = rows.map((r) => `<button class="rv-row ${r.tag} ${r.side === mine ? 'mine' : ''}" role="listitem" data-ply="${r.i}" aria-label="Move ${Math.floor(r.i / 2) + 1}${r.i % 2 ? ' black' : ''}: ${esc(r.san)} ${r.tag}${r.better ? `, better ${esc(r.better)}` : ''}"><span class="rv-n">${r.i % 2 ? '' : `${r.i / 2 + 1}.`}</span><b>${esc(r.san)}${mark[r.tag]}</b>${r.better ? `<span class="small">better: ${esc(r.better)}</span>` : ''}</button>`).join('');
+  // a small board: tap a move to see the position, your move (blue) and the better one (green)
+  const GLYPH = { K: '♔', Q: '♕', R: '♖', B: '♗', N: '♘', P: '♙', k: '♚', q: '♛', r: '♜', b: '♝', n: '♞', p: '♟' };
+  const sq = (u) => (8 - Number(u[1])) * 8 + 'abcdefgh'.indexOf(u[0]);
+  const boardHtml = (ply) => {
+    const g = new Chess();
+    for (let k = 0; k < ply; k++) g.play(ucis[k]);
+    const played = [sq(ucis[ply].slice(0, 2)), sq(ucis[ply].slice(2, 4))];
+    const better = rv[ply].best && rv[ply].best !== ucis[ply] && rows[ply].better ? [sq(rv[ply].best.slice(0, 2)), sq(rv[ply].best.slice(2, 4))] : [];
+    const flip = mine === 'b';
+    let html = '';
+    for (let k = 0; k < 64; k++) {
+      const i = flip ? 63 - k : k;
+      const dark = ((i >> 3) + (i & 7)) % 2 === 1;
+      const p = g.board[i];
+      html += `<span class="rv-sq ${dark ? 'd' : 'l'} ${played.includes(i) ? 'pl' : ''} ${better.includes(i) ? 'bt' : ''}">${p ? GLYPH[p] : ''}</span>`;
+    }
+    return `<div class="rv-board" role="img" aria-label="Position before move ${Math.floor(ply / 2) + 1}">${html}</div><p class="small center">${esc(rows[ply].san)}${rows[ply].better ? ` · <span style="color:#7cffb2">better: ${esc(rows[ply].better)}</span>` : ''}</p>`;
+  };
+  const firstPly = key && key.loss >= 90 ? key.i : 0;
   await modal(`<h2>📈 Game review</h2>
     <div class="tide-stats"><div><b>${acc}%</b><span>Accuracy</span></div><div><b>${count('blunder')}</b><span>Blunders ??</span></div><div><b>${count('mistake')}</b><span>Mistakes ?</span></div><div><b>${count('best')}</b><span>Best moves ★</span></div></div>
     ${key && key.loss >= 70 ? `<div class="tip">🔑 <b>Key moment:</b> move ${Math.floor(key.i / 2) + 1}, you played <b>${esc(key.san)}</b>${key.better ? ` – <b>${esc(key.better)}</b> was stronger` : ''}.</div>` : '<div class="tip">🌊 A clean game – no big mistakes!</div>'}
-    <div class="rv-list" role="list">${list}</div>`, { buttons: [{ label: 'Done', value: null, cls: 'green' }] });
-  showHub();
+    <div id="rv-board">${boardHtml(firstPly)}</div>
+    <div class="rv-list" role="list">${list}</div>`, {
+    buttons: [{ label: 'Back to the game result', value: null, cls: 'green' }],
+    onOpen: (sheet) => {
+      for (const b of $$('[data-ply]', sheet)) b.onclick = () => { $('#rv-board', sheet).innerHTML = boardHtml(Number(b.dataset.ply)); sfx.tap(); };
+    },
+  });
 }
 
 function toPgn(sim) {
@@ -2819,7 +2843,9 @@ async function endVersus(run) {
   run.ended = true;
   run.stopWatch?.();
   const { sim, id, online } = run;
-  noteGameEnd(id, false, 'versus');
+  const firstShow = !run.recorded;
+  run.recorded = true;
+  if (firstShow) noteGameEnd(id, false, 'versus');
   if (online) update((d) => { if (d.versus) delete d.versus[online.code]; });
   let html;
   if (id === 'chess') {
@@ -2831,7 +2857,7 @@ async function endVersus(run) {
       <div class="big-score">${res}</div><p class="muted">${esc(r.reason)} · ${Math.ceil(sim.game.ply / 2)} moves</p>`;
     if (run.casual) {
       const lvl = sim.level;
-      update((d) => {
+      if (firstShow) update((d) => {
         const rec = { w: 0, d: 0, l: 0, ...((d.chessRecord || {})[lvl] || {}) };
         rec[!r.winner ? 'd' : won ? 'w' : 'l']++;
         d.chessRecord = { ...(d.chessRecord || {}), [lvl]: rec };
@@ -2853,7 +2879,7 @@ async function endVersus(run) {
         { label: '🕹️ Arcade', value: 'hub', cls: 'ghost' },
       ],
     });
-    if (out === 'review') return chessReview(sim);
+    if (out === 'review') { await chessReview(sim); run.ended = false; return endVersus(run); }
     if (out === 'pgn') { await shareText(toPgn(sim)); return showHub(); }
     if (out === 'rematch') return chessSetup(run.casual);
     if (out === 'prematch') return chessParty({ ...run.chessParty, white: run.chessParty.black, black: run.chessParty.white });
