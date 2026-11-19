@@ -84,10 +84,15 @@ ITEMS.push(
 );
 export const ITEM = Object.fromEntries(ITEMS.map((i) => [i.id, i]));
 
-/** Comfort points from what's placed, and the matching level (0–5). */
-const LEVELS = [0, 6, 16, 28, 42, 56]; // a fully decked-out cove (~62) reaches 5 stars
+/** Polishing an owned item adds comfort: level 2 and 3 cost shells (a sink that keeps going). */
+export const POLISH = [0, 0, 600, 1500];
+export const MAX_STARS = 8;
+export const itemComfort = (pool, id) => (ITEM[id]?.comfort || 0) + ((pool?.lvl?.[id] || 1) - 1) * 3;
+
+/** Comfort points from what's placed, and the matching level (0–8). */
+const LEVELS = [0, 6, 16, 28, 42, 56, 68, 80, 92]; // stars 6–8 need polished pieces
 export function comfortOf(pool) {
-  const pts = Object.values(pool?.placed || {}).reduce((n, id) => n + (ITEM[id]?.comfort || 0), 0);
+  const pts = Object.values(pool?.placed || {}).reduce((n, id) => n + itemComfort(pool, id), 0);
   let level = 0;
   for (let i = 0; i < LEVELS.length; i++) if (pts >= LEVELS[i]) level = i;
   return { pts, level, next: LEVELS[level + 1] ?? null };

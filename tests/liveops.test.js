@@ -47,19 +47,19 @@ test('Tide Pass: seasons cover every day, game XP is capped per day, tiers pay o
   assert.equal(added, live.XP.game * live.XP.gameCapPerDay);
   live.addXp(d, season, '2026-11-19', live.XP.game, { game: true });
   assert.equal(d.pass.xp, added + live.XP.game, 'cap resets the next day');
-  const tiers = live.tierOfXp(d.pass.xp);
+  const tiers = live.tierOfXp(d.pass.xp, season);
   const got = live.claimTiers(d, season, () => 0.5);
   assert.equal(got.filter((g) => g.tier).length, tiers);
   assert.equal(live.claimTiers(d, season).length, 0, 'no double claims');
   // the final tier gives the season outfit
-  d.pass.xp = live.TIERS * live.XP_PER_TIER * 2;
+  d.pass.xp = live.TIERS * live.tierXp(season) * 2;
   const shellsBefore = d.shells;
   live.claimTiers(d, season, () => 0.5);
   assert.equal(d.pass.claimed, live.TIERS * 2, 'bonus tiers keep paying past tier 30');
   assert.ok(d.outfits[season.outfit]);
   assert.ok(d.shells > shellsBefore);
   // an outfit you already own turns into shells
-  const d2 = { shells: 0, outfits: { [season.outfit]: 1 }, pass: { season: season.id, xp: live.TIERS * live.XP_PER_TIER, claimed: live.TIERS - 1 } };
+  const d2 = { shells: 0, outfits: { [season.outfit]: 1 }, pass: { season: season.id, xp: live.TIERS * live.tierXp(season), claimed: live.TIERS - 1 } };
   live.claimTiers(d2, season, () => 0.5);
   assert.ok(d2.shells >= 800);
 });

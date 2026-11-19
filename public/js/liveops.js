@@ -53,7 +53,7 @@ export const WEEKLY = [
   { id: 'variety', text: 'Play 6 different games', goal: 6, cur: (w) => (w.ids || []).length },
   { id: 'games', text: 'Finish 25 games', goal: 25, cur: (w) => w.games || 0 },
 ];
-export const WEEKLY_REWARD = { shells: 500, packs: 2, xp: 250 };
+export const WEEKLY_REWARD = { shells: 250, packs: 2, xp: 250 };
 
 export function weekState(d, week) {
   return d.week?.week === week ? d.week : { week, chests: 0, ids: [], games: 0, claimed: false };
@@ -74,6 +74,11 @@ export const SEASONS = [
 ];
 export const TIERS = 30;
 export const XP_PER_TIER = 400;
+/** First Tide started under the old pace and keeps it, so its snorkel stays earnable. */
+export const tierXp = (season) => (season?.id === 's0' ? 120 : XP_PER_TIER);
+/** Which scripted season's decor & stickers a season uses ("Open Sea" quarters cycle through them). */
+export const decorSeason = (season) => season?.decor || season?.id;
+export const PACK_PRICE = 300;
 export const XP = { game: 10, gameCapPerDay: 30, chest: 60, tide: 30, weekly: 250 };
 
 export function seasonAt(day) {
@@ -86,7 +91,7 @@ export function seasonAt(day) {
   const endMonth = q * 3 + 3;
   const to = `${y}-${String(endMonth).padStart(2, '0')}-${[31, 30, 30, 31][q]}`;
   const outfits = ['captain', 'bubble', 'pearl', 'ribbon'];
-  return { id: `q${y}${q}`, name: 'Open Sea', icon: '⛵', from, to, outfit: outfits[(y * 4 + q) % outfits.length] };
+  return { id: `q${y}${q}`, name: 'Open Sea', icon: '⛵', from, to, outfit: outfits[(y * 4 + q) % outfits.length], decor: ['s0', 's1', 's2', 's3'][(y * 4 + q) % 4] };
 }
 
 /** Days left in the season (inclusive of today). */
@@ -108,7 +113,7 @@ export function passState(d, season) {
   return d.pass?.season === season.id ? d.pass : { season: season.id, xp: 0, claimed: 0, day: '', dayGames: 0 };
 }
 /** Tiers reached; past tier 30 every XP_PER_TIER more is a repeatable bonus tier. */
-export const tierOfXp = (xp) => Math.floor(xp / XP_PER_TIER);
+export const tierOfXp = (xp, season) => Math.floor(xp / tierXp(season));
 
 /** Adds XP (game XP is capped per day). Returns the XP actually added. */
 export function addXp(d, season, day, amount, { game = false } = {}) {
@@ -125,7 +130,7 @@ export function addXp(d, season, day, amount, { game = false } = {}) {
 /** Claims every reached tier; returns the list of rewards granted. */
 export function claimTiers(d, season, rollPack) {
   const p = (d.pass = passState(d, season));
-  const reached = tierOfXp(p.xp);
+  const reached = tierOfXp(p.xp, season);
   const got = [];
   while (p.claimed < reached) {
     p.claimed++;
@@ -136,7 +141,7 @@ export function claimTiers(d, season, rollPack) {
       if (d.outfits?.[r.outfit]) { d.shells += 500; got.push({ label: 'You already have this outfit: +500 🐚 instead' }); }
       else d.outfits = { ...(d.outfits || {}), [r.outfit]: 1 };
     }
-    if (r.packs) for (let i = 0; i < r.packs; i++) got.push(...openPack(d, rollPack, season.id));
+    if (r.packs) for (let i = 0; i < r.packs; i++) got.push(...openPack(d, rollPack, decorSeason(season)));
   }
   return got;
 }
@@ -196,8 +201,9 @@ export function openPack(d, roll = Math.random, seasonId = null) {
     const s = pool[Math.floor(roll() * pool.length) % pool.length];
     const dupe = !!d.stickers[s.id];
     d.stickers[s.id] = (d.stickers[s.id] || 0) + 1;
-    if (dupe) d.shells += DUPE_SHELLS[rarity];
-    got.push({ sticker: s.id, dupe, label: `${s.icon} ${s.name}${dupe ? ` (spare: +${DUPE_SHELLS[rarity]} 🐚)` : ' – new!'}` });
+    const spare = DUPE_SHELLS[s.rarity] || DUPE_SHELLS.common;
+    if (dupe) d.shells += spare;
+    got.push({ sticker: s.id, dupe, label: `${s.icon} ${s.name}${dupe ? ` (spare: +${spare} 🐚)` : ' – new!'}` });
   }
   return got;
 }
@@ -283,4 +289,11 @@ export function openAdvent(d, day, roll = Math.random) {
   if (door.sticker) { d.stickers = { ...(d.stickers || {}), [door.sticker]: (d.stickers?.[door.sticker] || 0) + 1 }; got.push(`${STICKER[door.sticker].icon} ${STICKER[door.sticker].name}`); }
   for (let i = 0; i < (door.packs || 0); i++) got.push(...openPack(d, roll, 's1').map((g) => g.label));
   return { door, got };
+}
+
+/** Shell shop: a sticker pack (with this season's limited stickers in it). */
+export function buyPack(d, seasonId, roll = Math.random) {
+  if (d.shells < PACK_PRICE) return null;
+  d.shells -= PACK_PRICE;
+  return openPack(d, roll, seasonId);
 }

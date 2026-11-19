@@ -198,7 +198,7 @@ export function mergeSaves(a, b, { firstMerge = false } = {}) {
   // Tide of the Day: keep every day's result; if both devices have one, keep the earlier save's (first try)
   if (a.tide || b.tide) m.tide = { ...(older.tide || {}), ...(newer.tide || {}), days: { ...(newer.tide?.days || {}), ...(older.tide?.days || {}) } };
   // Tide Pool: never lose an item; the layout follows the newer save
-  if (a.pool || b.pool) m.pool = { ...(newer.pool || older.pool), owned: { ...(older.pool?.owned || {}), ...(newer.pool?.owned || {}) }, placed: { ...((newer.pool || older.pool)?.placed || {}) } };
+  if (a.pool || b.pool) m.pool = { ...(newer.pool || older.pool), owned: { ...(older.pool?.owned || {}), ...(newer.pool?.owned || {}) }, placed: { ...((newer.pool || older.pool)?.placed || {}) }, lvl: maxPerKey(older.pool?.lvl, newer.pool?.lvl) };
   // live-ops: stickers, outfits and album bonuses are never lost; Tide Pass keeps the most XP
   if (a.stickers || b.stickers) m.stickers = maxPerKey(older.stickers, newer.stickers);
   if (a.outfits || b.outfits) m.outfits = { ...(older.outfits || {}), ...(newer.outfits || {}) };
