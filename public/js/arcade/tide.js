@@ -116,7 +116,8 @@ export function bestSolve(start, width = 200) {
 }
 
 class TideSim {
-  constructor(seed) {
+  /** hard: the limit is the perfect line itself – no spare moves at all */
+  constructor(seed, hard = false) {
     this.seed = seed >>> 0;
     this.grid = makeGrid(this.seed);
     this.start = this.grid.slice();
@@ -124,7 +125,8 @@ class TideSim {
     // (a careful player wins ~93% of days, a sloppy one ~66%)
     this.perfect = bestSolve(this.grid).length;
     this.par = this.perfect + 1;
-    this.limit = this.perfect + 3;
+    this.limit = hard ? this.perfect : this.perfect + 3;
+    this.hard = hard;
     this.gains = [];
     this.moves = [];
     this.log = [];
@@ -190,7 +192,7 @@ export function shareText(key, sim, extra = '') {
   const gains = sim.gains || [];
   const rows = [];
   for (let i = 0; i < gains.length; i += 8) rows.push(gains.slice(i, i + 8).map(moveSquare).join(''));
-  return `Tidepop Tide #${tideNumber(key)} ${res} ${badge}\n${rows.join('\n')}${extra ? '\n' + extra : ''}`;
+  return `Tidepop Tide #${tideNumber(key)} ${res} ${badge}\n${rows.join('\n')}\n(🌊 huge · 🟩 good · 🟦 small · ⬛ none)${extra ? '\n' + extra : ''}`;
 }
 
 export default {
@@ -208,3 +210,10 @@ export default {
   replay,
 };
 export { TideSim };
+
+/** The day key (YYYY-MM-DD) of Tide #n. */
+export function tideKey(n) {
+  return new Date(EPOCH + (n - 1) * 86400000).toISOString().slice(0, 10);
+}
+/** Hard tide: a different board the same day, and you must find the perfect line. */
+export const hardSeed = (seed) => (seed ^ 0x5bd1e995) >>> 0;

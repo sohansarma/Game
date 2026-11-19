@@ -15,7 +15,7 @@ import { MatchView } from './matchview.js';
 import { BlocksView } from './blocksview.js';
 import { iconURL, PALETTE, clearSpriteCache } from './creatures.js';
 import { sfx, unlockAudio, configureAudio, haptic, purr } from './audio.js';
-import { tideNumber, shareText as tideShareText, moveSquare } from './arcade/tide.js';
+import { tideNumber, shareText as tideShareText, moveSquare, tideKey, hardSeed, TideSim } from './arcade/tide.js';
 import { SLOTS as POOL_SLOTS, ITEMS as POOL_ITEMS, ITEM as POOL_ITEM, comfortOf, comfortBonus, found as poolFound, newlyFound, drawPool } from './pool.js';
 import { startCloud, syncNow, cloudAccount, cloudStatus, onCloudChange, signUp, logIn, logOut, recoverAccount, changePassword, deleteAccount, setClaudeSync } from './cloud.js';
 import { configureCozy, cozyActive, cozySleeping, wakeCozy, onSleep, isNightTime, cozySound, VIBES, VIBE } from './cozy.js';
@@ -103,8 +103,11 @@ async function boot() {
   }
   if (ch) acceptChallenge(ch);
   else if (s.onboarded && new URLSearchParams(location.search).has('tide')) {
+    const n = Number(new URLSearchParams(location.search).get('tide'));
     try { history.replaceState(null, '', location.pathname + location.hash); } catch { /* sandboxed */ }
-    playTide();
+    const today = tideNumber(dayKey());
+    if (Number.isInteger(n) && n >= 1 && n < today) { toast(`That link was Tide #${n} – playing it as practice. Today's is #${today}!`); playTide({ key: tideKey(n) }); }
+    else playTide();
   }
 }
 
@@ -514,7 +517,7 @@ function tideCardHtml() {
   const n = tideNumber(key);
   const st = tideStats();
   const sub = r
-    ? `${r.solved ? `✅ Solved in ${r.moves.length}${r.moves.length <= r.par ? ' ⛳' : ''}` : '🌫️ Not this time'} · next in <b id="u-tide-next">${hms(msToReset())}</b>`
+    ? `${r.solved ? `✅ Solved in ${r.moves.length}${r.moves.length <= (r.perfect ?? r.par - 1) ? ' 💎' : r.moves.length <= r.par ? ' ⛳' : ''}` : '🌫️ Not this time'}${r.solved && !load().tide?.hard?.[key] ? ' · 🔥 Hard tide unlocked' : ''} · next ${localReset()}`
     : `Same puzzle for everyone · par ${tidePar(key)} · 💎 ${tidePar(key) - 1} · ${st.cur ? `🔥 ${st.cur}-day tide streak` : 'start a tide streak'}`;
   return `<button class="tide-card ${r ? 'done' : ''}" id="u-tide">
     <span class="tide-wave">🌊</span>
@@ -522,17 +525,28 @@ function tideCardHtml() {
     <span class="btn sm">${r ? 'Share' : 'Play'}</span></button>`;
 }
 
-async function playTide() {
-  const key = dayKey();
-  if (tideDays()[key]) return showTideResult(key);
+/** When the next daily puzzles arrive, in the player's own time. */
+function localReset() {
+  const t = new Date(Date.now() + msToReset());
+  return `at ${t.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })} your time`;
+}
+
+/** opts: { key } an earlier day = practice from the archive · { hard } = today's hard tide */
+async function playTide(opts = {}) {
+  const today = dayKey();
+  const key = opts.key || today;
+  const practice = key !== today;
+  const hard = !!opts.hard;
+  if (!practice && !hard && tideDays()[key]) return showTideResult(key);
+  if (hard && load().tide?.hard?.[key]) { toast("You've played today's hard tide – a new one tomorrow"); return showTideResult(key); }
   leaveGame();
   try { history.pushState({ g: 1 }, ''); } catch { /* sandboxed */ }
   const g = ARCADE_BY_ID.tide;
   const mod = await VIEWS.tide();
   if (!load().tide?.seenHow) { await arcadeHow('tide'); update((d) => { d.tide = { ...(d.tide || { days: {} }), seenHow: true }; }); }
-  const playSeed = arcadeSeed('tide', true, key, 0);
-  const sim = g.create(playSeed);
-  const run = { kind: 'arcade', id: 'tide', daily: true, key, seed: 0, playSeed, sim, tide: true };
+  const playSeed = hard ? hardSeed(arcadeSeed('tide', true, key, 0)) : arcadeSeed('tide', true, key, 0);
+  const sim = hard ? new TideSim(playSeed, true) : g.create(playSeed);
+  const run = { kind: 'arcade', id: 'tide', daily: true, key, seed: 0, playSeed, sim, tide: true, practice, hard };
   currentRun = run;
   setBackground(g.color);
   const el = showScreen('arcade', `
@@ -542,7 +556,7 @@ async function playTide() {
     </div>
     <div class="board-wrap"><canvas id="ar-canvas" aria-label="Tide of the Day board"></canvas></div>
     <div id="ar-controls" class="arcade-controls"></div>
-    <div class="mode-label" id="ar-label">🌊 Tide #${tideNumber(key)} · only your first try counts</div>`);
+    <div class="mode-label" id="ar-label">${hard ? `🔥 Hard tide #${tideNumber(key)} · no spare moves – find the perfect line` : practice ? `📚 Tide #${tideNumber(key)} from the archive · practice, not ranked` : `🌊 Tide #${tideNumber(key)} · only your first try counts`}</div>`);
   applyTable(el, 'tide');
   const refresh = () => {
     const box = $('#ar-hud', el);
@@ -567,6 +581,28 @@ async function endTide(run) {
   if (run.ended) return;
   run.ended = true;
   const { sim, key } = run;
+  if (run.practice || run.hard) {
+    // archive & hard tides: recorded for you, not ranked
+    update((d) => {
+      d.tide = { ...(d.tide || {}), days: { ...(d.tide?.days || {}) } };
+      const rec = { moves: sim.moves.length, solved: sim.solved, perfect: sim.perfect, limit: sim.limit, gains: sim.gains.slice() };
+      if (run.hard) d.tide.hard = { ...(d.tide.hard || {}), [key]: rec };
+      else d.tide.archive = { ...(d.tide.archive || {}), [key]: rec };
+      if (run.hard && sim.solved) d.shells += 40;
+    });
+    noteGameEnd('tide', false);
+    leaveGame();
+    showHub();
+    const n = tideNumber(key), today = tideNumber(dayKey());
+    const r = await modal(`<h2>${run.hard ? '🔥 Hard tide' : '📚 Archive'} #${n}</h2><div class="big-score">${sim.solved ? `${sim.moves.length}/${sim.limit}` : `X/${sim.limit}`}</div>
+      <p class="muted">${sim.solved ? (sim.moves.length <= sim.perfect ? '💎 The perfect line!' : 'Solved!') : `The tide reached ${sim.covered}% – the perfect line was ${sim.perfect}.`}${run.hard && sim.solved ? ' +40 🐚' : ''}</p>
+      ${run.practice ? `<p class="small muted">This was Tide #${n} – practice, not ranked. Today's is #${today}.</p>` : '<p class="small muted">Hard tides are just for you (and your share text).</p>'}`, {
+      buttons: [...(run.hard ? [{ label: '📤 Share', value: 'share', cls: 'green' }] : [{ label: '📚 Archive', value: 'arch', cls: 'blue' }]), { label: '🕹️ Arcade', value: null, cls: 'ghost' }],
+    });
+    if (r === 'arch') showTideArchive();
+    if (r === 'share') shareText(`Tidepop 🔥 Hard tide #${n} ${sim.solved ? `${sim.moves.length}/${sim.limit} 💎` : `X/${sim.limit}`}\n${sim.gains.map(moveSquare).join('')}\n${location.origin}${location.pathname}?tide=${n}&ref=share`);
+    return;
+  }
   const shells = sim.solved ? 20 + 10 * (sim.limit - sim.moves.length) : 10;
   update((d) => {
     d.tide = { ...(d.tide || {}), days: { ...(d.tide?.days || {}) } };
@@ -606,8 +642,9 @@ async function showTideResult(key, { shells, sub } = {}) {
     <p class="small muted" id="t-rank">${sub ? 'Checking today’s ranking…' : ''}</p>
     <div class="tide-stats"><div><b>${st.played}</b><span>Played</span></div><div><b>${st.pct}</b><span>Win %</span></div><div><b>${st.cur}</b><span>Streak</span></div><div><b>${st.best}</b><span>Best</span></div></div>
     <div class="tide-dist">${bars}</div>
-    <p class="small center">Next tide in <b id="t-next">${hms(msToReset())}</b></p>`, {
-    buttons: [{ label: '📤 Share result', value: 'share', cls: 'green' }, { label: '🏆 Today’s ranking', value: 'lb', cls: 'blue' }, { label: '🕹️ Arcade', value: null, cls: 'ghost' }],
+    ${load().tide?.hard?.[key] ? `<p class="small">🔥 Hard tide: <b>${load().tide.hard[key].solved ? `${load().tide.hard[key].moves}/${load().tide.hard[key].limit} 💎` : 'not this time'}</b></p>` : ''}
+    <p class="small center">Next tide in <b id="t-next">${hms(msToReset())}</b> (${localReset()})</p>`, {
+    buttons: [{ label: '📤 Share result', value: 'share', cls: 'green' }, ...(key === dayKey() && r.solved && !load().tide?.hard?.[key] ? [{ label: '🔥 Hard tide – no spare moves', value: 'hard', cls: 'blue' }] : []), { label: '🏆 Today’s ranking', value: 'lb', cls: 'blue' }, { label: '📚 Archive', value: 'arch', cls: 'ghost' }, { label: '🕹️ Arcade', value: null, cls: 'ghost' }],
     onOpen: (sheet) => {
       const t = setInterval(() => { const el = $('#t-next', sheet); if (!el) return clearInterval(t); el.textContent = hms(msToReset()); }, 1000);
       sub?.then((x) => {
@@ -621,7 +658,27 @@ async function showTideResult(key, { shells, sub } = {}) {
     await shareText(tideShareText(key, fake, `${st.cur > 1 ? `🔥 ${st.cur}-day tide streak\n` : ''}${location.origin}${location.pathname}?tide=${tideNumber(key)}&ref=share`));
     showTideResult(key);
   } else if (res === 'lb') showLeaderboard('tideDaily');
+  else if (res === 'hard') playTide({ hard: true });
+  else if (res === 'arch') showTideArchive();
   else if (currentScreen() !== 'hub') showHub();
+}
+
+/** The last two weeks of tides: replay any of them as practice. */
+async function showTideArchive() {
+  const today = tideNumber(dayKey());
+  const days = tideDays(), arch = load().tide?.archive || {};
+  const rows = [];
+  for (let n = today - 1; n >= Math.max(1, today - 14); n--) {
+    const k = tideKey(n), mine = days[k], a = arch[k];
+    const st = mine ? (mine.solved ? `✅ ${mine.moves.length}/${mine.limit}` : '🌫️ missed') : a ? (a.solved ? `📚 ${a.moves}/${a.limit}` : '📚 tried') : '–';
+    rows.push(`<button class="btn ghost wide" data-n="${n}" style="justify-content:space-between;display:flex"><span>🌊 Tide #${n}</span><span class="small">${st}</span></button>`);
+  }
+  const r = await modal(`<h2>📚 Tide archive</h2><p class="small muted">Play any of the last two weeks for practice – it doesn't change your streak or ranks.</p>
+    <div class="col" style="gap:6px">${rows.join('') || '<p class="muted">The archive fills up as the days go by.</p>'}</div>`, {
+    buttons: [{ label: 'Close', value: null, cls: 'ghost' }],
+    onOpen: (sheet) => { for (const b of $$('[data-n]', sheet)) b.onclick = () => closeModal(Number(b.dataset.n)); },
+  });
+  if (Number.isInteger(r)) playTide({ key: tideKey(r) });
 }
 
 // ------------------------------------------------------------------ Tide Pool home
