@@ -47,14 +47,24 @@ export default class PufferView {
       if (e?.type === 'keydown') {
         if (document.querySelector('.modal.open') || ![' ', 'ArrowUp', 'w'].includes(e.key)) return;
         e.preventDefault();
+        if (e.repeat) return;
       }
       if (this.sim.over) return;
+      this.holding = { tick: this.sim.tick };
       this.sim.flap();
       this.puff = 1;
       sfx.swap();
       haptic(8);
     };
     const down = (e) => { e.preventDefault(); flap(e); };
+    // let go: back to normal size
+    const up = (e) => {
+      if (e?.type === 'keyup' && ![' ', 'ArrowUp', 'w'].includes(e.key)) return;
+      this.holding = null;
+      if (this.sim.deflate()) sfx.tap();
+    };
+    window.addEventListener('pointerup', up);
+    window.addEventListener('keyup', up);
     const resize = () => this.resize();
     this.canvas.addEventListener('pointerdown', down);
     window.addEventListener('keydown', flap);
@@ -62,6 +72,8 @@ export default class PufferView {
     this.unbind = () => {
       this.canvas.removeEventListener('pointerdown', down);
       window.removeEventListener('keydown', flap);
+      window.removeEventListener('pointerup', up);
+      window.removeEventListener('keyup', up);
       window.removeEventListener('resize', resize);
     };
   }
@@ -76,6 +88,8 @@ export default class PufferView {
       const before = this.sim.score;
       if (this.ghost === undefined) this.ghost = this.loadGhost();
       if (!this.sim.over) this.stepGhost();
+      // held for 0.2 s: puff up
+      if (this.holding && !this.sim.inflated && this.sim.tick - this.holding.tick >= 12 && this.sim.inflate()) { sfx.special(); haptic(10); }
       this.sim.step();
       for (const e of this.sim.events) {
         if (e === 'pass') sfx.coin();
@@ -102,18 +116,18 @@ export default class PufferView {
   loadGhost() {
     try {
       const g = JSON.parse(localStorage.getItem(this.ghostKey()) || 'null');
-      if (!g || !Array.isArray(g.flaps)) return null;
+      if (!g || !Array.isArray(g.acts)) return null;
       const sim = new this.sim.constructor(this.sim.seed);
-      return { sim, flaps: g.flaps, i: 0, score: g.score };
+      return { sim, acts: g.acts, i: 0, score: g.score };
     } catch { return null; }
   }
   saveGhost() {
     try {
       const old = JSON.parse(localStorage.getItem(this.ghostKey()) || 'null');
       if (old && old.score >= this.sim.score) return;
-      const flaps = this.sim.log.filter((a) => a[0] === 'f').map((a) => a[1]);
-      if (flaps.length > 20000) return;
-      localStorage.setItem(this.ghostKey(), JSON.stringify({ score: this.sim.score, flaps }));
+      const acts = this.sim.log.filter((a) => a[0] !== 'q');
+      if (acts.length > 20000) return;
+      localStorage.setItem(this.ghostKey(), JSON.stringify({ score: this.sim.score, acts }));
       // keep only a few ghosts around
       const keys = Object.keys(localStorage).filter((k) => k.startsWith('tidepop-puffer-ghost:'));
       if (keys.length > 8) for (const k of keys.slice(0, keys.length - 8)) if (k !== this.ghostKey()) localStorage.removeItem(k);
@@ -123,7 +137,10 @@ export default class PufferView {
     const g = this.ghost;
     if (!g || g.sim.over) return;
     if (!g.sim.started) { if (this.sim.started) { g.sim.flap(); g.i = 1; } return; }
-    while (g.i < g.flaps.length && g.flaps[g.i] <= g.sim.tick) { g.sim.flap(); g.i++; }
+    while (g.i < g.acts.length && g.acts[g.i][1] <= g.sim.tick) {
+      const [a] = g.acts[g.i++];
+      if (a === 'f') g.sim.flap(); else if (a === 'i') g.sim.inflate(); else if (a === 'u') g.sim.deflate();
+    }
     g.sim.step();
   }
 
@@ -185,13 +202,13 @@ export default class PufferView {
     // ghost of your best run on this seed
     if (this.ghost && !this.ghost.sim.over && this.sim.started) {
       ctx.globalAlpha = 0.3;
-      this.fish(PX, this.ghost.sim.y, R, Math.max(-0.5, Math.min(1.1, this.ghost.sim.vy * 0.18)), false);
+      this.fish(PX, this.ghost.sim.y, this.ghost.sim.r, Math.max(-0.5, Math.min(1.1, this.ghost.sim.vy * 0.18)), false);
       ctx.globalAlpha = 1;
     }
     // puffer
     this.puff = Math.max(0, this.puff - 0.06);
     const rot = Math.max(-0.5, Math.min(1.1, s.vy * 0.18));
-    this.fish(PX, s.y, R * (1 + this.puff * 0.25), rot, s.over);
+    this.fish(PX, s.y, s.r * (1 + this.puff * 0.25), rot, s.over);
     // score
     ctx.textAlign = 'center';
     ctx.textBaseline = 'middle';
@@ -281,4 +298,5 @@ export function hud(sim) {
 export const HOW = `<div class="tip">🐡 <b>Tap</b> (or press Space) to make the puffer swim up. Let go to sink.</div>
 <div class="tip">🪸 Slip through the gaps in the coral: <b>+10</b> each. Grab glowing <b>pearls</b> for <b>+5</b>.</div>
 <div class="tip">⚡ The current speeds up and the gaps get tighter the further you go. Earn 🥉 at 10, 🥈 at 25 and 🥇 at 50 corals!</div>
-<div class="tip">🌊 After 20 corals some gaps <b>sway</b>; after 40, golden <b>squeeze</b> gaps are worth double. A see-through puffer is your <b>ghost</b> – your best run on the same course (daily challenge).</div>`;
+<div class="tip">🎈 <b>Hold</b> to puff up: you sink slowly and float through tricky stretches – but you're a bigger target. Let go to shrink.</div>
+<div class="tip">🌊 After 20 corals some gaps <b>sway</b>; after 40, golden <b>squeeze</b> gaps are worth double. A see-through puffer is your <b>ghost</b> – your best run on the same course – the endless course changes every week, so you can race yourself all week.</div>`;

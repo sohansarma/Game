@@ -8,7 +8,9 @@
 // Ore goes into your cargo bag, which holds only so much: ore you dig with a
 // full bag is left behind. Cargo is banked (and becomes spendable gold) at
 // each shop ledge or back at the surface. A sonar ping from the shop shows
-// ores through the dark for 40 turns.
+// ores through the dark for 40 turns. Push your luck: run out of energy
+// and half the unbanked bag is lost; lava burns a quarter of it. Cashing
+// out (climbing out) keeps the whole bag.
 // Score = gold earned (banked + still in the bag; spending doesn't reduce
 // it) + 10 x deepest row.
 
@@ -151,6 +153,8 @@ class MinerSim {
     if (info.hurt) {
       this.energy = Math.max(0, this.energy - info.hurt);
       this.events.push({ kind: 'hurt', x, y, amount: info.hurt });
+      const burnt = Math.floor(this.cargo / 4);
+      if (burnt) { this.cargo -= burnt; this.events.push({ kind: 'burnt', x, y, amount: burnt }); }
     }
     if (t === T.TNT) this.blast(x, y, 1, 0.5);
     if (t === T.CHEST) {
@@ -245,6 +249,10 @@ class MinerSim {
     }
     if (!this.canMove()) {
       this.over = true;
+      // stranded: half of what you were still carrying is lost
+      const lost = Math.ceil(this.cargo / 2);
+      if (lost) { this.cargo -= lost; this.events.push({ kind: 'lost', amount: lost }); }
+      this.overReason = lost ? `Out of energy – dropped ${lost} gold from your bag` : 'Out of energy';
       this.events.push({ kind: 'over' });
     }
   }
@@ -276,6 +284,7 @@ class MinerSim {
     if (this.over) return;
     this.log.push(['q']);
     this.over = true;
+    this.overReason = this.cargo ? `Cashed out with ${this.cargo} gold in the bag` : 'Cashed out';
   }
 }
 

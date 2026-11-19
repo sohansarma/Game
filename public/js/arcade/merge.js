@@ -4,6 +4,9 @@
 // bonus when one swipe makes several merges (+25% per extra merge).
 // The next creature is shown in advance. Making a new top tile of 128 or
 // more earns an undo (hold up to 2); ['u'] rewinds one move.
+// Creature powers, when they are made by a merge: 🐙 (128) squirts ink and
+// clears the smallest tile next to it; 🦈 (256) eats every 🐚 2 next to it
+// (+2 each).
 
 import { Rng } from '../rng.js';
 
@@ -89,6 +92,18 @@ class MergeSim {
     if (!moved) { this.score = snap.score; this.best = snap.best; return { ok: false }; }
     this.log.push(['m', dir]);
     this.snap = snap;
+    // creature powers fire where they were made
+    const powers = [];
+    const nbrs = (r, c) => [[r - 1, c], [r + 1, c], [r, c - 1], [r, c + 1]].filter(([a, b]) => a >= 0 && b >= 0 && a < N && b < N);
+    for (const m of merges) {
+      if (m.v === 128) {
+        let best = null;
+        for (const [a, b] of nbrs(m.r, m.c)) { const t = next[a][b]; if (t && t.v < 128 && (!best || t.v < next[best[0]][best[1]].v)) best = [a, b]; }
+        if (best) { powers.push({ kind: 'ink', r: best[0], c: best[1], id: next[best[0]][best[1]].id, from: [m.r, m.c] }); next[best[0]][best[1]] = null; }
+      } else if (m.v === 256) {
+        for (const [a, b] of nbrs(m.r, m.c)) if (next[a][b]?.v === 2) { powers.push({ kind: 'eat', r: a, c: b, id: next[a][b].id, from: [m.r, m.c] }); next[a][b] = null; this.score += 2; }
+      }
+    }
     // several merges in one swipe: combo bonus
     let bonus = 0;
     if (merges.length >= 2) bonus = Math.round(merges.reduce((a, m) => a + m.v, 0) * 0.25 * (merges.length - 1));
@@ -104,7 +119,7 @@ class MergeSim {
       this.over = true;
       this.overReason = this.best >= 2048 ? 'Ocean master! 👑' : 'No more moves!';
     }
-    return { ok: true, moves, merges, spawned, bonus, earned };
+    return { ok: true, moves, merges, spawned, bonus, earned, powers };
   }
 
   /** Rewind the last move (costs one earned undo). */

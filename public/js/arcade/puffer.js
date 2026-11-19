@@ -5,6 +5,8 @@
 // World is 100 x 160 units. Score = 10 per coral passed + 5 per pearl.
 // After 20 corals some gaps start to sway, after 40 some are narrow
 // "squeeze" gaps worth double.
+// Hold to puff up (['i', tick] … ['u', tick]): a bigger puffer that sinks
+// slowly – floaty control, but a fatter target for the coral.
 
 import { Rng } from '../rng.js';
 
@@ -78,12 +80,29 @@ class PufferSim {
     this.overReason = 'Cashed out';
   }
 
+  get r() {
+    return this.inflated ? 6.5 : R;
+  }
+  inflate() {
+    if (this.over || !this.started || this.inflated) return false;
+    this.log.push(['i', this.tick]);
+    this.inflated = true;
+    return true;
+  }
+  deflate() {
+    if (this.over || !this.inflated) return false;
+    this.log.push(['u', this.tick]);
+    this.inflated = false;
+    return true;
+  }
+
   step() {
     this.events = [];
+    const R = this.r;
     if (this.over || !this.started) return;
     this.tick++;
     if (this.pending) { this.vy = FLAP_V; this.pending = false; this.events.push('flap'); }
-    this.vy = Math.min(MAX_FALL, this.vy + GRAVITY);
+    this.vy = this.inflated ? Math.min(1.5, this.vy + 0.05) : Math.min(MAX_FALL, this.vy + GRAVITY);
     this.y += this.vy;
     this.speed = Math.min(1.9, 1.0 + this.tick * 0.00025);
     for (const p of this.pipes) {
@@ -112,6 +131,7 @@ class PufferSim {
   }
 
   hits(p) {
+    const R = this.r;
     if (PX + R < p.x || PX - R > p.x + PIPE_W) return false;
     const top = p.gy - p.gap / 2, bottom = p.gy + p.gap / 2;
     // closest point on the pipe rectangles to the circle centre
@@ -147,6 +167,8 @@ function replay(seed, log) {
     while (sim.tick < a[1] && !sim.over && sim.started) sim.step();
     if (sim.over || sim.tick !== a[1]) return { ok: false, reason: 'input out of sync', sim };
     if (a[0] === 'f') sim.flap();
+    else if (a[0] === 'i') { if (!sim.inflate()) return { ok: false, reason: 'bad inflate', sim }; }
+    else if (a[0] === 'u') { if (!sim.deflate()) return { ok: false, reason: 'bad deflate', sim }; }
     else if (a[0] === 'q') sim.quit();
     else return { ok: false, reason: 'unknown action', sim };
   }

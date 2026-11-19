@@ -105,6 +105,7 @@ export const BOTS = {
   puffer(sim, rng) {
     const next = sim.pipes.find((p) => p.x + 16 > 25) || sim.pipes[0];
     if (!sim.started || (sim.y > next.gy + 5 && sim.vy > 0 && rng.next() < 0.97)) sim.flap();
+    if (sim.inflated ? rng.next() < 0.15 : sim.started && sim.passed > 2 && rng.next() < 0.003) { if (sim.inflated) sim.deflate(); else sim.inflate(); }
     sim.step();
     if (sim.tick > 20000) sim.quit();
   },

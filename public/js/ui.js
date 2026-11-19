@@ -55,8 +55,10 @@ export function modal(html, { buttons = [], dismissable = true, onOpen, row = fa
   lastFocus = document.activeElement;
   return new Promise((resolve) => {
     modalResolve = resolve;
+    const openedAt = performance.now();
     for (const btn of $$('.actions > [data-i]', sheet)) {
       btn.addEventListener('click', () => {
+        if (performance.now() - openedAt < 250) return; // a key mashed as the modal opened
         sfx.tap();
         closeModal(buttons[Number(btn.dataset.i)].value);
       });

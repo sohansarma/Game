@@ -155,6 +155,10 @@ export default class MinerView {
       } else if (e.kind === 'shop') {
         sfx.win();
         this.popup('⛺ Mine shop!', 2, this.sim.y - 1, '#ffd23f', true);
+      } else if (e.kind === 'burnt') {
+        this.popup(`🔥 −${e.amount} gold`, e.x, e.y - 1, '#ff6a00');
+      } else if (e.kind === 'lost') {
+        this.popup(`🎒 Dropped ${e.amount} gold!`, 2, this.sim.y - 2, '#ff8a80', true);
       } else if (e.kind === 'full') {
         this.popup(`🎒 Bag full! −${e.amount}`, e.x, e.y, '#ff8a80');
         sfx.bad();
@@ -488,6 +492,7 @@ export function hud(sim) {
 
 export const HOW = `<div class="tip">⛏️ <b>Swipe or tap</b> left, right or down to dig. Every block costs <b>⚡ energy</b> – harder rock costs more.</div>
 <div class="tip">💎 Ores give gold (deeper = richer: copper → silver → gold → emerald → diamond). <b>Energy crystals</b> refill you, <b>TNT</b> blasts a 3×3 area, <b>chests</b> hold surprises and <b>lava</b> burns 20 energy.</div>
+<div class="tip">⚠️ <b>Push your luck:</b> run out of energy and you drop <b>half</b> of the gold still in your bag; lava burns a quarter. 🏁 Cash out any time to keep it all.</div>
 <div class="tip">🎒 Ore goes in your <b>bag</b> (holds 300 to start). With a full bag, ore you dig is lost – so push on to the next shop to <b>bank</b> it. Banked gold is what you spend.</div>
 <div class="tip">⛺ Every 25 m there's a <b>mine shop</b>: energy, a better pickaxe (cheaper digging, brighter lamp), bombs, a bigger bag, or a 📡 <b>sonar ping</b> that shows ores through the dark.</div>
 <div class="tip">🏆 Score = gold earned + 10 per metre of depth. The run ends when you can't dig anymore – or cash out any time.</div>`;

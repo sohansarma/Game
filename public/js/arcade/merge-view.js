@@ -116,6 +116,12 @@ export default class MergeView {
       const s = res.spawned;
       this.tiles.set(s.id, { v: s.v, x: s.c, y: s.r, tx: s.c, ty: s.r, scale: 0, pop: 0, born: performance.now() + 120 });
     }
+    for (const p of res.powers || []) {
+      const t = this.tiles.get(p.id);
+      if (t) t.dying = true, (t.tx = p.from[1]), (t.ty = p.from[0]);
+      this.popups.push({ x: p.c + 0.5, y: p.r + 0.5, text: p.kind === 'ink' ? '🐙 Ink!' : '🦈 Chomp!', t0: performance.now() + 150, color: p.kind === 'ink' ? '#b388ff' : '#7fd4ff', big: true });
+      sfx.special();
+    }
     if (res.bonus) this.popups.push({ x: N / 2, y: N / 2, text: `Combo ×${res.merges.length}! +${res.bonus}`, t0: performance.now() + 120, color: '#ffd23f', big: true });
     if (res.earned) { this.popups.push({ x: N / 2, y: N / 2 + 0.6, text: `New ${tileEmoji(this.sim.best)}! +1 undo`, t0: performance.now() + 200, color: '#7cffb2', big: true }); sfx.win(); }
     this.renderControls();
@@ -222,5 +228,6 @@ export function hud(sim) {
 
 export const HOW = `<div class="tip">🐳 <b>Swipe</b> to slide every tile. Two matching creatures that touch <b>merge</b> into the next one: 🐚 → 🦐 → 🦀 → 🐠 → 🐡 → 🐢 → 🐙 → 🦈 → 🐬 → 🐳 → 👑</div>
 <div class="tip">➕ Every merge adds the new tile's number to your score. Several merges in one swipe score a <b>combo bonus</b>. The <b>Next</b> creature is shown below the board.</div>
+<div class="tip">🐙 Make an <b>octopus</b> (128) and it inks away the smallest creature next to it. 🦈 A <b>shark</b> (256) gobbles every 🐚 next to it.</div>
 <div class="tip">↶ Each new top creature from 🐙 128 up earns an <b>undo</b> (hold up to 2).</div>
 <div class="tip">🏁 The game ends when the board is full and nothing can merge. Reach 🐳 2048 to become <b>Ocean master</b>!</div>`;

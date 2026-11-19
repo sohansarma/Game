@@ -18,6 +18,7 @@ export const DASH_TICKS = 120;
 
 class SerpentSim {
   constructor(seed) {
+    this.seed = seed >>> 0;
     this.rng = new Rng(seed);
     this.tick = 0;
     this.started = false;

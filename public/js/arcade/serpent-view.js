@@ -48,9 +48,40 @@ export default class SerpentView {
     this.oy = Math.floor((rect.height - this.cell * ROWS) / 2);
   }
 
+  ghostKey() {
+    return `tidepop-serpent-ghost:${this.sim.seed}`;
+  }
+  loadGhost() {
+    try {
+      const g = JSON.parse(localStorage.getItem(this.ghostKey()) || 'null');
+      if (!g || !Array.isArray(g.acts)) return null;
+      return { sim: new this.sim.constructor(this.sim.seed), acts: g.acts, i: 0 };
+    } catch { return null; }
+  }
+  saveGhost() {
+    try {
+      const old = JSON.parse(localStorage.getItem(this.ghostKey()) || 'null');
+      if (old && old.score >= this.sim.score) return;
+      const acts = this.sim.log.filter((a) => a[0] !== 'q');
+      if (acts.length > 20000) return;
+      localStorage.setItem(this.ghostKey(), JSON.stringify({ score: this.sim.score, acts }));
+      const keys = Object.keys(localStorage).filter((k) => k.startsWith('tidepop-serpent-ghost:'));
+      if (keys.length > 8) for (const k of keys.slice(0, keys.length - 8)) if (k !== this.ghostKey()) localStorage.removeItem(k);
+    } catch { /* no ghost */ }
+  }
+  stepGhost() {
+    const g = this.ghost;
+    if (!g || g.sim.over || !this.sim.started) return;
+    while (g.i < g.acts.length && g.acts[g.i][1] <= g.sim.tick) {
+      const a = g.acts[g.i++];
+      if (a[0] === 's') g.sim.start(); else if (a[0] === 't') g.sim.turn(a[2]); else if (a[0] === 'b') g.sim.dash();
+    }
+    g.sim.step();
+  }
+
   dash() {
     if (this.sim.dash()) { sfx.special(); haptic(20); this.hooks.onChange?.(this.sim); }
-    else sfx.bad?.();
+    else { sfx.bad?.(); if (this.sim.body.length <= 4) this.note = { text: 'Grow to 5 to dash', t0: performance.now() }; }
   }
 
   turn(d) {
@@ -103,6 +134,8 @@ export default class SerpentView {
     let changed = false;
     while (this.acc >= STEP) {
       this.acc -= STEP;
+      if (this.ghost === undefined) this.ghost = this.loadGhost();
+      if (!this.sim.over) this.stepGhost();
       this.sim.step();
       for (const e of this.sim.events) {
         if (e === 'eat') { sfx.match(Math.min(8, 1 + Math.floor(this.sim.eaten / 5))); this.burstAtHead('#ff8a80'); changed = true; }
@@ -115,6 +148,7 @@ export default class SerpentView {
     if (changed) this.hooks.onChange?.(this.sim);
     if (this.sim.over && !this.overSent) {
       this.overSent = true;
+      this.saveGhost();
       setTimeout(() => this.hooks.onOver?.(this.sim), 500);
     }
     this.draw(now);
@@ -179,6 +213,12 @@ export default class SerpentView {
       ctx.lineWidth = 2.5;
       ctx.beginPath(); ctx.arc(cx, cy, C * 0.45, -Math.PI / 2, -Math.PI / 2 + Math.PI * 2 * left); ctx.stroke();
     }
+    // ghost: your best run on this course, see-through
+    const gs = this.ghost?.sim;
+    if (gs && gs.started && !gs.over && s.started) {
+      ctx.fillStyle = 'rgba(255,255,255,0.22)';
+      for (const [x, y] of gs.body) { ctx.beginPath(); ctx.arc(x * C + C / 2, y * C + C / 2, C * 0.36, 0, Math.PI * 2); ctx.fill(); }
+    }
     // serpent: a smooth tube that glides between cells
     const n = s.body.length;
     const sub = s.over || !s.started || this.reduced ? 1 : Math.min(1, (s.tick - s.lastMove + this.acc / STEP) / Math.max(1, s.moveGap));
@@ -225,6 +265,12 @@ export default class SerpentView {
     }
     ctx.globalAlpha = 1;
     this.particles = this.particles.filter((p) => p.life > 0);
+    if (this.note && performance.now() - this.note.t0 < 1300) {
+      ctx.fillStyle = '#ffd23f';
+      ctx.font = `800 ${C * 0.5}px ui-rounded, system-ui, sans-serif`;
+      ctx.textAlign = 'center';
+      ctx.fillText(this.note.text, (COLS * C) / 2, C * 1.6);
+    }
     if (s.dashing) {
       ctx.fillStyle = '#ffe082';
       ctx.font = `800 ${C * 0.5}px ui-rounded, system-ui, sans-serif`;

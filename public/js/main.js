@@ -2561,7 +2561,9 @@ async function playArcade(id, { daily, seed: forcedSeed, challenge } = {}) {
     colour = await pickLudoColour(daily ? "Today's league – pick your colour" : 'League – pick your colour');
     if (colour === null) return arcadeMenu(id);
   }
-  const runSeed = forcedSeed !== undefined ? forcedSeed : randSeed();
+  // Puffer Dash & Sea Serpent: the endless course stays the same all week, so your ghost has a course to race on
+  const weeklyCourse = !daily && forcedSeed === undefined && (id === 'puffer' || id === 'serpent');
+  const runSeed = forcedSeed !== undefined ? forcedSeed : weeklyCourse ? hashString(`${id}-course-${weekKey()}`) : randSeed();
   const playSeed = forcedSeed !== undefined ? forcedSeed : arcadeSeed(id, daily, key, runSeed);
   const sim = g.create(playSeed);
   if (colour !== null && sim.setColour) sim.setColour(colour);
