@@ -212,8 +212,11 @@ function drawWave(ctx, s, horizontal) {
 
 /** Starfish special: a little orange starfish clinging to the creature. */
 function drawStarBadge(ctx, s) {
-  const cx = s * 0.74, cy = s * 0.26, R = s * 0.22, r = s * 0.09;
+  const cx = s * 0.72, cy = s * 0.28, R = s * 0.27, r = s * 0.11;
   ctx.save();
+  // a dark halo so the wish star reads on every creature colour (even the yellow starfish)
+  ctx.fillStyle = 'rgba(20, 10, 60, 0.55)';
+  ctx.beginPath(); ctx.arc(cx, cy, R * 1.15, 0, Math.PI * 2); ctx.fill();
   ctx.beginPath();
   for (let i = 0; i < 10; i++) {
     const a = -Math.PI / 2 + (i * Math.PI) / 5;
@@ -223,7 +226,7 @@ function drawStarBadge(ctx, s) {
   }
   ctx.closePath();
   const g = ctx.createRadialGradient(cx - R * 0.3, cy - R * 0.3, 1, cx, cy, R);
-  g.addColorStop(0, '#ffe08a'); g.addColorStop(1, '#ff7a3d');
+  g.addColorStop(0, '#ffffff'); g.addColorStop(0.45, '#ff8ad8'); g.addColorStop(1, '#b03ad8');
   ctx.fillStyle = g;
   ctx.fill();
   ctx.lineWidth = s * 0.025;

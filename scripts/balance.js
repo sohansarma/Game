@@ -18,7 +18,8 @@ export function targetWinRate(n) {
   const inWorld = (n - 1) % 10;
   let w = 0.97 - 0.0045 * n - 0.012 * inWorld;
   if (n % 10 === 0) w -= 0.16; // boss levels are the real tests
-  return Math.max(0.5, Math.min(0.98, w));
+  if (n <= 3) w = 0.995; // the tutorial should be close to unlosable
+  return Math.max(0.5, Math.min(n <= 3 ? 0.995 : 0.98, w));
 }
 
 const quantile = (arr, q) => {

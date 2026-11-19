@@ -146,6 +146,17 @@ export function levelRecipe(n) {
       recipe.crates = cratePattern(crateKinds[(n * 3) % crateKinds.length], size, hp).filter(
         (p) => free(p) && !jellySet.has(p[0] * 64 + p[1]),
       );
+      // every crate row needs a real gap to the sky: if the gaps land on holes, open one crate
+      const holeAt = new Set(recipe.holes.map(([r, c]) => r * 64 + c));
+      const rowsWithCrates = [...new Set(recipe.crates.map((p) => p[0]))];
+      for (const r of rowsWithCrates) {
+        const inRow = recipe.crates.filter((p) => p[0] === r);
+        const openCells = Array.from({ length: size }, (_, c) => c).filter((c) => !holeAt.has(r * 64 + c) && !inRow.some((p) => p[1] === c));
+        if (inRow.length >= size - 2 && !openCells.length) {
+          const mid = inRow.slice().sort((a, b) => Math.abs(a[1] - size / 2) - Math.abs(b[1] - size / 2))[0];
+          recipe.crates = recipe.crates.filter((p) => p !== mid);
+        }
+      }
       recipe.goals.push({ type: 'crate' });
     } else if (k === 'collect') {
       const howMany = n <= 5 ? 1 : n < 30 ? 2 : 3;

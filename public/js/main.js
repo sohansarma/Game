@@ -1630,7 +1630,10 @@ async function submitRun(entry) {
   try {
     return await api.submit({ ...entry, v: ENGINE_VERSION });
   } catch (e) {
-    return { error: e.status === 409 ? 'A game update is available – reload to submit scores.' : `Couldn't submit: ${e.message}` };
+    const error = e.status === 409 ? 'A game update is available – reload to submit scores.' : `Couldn't submit: ${e.message}`;
+    // a silent failure on a level win would lose the star sync – say so once
+    if (entry.board === 'stars' && !submitRun.warned) { submitRun.warned = true; toast(`⚠️ ${error}`); }
+    return { error };
   }
 }
 
@@ -1656,7 +1659,7 @@ function saveLevelWin(run) {
     if (prevStars === 0) d.stats.levelsWon++;
     if (gift) d.boosters[gift]++;
   });
-  submitRun({ board: 'stars', level: n, seed: run.cfg.seed, log: game.log });
+  submitRun({ board: 'stars', level: n, seed: run.cfg.seed, log: game.log }).then((r) => { if (r?.error && !submitRun.warned) { submitRun.warned = true; toast(`⚠️ ${r.error}`); } });
   run.win = { stars, prev, shells, gift, streak, streakGift };
   return run.win;
 }

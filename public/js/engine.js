@@ -458,8 +458,11 @@ export class Game {
     if (bestScore > 0) return best;
     const counts = new Array(this.colors).fill(0);
     for (let r = 0; r < this.rows; r++) for (let c = 0; c < this.cols; c++) { const g = this.gems[r][c]; if (g && g.color >= 0) counts[g.color]++; }
-    let col = 0;
-    for (let i = 1; i < counts.length; i++) if (counts[i] > counts[col]) col = i;
+    // collect levels: swim to a creature you still need
+    const wanted = new Set(this.objectiveProgress().filter((o) => o.type === 'collect' && !o.done).map((o) => o.color));
+    let col = -1;
+    for (let i = 0; i < counts.length; i++) if (counts[i] && (wanted.size ? wanted.has(i) : true) && (col < 0 || counts[i] > counts[col])) col = i;
+    if (col < 0) { col = 0; for (let i = 1; i < counts.length; i++) if (counts[i] > counts[col]) col = i; }
     const opts = [];
     for (let r = 0; r < this.rows; r++) for (let c = 0; c < this.cols; c++) { const g = this.gems[r][c]; if (g && g.color === col && !avoid.has(key(r, c))) opts.push([r, c]); }
     return opts.length ? opts[this.rng.int(opts.length)] : null;
@@ -770,8 +773,9 @@ export class Game {
       }
       if (!slid) break;
     }
-    // a pocket nothing can reach still gets a gem (boards never have holes in play)
-    for (let r = 0; r < this.rows; r++) for (let c = 0; c < this.cols; c++) {
+    // a pocket nothing can reach stays empty until the crate above breaks (true trapping);
+    // older configs (cfg.fillPockets) still refill it in place
+    if (this.cfg.fillPockets) for (let r = 0; r < this.rows; r++) for (let c = 0; c < this.cols; c++) {
       if (this.isOpen(r, c) && !this.gems[r][c]) {
         const g = this.newGem(this.rng.int(this.colors));
         this.gems[r][c] = g;
