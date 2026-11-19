@@ -259,7 +259,8 @@ export function createApi(store, { now = () => new Date(), origin = process.env.
             if (!sp || !Number.isInteger(seed) || seed < 0 || seed > 0xffffffff || body.log.length > 20000) throw fail(400, 'bad run');
             const r = ugcReplay(sp, seed, body.log);
             if (!r.ok || !r.sim.over) throw fail(422, 'replay failed');
-            (rec.verified ||= {})[body.playerId] = true;
+            // a real play: at least 10 seconds (an empty throwaway run doesn't earn a vote)
+            if ((r.sim.tick || 0) >= 600) (rec.verified ||= {})[body.playerId] = true;
           }
           (rec.plays ||= {})[body.playerId] = Math.min(99999, (rec.plays[body.playerId] || 0) + 1);
           (rec.playedAt ||= {})[body.playerId] = t;
@@ -432,7 +433,7 @@ export function createApi(store, { now = () => new Date(), origin = process.env.
       const r = ugcReplay(spec, seed, log);
       if (!r.ok) throw fail(422, 'replay failed: ' + r.reason);
       if (typeof body.score === 'number' && body.score !== r.sim.score) throw fail(422, 'score mismatch');
-      (rec.verified ||= {})[body.playerId] = true;
+      if ((r.sim.tick || 0) >= 600) (rec.verified ||= {})[body.playerId] = true;
       return { ok: true, ...record(boardId('ugc', key), body.playerId, r.sim.score), verified: r.sim.score };
     }
     if (!acceptableKeys(board, now()).includes(key)) throw fail(422, 'this board is closed');

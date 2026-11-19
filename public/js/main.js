@@ -3265,7 +3265,9 @@ async function endUgc(run) {
     d.shells += shells;
   });
   noteGameEnd('community', score > best);
-  const playedP = api.ugc.played(g.id, { seed: run.seed, log: sim.log, version: g.version }).catch(() => {});
+  const playedRun = { seed: run.seed, log: sim.log, version: g.version };
+  // record the play (one retry – a busy network shouldn't cost you your rating)
+  const playedP = api.ugc.played(g.id, playedRun).catch(() => new Promise((r) => setTimeout(r, 1500)).then(() => api.ugc.played(g.id, playedRun))).catch(() => toast("Couldn't record your play – ratings need a recorded play"));
   score > best ? sfx.win() : sfx.lose();
   announceAchievements();
   const p = modal(`<h2>${g.hero} ${esc(sim.overReason || 'Game over')}</h2><div class="big-score">${fmt(score)}</div>
