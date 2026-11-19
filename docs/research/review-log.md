@@ -74,3 +74,37 @@ Round 2 average: **6.6/10** (Round 1: 5). Nobody said YES yet – every reviewer
 | 39 | Reef Blocks: **Rescue mode** – 20 levels freeing trapped fish within a piece budget, the **tide** pushes rows up from level 5, seeds picked for a 95%→45% curve; **Daily ghost race** vs today's #1 (server keeps the log); endless gets tougher (fewer small pieces after 200, the kind dealer fades, combo cap x8); undo offered before game over; combo meter visible; bigger tray pieces; ENGINE_VERSION 6 | block puzzle | ✅ |
 | 40 | Shell Swap: **Tide levels** (every third level from 12: a wave sweeps the bottom row every 5 moves and fires specials – HUD counter + level card); crate walls leave a feed gap; 5 colours from level 4; collect goals grow until a level needs real moves; tougher crates/algae from 12; **Wish Star** taught (level 5 + How to play); **Daily Dive ghost race**; mid-cascade swipes grab the gem drawn under your finger; callouts stack; taps/keys work mid-cascade; "So close" only when close; levels re-balanced | match-3, critic | ✅ (levels 6 & 12 still quick with the hint bot) |
 | 41 | Ludo: **house rules and Team Up online** (you + friend vs 2 bots); **reactions reach the other phone**; 🤝 partner badge; a **finished teammate's turns go to their partner**; Team Up start button explains it fills the table | ludo | ✅ (3–4 humans online and server dice for online bots: open) |
+
+## Round 3 – re-review
+| Reviewer | Verdict | Score (R1 → R2 → R3) | Remaining (their words, short) |
+|---|---|---|---|
+| Growth & monetisation | **YES** | 5 → 7 → 8 | one canonical production origin; persistent disk; privacy contact details; CMP/ads.txt (business) |
+| UX & accessibility | **YES** | 5 → 7 → 8 | reduce-motion re-read at start; timer pill at 200%; name dialog heading |
+| Daily puzzle (Tide) | **YES** | 5 → 7 → 8 | reload restarts a ranked tide; late links land in practice; hard share weaker; hard HUD par |
+| Arcade B | **YES** | 5 → 7 → 8 | Breaker tap serve ≠ aim line; creep has no teeth; stale "tap to launch" text |
+| Reef Blocks | **YES** | 5 → 6.5 → 8 | Rescue undo overwrote Endless run; toasts over the board; empty ghost box |
+| Arcade A | **YES** | 5 → 6.5 → 7.5 | ghosts only your own; serpent ghost faint; merge popups pile; 250 ms guard short |
+| Creator Studio | **YES** | 5 → 6 → 8 | throwaway reports; no admin UI in server mode; studio list lacks "held"; played() failure silent |
+| Live-ops | NOT YET | 5 → 7 → 8 | shells pile up after ~day 32 (needs a repeatable sink); snorkel unearnable; Open Sea has no decor |
+| Speedcuber | NOT YET | 5 → 6.5 → 7.5 | daily scramble won by its inverse (and QTM); one try not enforced; no wide/x/z keys; delete crash |
+| Chess | NOT YET | 5 → 6 → 7.5 | review engine too shallow (Opera Game); no board in review; daily puzzle a mate-in-one |
+| Ludo | NOT YET | 5 → 7 → 8 | no 3–4 humans online / partner choice; guest not told the rules; online bot dice seeded; background move flush |
+| Critic | NOT YET | 5 → 6.5 → 7 | **Shell Swap render loop could freeze**; difficulty flat; 11 s celebration; toasts over result card |
+| Match-3 | NOT YET | 5 → 6 → 7 | Wish Star didn't seek goals; tutorial too hard / tide skippable; in-place spawns under walls; server out of date; Wish Star hard to see |
+
+Round 3: **7 of 13 YES**, average **7.8/10**.
+
+### Round 3 work items
+| # | Item | From | Status |
+|---|---|---|---|
+| 42 | Shell Swap **render loop can't freeze** (effects clamped, loop guarded and keeps running); celebration at triple speed; **toasts queue** (max two) | critic | ✅ |
+| 43 | Shell Swap: **pockets under crates stay empty** until the crate breaks (real trapping); hole-blocked crate rows get a gap; **Wish Star swims to goal creatures**; magenta star with a dark halo; tutorial ≈ unlosable; boss levels tuned to the hint player, tide levels from 9, moves floor 7; a failed star submit is shown; ENGINE_VERSION 8 | match-3, critic | ✅ |
+| 44 | Live-ops: **repeatable shell sinks** (polish cove pieces ★★★ → up to 8-star comfort; sticker packs for 300 🐚); chest shells trimmed; First Tide keeps the old pace (snorkel earnable); Open Sea reuses seasonal decor/stickers; spare seasonal stickers pay by rarity | live-ops | ✅ |
+| 45 | Cube: Daily Scramble **hides the move list**, counts **face turns** (R2 = 1), **reversed scramble scores 0**, counts as used at start; csTimer wide moves (r/l), **x/y/z rotations**; moves list shows what you pressed; inspection pauses; Stop freezes the clock; delete-only-solve crash fixed; ENGINE_VERSION 7 | speedcuber | ✅ |
+| 46 | Chess: review = **one depth-3 search per position + a deeper look at the played move** (Opera Game: Morphy's sacrifices pass, 15…Nxd7 is the ??); **board in the review**; returns to the result (rematch kept); **daily puzzle always a combination** | chess | ✅ |
+| 47 | Ludo: **2–4 people online on one code** (partner opposite = first to join), rules & Team Up in the create sheet, **guests shown the house rules**, reactions from every seat, move flushed when the phone goes to the background | ludo | ✅ (online bot dice still seeded) |
+| 48 | Tide: an unfinished ranked/hard tide **resumes** (a reload isn't a second try); practice offers today's tide; hard share uses the full share text; hard HUD hides par | daily puzzle | ✅ |
+| 49 | Reef Blocks: Rescue undo no longer overwrites Endless; Rescue callouts on the board; empty ghost box hidden | blocks | ✅ |
+| 50 | Breaker tap serves along the drawn line, paddle stays while aiming, coral creeps every 20 s, serve text; Merge popups capped; modal key guard 450 ms; zero runs never become ghosts | arcade A/B | ✅ |
+| 51 | Accessibility: reduce-motion re-read every start; welcome dialog heading; timer wraps at 200% | UX | ✅ |
+| 52 | Creator: a vote needs a ≥10 s play; play report retries; privacy page gets a controller & rights section (fill-ins for operator/contact/hosting) | creator, growth | ✅ |
