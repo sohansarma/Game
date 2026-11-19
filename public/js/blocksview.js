@@ -41,10 +41,10 @@ export class BlocksView {
     // board takes ~ 68% of height, tray the rest
     this.cell = Math.floor(Math.min(W * 0.94 / SIZE, (H * 0.7) / SIZE));
     this.bx = Math.floor((W - this.cell * SIZE) / 2);
-    this.by = Math.floor(H * 0.02);
+    this.by = Math.floor(Math.max(H * 0.02, 28)); // room above the board for the combo meter
     this.trayY = this.by + this.cell * SIZE + Math.max(12, H * 0.03);
     this.trayH = H - this.trayY - 6;
-    this.trayCell = Math.min(this.cell * 0.55, this.trayH / 5.2);
+    this.trayCell = Math.min(this.cell * 0.66, this.trayH / 5.2);
     this.W = W;
   }
 
@@ -303,6 +303,17 @@ export class BlocksView {
       }
     }
 
+    // rescue: trapped fish peek out of their coral
+    if (g.fish?.size) {
+      ctx.font = `${Math.round(C * 0.62)}px system-ui, "Apple Color Emoji", "Segoe UI Emoji", sans-serif`;
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+      for (const f of g.fish) {
+        const [fr, fc] = f.split(',').map(Number);
+        const bob = this.reduced ? 0 : Math.sin(now / 300 + fr + fc) * C * 0.04;
+        ctx.fillText('🐠', this.bx + fc * C + C / 2, this.by + fr * C + C / 2 + bob);
+      }
+    }
     // clear flashes
     this.flashes = this.flashes.filter((f) => now - f.t0 < 350);
     for (const f of this.flashes) {

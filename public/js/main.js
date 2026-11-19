@@ -1,7 +1,7 @@
 // Tidepop – app controller: screens, flows, progression, leaderboards.
 
 import { Game, replay, SPECIAL } from './engine.js';
-import { BlockGame, replayBlocks } from './blocks.js';
+import { BlockGame, replayBlocks, RESCUE_LEVELS, RESCUE_SEEDS, rescueLevel } from './blocks.js';
 import { getLevel, LEVEL_COUNT, MAX_LEVEL, worldOf, difficultyOf } from './levels.js';
 import { dailyConfig, deepConfig, dayKey, weekKey, blocksSeed, ENGINE_VERSION, BOARDS } from './modes.js';
 import { ARCADE, ARCADE_BY_ID, arcadeSeed, tierOf, challengeHash, parseChallenge } from './arcade/index.js';
@@ -3247,13 +3247,30 @@ async function blocksMenu() {
       ...(s.blocksRun ? [{ label: '▶ Continue run', value: 'continue', cls: 'green' }] : []),
       { label: s.blocksRun ? 'New endless run' : '▶ Endless', value: 'endless', cls: s.blocksRun ? 'blue' : 'green' },
       { label: '📅 Daily Reef (same pieces for all)', value: 'daily', cls: 'blue' },
+      { label: `🐠 Rescue – free the trapped fish (${Object.keys(s.blocksRescue || {}).length}/${RESCUE_LEVELS})`, value: 'rescue', cls: 'blue' },
       { label: '🏆 Leaderboard', value: 'lb', cls: 'ghost' },
     ],
   });
   if (r === 'continue') playBlocks({ resume: true });
   else if (r === 'endless') { update((d) => { d.blocksRun = null; }); playBlocks({}); }
   else if (r === 'daily') playBlocks({ daily: true });
+  else if (r === 'rescue') rescueMap();
   else if (r === 'lb') showLeaderboard('blocks');
+}
+
+async function rescueMap() {
+  const done = load().blocksRescue || {};
+  const next = Math.min(RESCUE_LEVELS, Object.keys(done).length + 1);
+  const r = await modal(`<h2>🐠 Reef Rescue</h2><p class="small">Fish are stuck in the coral. Finish the row or column a fish is in to set it free – before you run out of pieces. From level 5 the <b>tide</b> pushes a new row up every few pieces: don't let a fish get swept off the top!</p>
+    <div class="rescue-grid">${Array.from({ length: RESCUE_LEVELS }, (_, i) => {
+      const n = i + 1, st = done[n] || 0, open = n <= next;
+      return `<button class="rescue-lv ${st ? 'done' : ''}" data-n="${n}" ${open ? '' : 'disabled'} aria-label="Level ${n}${st ? `, ${st} stars` : open ? '' : ', locked'}"><b>${n}</b><small>${st ? '★'.repeat(st) : open ? '🐠'.repeat(Math.min(3, rescueLevel(n).fish)) : '🔒'}</small></button>`;
+    }).join('')}</div>`, {
+    buttons: [{ label: `▶ Level ${next}`, value: next, cls: 'green' }, { label: 'Back', value: null, cls: 'ghost' }],
+    onOpen: (sheet) => { for (const b of $$('[data-n]', sheet)) b.onclick = () => closeModal(Number(b.dataset.n)); },
+  });
+  if (Number.isInteger(r)) playBlocks({ rescue: r });
+  else blocksMenu();
 }
 
 function playBlocks(opts) {
@@ -3267,38 +3284,69 @@ function playBlocks(opts) {
     seed = s.blocksRun.seed;
     const r = replayBlocks(seed, s.blocksRun.log);
     game = r.ok ? r.game : new BlockGame({ seed });
+  } else if (opts.rescue) {
+    seed = RESCUE_SEEDS[opts.rescue - 1];
+    game = new BlockGame({ seed, rescue: opts.rescue });
   } else {
     seed = opts.daily ? blocksSeed('blocksDaily', key) : randSeed();
     game = new BlockGame({ seed });
   }
-  const run = { kind: 'blocks', daily: !!opts.daily, seed, key, game };
+  const run = { kind: 'blocks', daily: !!opts.daily, rescue: opts.rescue || 0, seed, key, game };
+  // Daily: race today's #1 run as a ghost
+  if (run.daily) api.ghost('blocksDaily', key).then((gh) => {
+    if (!gh || gh.me || currentRun !== run) return;
+    const r = replayBlocks(seed, []);
+    const g2 = r.game, scores = [0];
+    for (const a of gh.log) { if (a[0] === 'p') { g2.place(a[1], a[2], a[3]); scores.push(g2.score); } else if (a[0] === 'u') { g2.undo(); scores.pop(); } }
+    run.ghost = { name: gh.name, score: gh.score, scores };
+    refresh();
+  });
   currentRun = run;
   const best = () => (run.daily ? load().blocksDaily[key] || 0 : load().blocks.best);
   const el = showScreen('blocks', `
     <div class="hud">
       <button class="icon-btn" id="b-pause" aria-label="Pause">⏸</button>
       <div class="box grow"><span class="lbl">Score</span><span class="n" id="b-score" style="font-size:1.6rem;font-weight:900">0</span></div>
-      <div class="box"><span class="lbl">${run.daily ? 'Today best' : 'Best'}</span><b id="b-best">${fmt(best())}</b></div>
+      ${run.rescue ? `<div class="box"><span class="lbl">Fish</span><b id="b-fish">🐠 0/${game.fish.size}</b></div><div class="box"><span class="lbl">Pieces</span><b id="b-left">${game.piecesLeft}</b></div>` : `<div class="box"><span class="lbl">${run.daily ? 'Today best' : 'Best'}</span><b id="b-best">${fmt(best())}</b></div>`}
+      ${run.daily ? '<div class="box" id="b-ghost-box" hidden><span class="lbl" id="b-ghost-name">👻</span><b id="b-ghost">–</b></div>' : ''}
     </div>
     <div class="board-wrap"><canvas id="b-canvas" aria-label="Reef Blocks board. Press 1, 2 or 3 to pick a piece, arrows to move, Enter to place."></canvas></div>
     <div class="boosters">
       <button class="booster" id="b-undo" aria-label="Undo last move">↶<span class="cnt">${game.undosLeft}</span></button>
-      <div class="mode-label" style="align-self:center">${run.daily ? '📅 Daily Reef' : '🧱 Endless'} · combo <b id="b-combo">–</b></div>
+      <div class="mode-label" style="align-self:center">${run.rescue ? `🐠 Rescue ${run.rescue}${game.rescue.tideEvery ? ` · 🌊 tide every ${game.rescue.tideEvery}` : ''}` : run.daily ? '📅 Daily Reef' : '🧱 Endless'} · combo <b id="b-combo">–</b></div>
     </div>`);
-  const refresh = () => {
+  const totalFish = game.fish.size;
+  function refresh() {
     $('#b-score', el).textContent = fmt(game.score);
-    $('#b-best', el).textContent = fmt(Math.max(best(), game.score));
+    if (run.rescue) { $('#b-fish', el).textContent = `🐠 ${game.freed}/${totalFish}`; $('#b-left', el).textContent = game.piecesLeft; }
+    else $('#b-best', el).textContent = fmt(Math.max(best(), game.score));
+    if (run.ghost) {
+      const gs = run.ghost.scores[Math.min(game.placed, run.ghost.scores.length - 1)];
+      $('#b-ghost-box', el).hidden = false;
+      $('#b-ghost-name', el).textContent = `👻 #1 ${run.ghost.name}`;
+      $('#b-ghost', el).textContent = `${fmt(gs)}${game.score >= gs ? ' ✓' : ''}`;
+    }
     $('#b-combo', el).textContent = game.combo > 1 ? `x${game.combo}` : '–';
     $('#b-undo .cnt', el).textContent = game.undosLeft;
     $('#b-undo', el).disabled = !(game.undosLeft > 0 && game.prev);
-  };
+  }
   view = new BlocksView($('#b-canvas', el), game, {
     reducedMotion: s.settings.reducedMotion,
-    onPlaced: (res) => {
+    onPlaced: async (res) => {
       refresh();
-      if (!run.daily) update((d) => { d.blocksRun = game.state === 'playing' ? { seed, log: game.log } : null; });
+      if (!run.daily && !run.rescue) update((d) => { d.blocksRun = game.state === 'playing' ? { seed, log: game.log } : null; });
       if (res.perfect) update((d) => { d.stats.perfectClears++; });
-      if (game.state === 'over') setTimeout(() => endBlocks(run), 600);
+      if (res.freed?.length) { sfx.win(); toast(`🐠 ${res.freed.length > 1 ? `${res.freed.length} fish` : 'A fish'} swam free!`); }
+      if (res.tide) { sfx.zap(); toast('🌊 The tide pushed the reef up!'); }
+      if (game.state === 'won') return setTimeout(() => endRescue(run), 700);
+      if (game.state === 'over') {
+        // an unused undo is offered before the run ends
+        if (game.undosLeft > 0 && game.prev && !run.rescue) {
+          const u = await modal('<h2>Out of room!</h2><p>You still have an undo – take back your last piece?</p>', { buttons: [{ label: '↶ Undo last piece', value: 'undo', cls: 'green' }, { label: 'End the run', value: 'end', cls: 'ghost' }], dismissable: false });
+          if (u === 'undo' && game.undo()) { sfx.swap(); refresh(); view?.sync?.(); return; }
+        }
+        setTimeout(() => (run.rescue ? endRescue(run) : endBlocks(run)), 600);
+      }
     },
   });
   $('#b-pause', el).onclick = () => { sfx.tap(); pauseMenu(); };
@@ -3307,6 +3355,29 @@ function playBlocks(opts) {
   };
   refresh();
   if (!load().blocks.games && !opts.resume) toast('Drag a piece from the tray onto the reef!');
+}
+
+async function endRescue(run) {
+  if (run.ended) return;
+  run.ended = true;
+  const game = run.game, n = run.rescue, L = game.rescue;
+  const won = game.state === 'won';
+  const stars = won ? (game.piecesLeft >= L.pieces * 0.3 ? 3 : game.piecesLeft >= L.pieces * 0.12 ? 2 : 1) : 0;
+  const prev = load().blocksRescue?.[n] || 0;
+  const shells = won ? (prev ? Math.max(0, stars - prev) * 10 : 15 + stars * 5) : 2;
+  update((d) => { d.blocksRescue = { ...(d.blocksRescue || {}) }; if (won) d.blocksRescue[n] = Math.max(prev, stars); d.shells += shells; d.blocks.games++; });
+  noteGameEnd('reef', won && stars > prev);
+  won ? sfx.win() : sfx.lose();
+  const r = await modal(`<h2>${won ? '🐠 All fish rescued!' : game.overReason || 'No more room!'}</h2>
+    ${won ? `<div class="big-stars" role="img" aria-label="${stars} of 3 stars">${[0, 1, 2].map((i) => `<span class="${i < stars ? 'star-on' : 'star-off'}" aria-hidden="true">★</span>`).join('')}</div>` : `<p class="muted">${game.freed} of ${game.freed + game.fish.size} fish freed.</p>`}
+    <p class="muted small">${game.piecesLeft} piece${game.piecesLeft === 1 ? '' : 's'} left · ${fmt(game.score)} points</p>
+    ${shells ? `<div class="reward">+${shells} 🐚</div>` : ''}`, {
+    dismissable: false,
+    buttons: [...(won && n < RESCUE_LEVELS ? [{ label: `▶ Level ${n + 1}`, value: 'next', cls: 'green' }] : []), { label: '↻ Try again', value: 'again', cls: won ? 'blue' : 'green' }, { label: '🗺️ Levels', value: 'map', cls: 'ghost' }],
+  });
+  if (r === 'next') playBlocks({ rescue: n + 1 });
+  else if (r === 'again') playBlocks({ rescue: n });
+  else rescueMap();
 }
 
 async function endBlocks(run) {
@@ -3335,6 +3406,7 @@ async function endBlocks(run) {
     <div class="big-score">${fmt(score)}</div>
     ${isBest ? '<p>🎉 New best!</p>' : `<p class="muted">Best: ${fmt(prevBest)}</p>`}
     <p class="muted small">${game.linesCleared} lines · best combo x${game.bestCombo || 0} · ${game.placed} pieces</p>
+    ${run.ghost ? `<p>${score > run.ghost.score ? `👻 You beat today's #1 run by <b>${esc(run.ghost.name)}</b>!` : `👻 Today's #1, <b>${esc(run.ghost.name)}</b>, finished with ${fmt(run.ghost.score)}.`}</p>` : ''}
     <div class="reward">+${shells} 🐚</div>
     <p class="muted small" id="r-rank">Checking leaderboard…</p>`, {
     dismissable: false,

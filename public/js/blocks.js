@@ -48,8 +48,18 @@ export const PIECES = BASE.map((p, i) => {
 });
 const TOTAL_W = PIECES.reduce((s, p) => s + p.weight, 0);
 
+/** Rescue levels: how many fish are trapped, how many pieces you get, and the tide. */
+export function rescueLevel(n) {
+  const fish = Math.min(8, 1 + Math.floor((n + 1) / 3));
+  return { n, fish, pieces: 8 + fish * 4 - Math.floor(n / 3), tideEvery: n >= 5 ? Math.max(6, 10 - Math.floor((n - 5) / 4)) : 0, fill: Math.min(24, 10 + n) };
+}
+export const RESCUE_LEVELS = 20;
+// a seed per level, picked so a sensible player's win rate falls from ~95% to ~45%
+export const RESCUE_SEEDS = [7104, 7208, 7308, 7425, 7509, 7631, 7713, 7813, 7911, 8013, 8124, 8238, 8317, 8423, 8517, 8623, 8742, 8829, 8933, 9048];
+
 export class BlockGame {
-  constructor({ seed, undos = 1 }) {
+  /** rescue: level number – trapped fish to free by clearing their lines, within a piece budget */
+  constructor({ seed, undos = 1, rescue = 0 }) {
     this.rng = new Rng(seed);
     this.board = Array.from({ length: SIZE }, () => new Array(SIZE).fill(-1)); // -1 empty, else colour 0..5
     this.score = 0;
@@ -63,16 +73,71 @@ export class BlockGame {
     this.log = [];
     this.prev = null;
     this.tray = [];
+    this.rescue = rescue ? rescueLevel(rescue) : null;
+    this.fish = new Set(); // "r,c" of trapped fish (rescue mode)
+    this.freed = 0;
+    if (this.rescue) this.setupRescue();
     this.refill();
+  }
+
+  setupRescue() {
+    const L = this.rescue;
+    const fullLine = (r, c) => this.board[r].every((v) => v !== -1) || this.board.every((row) => row[c] !== -1);
+    // each fish is stuck in a row (or column) that's mostly coral – finish it to set the fish free
+    for (let k = 0; k < L.fish; k++) {
+      const vertical = this.rng.next() < 0.4;
+      const line = 2 + this.rng.int(SIZE - 2);
+      const holes = 2 + this.rng.int(2) + (L.n > 10 ? 1 : 0);
+      const gaps = new Set();
+      while (gaps.size < holes) gaps.add(this.rng.int(SIZE));
+      const cells = [];
+      for (let i = 0; i < SIZE; i++) {
+        const [r, c] = vertical ? [i, line] : [line, i];
+        if (gaps.has(i) || this.board[r][c] !== -1) continue;
+        this.board[r][c] = this.rng.int(6);
+        if (fullLine(r, c)) { this.board[r][c] = -1; continue; }
+        cells.push([r, c]);
+      }
+      const spot = cells.filter(([r, c]) => r >= 3 && !this.fish.has(`${r},${c}`));
+      if (spot.length) { const [r, c] = spot[this.rng.int(spot.length)]; this.fish.add(`${r},${c}`); }
+    }
+    // a little loose coral in the way
+    for (let k = 0; k < L.fill - 8; k++) {
+      const r = 2 + this.rng.int(SIZE - 2), c = this.rng.int(SIZE);
+      if (this.board[r][c] !== -1) continue;
+      this.board[r][c] = this.rng.int(6);
+      if (fullLine(r, c)) this.board[r][c] = -1;
+    }
+    this.piecesLeft = L.pieces;
+  }
+
+  /** The tide pushes a row of coral up from below; whatever was on the top row is washed away. */
+  tidePush() {
+    const top = this.board[0];
+    let swept = 0;
+    for (let c = 0; c < SIZE; c++) if (this.fish.delete(`0,${c}`)) swept++;
+    const lostTop = top.some((v) => v !== -1);
+    if (swept) { this.state = 'over'; this.overReason = 'A fish was swept away by the tide!'; }
+    this.board.shift();
+    const row = new Array(SIZE).fill(-1);
+    for (let k = 0; k < 4; k++) row[this.rng.int(SIZE)] = this.rng.int(6);
+    this.board.push(row);
+    const moved = new Set();
+    for (const f of this.fish) { const [r, c] = f.split(',').map(Number); if (r > 0) moved.add(`${r - 1},${c}`); }
+    this.fish = moved;
+    return lostTop;
   }
 
   randomPiece() {
     let x = this.rng.next() * TOTAL_W;
+    let id = PIECES[PIECES.length - 1].id;
     for (const p of PIECES) {
       x -= p.weight;
-      if (x < 0) return p.id;
+      if (x < 0) { id = p.id; break; }
     }
-    return PIECES[PIECES.length - 1].id;
+    // endless gets tougher: after 200 pieces, small pieces are rarer
+    if (!this.rescue && this.placed > 200 && PIECES[id].cells.length <= 2 && this.rng.next() < Math.min(0.6, (this.placed - 200) / 400)) return this.randomPiece();
+    return id;
   }
 
   refill() {
@@ -83,7 +148,9 @@ export class BlockGame {
     let fallback = null;
     for (let attempt = 0; attempt < 12; attempt++) {
       const tray = [0, 1, 2].map(() => ({ piece: this.randomPiece(), color: this.rng.int(6) }));
-      if (filled > 26 && this.rng.next() < 0.5) {
+      // the kind dealer helps less and less as an endless run goes on
+      const kindness = this.rescue ? 0.5 : this.placed < 150 ? 0.5 : Math.max(0.08, 0.5 - (this.placed - 150) / 500);
+      if (filled > 26 && this.rng.next() < kindness) {
         const helper = this.lineFinisher();
         if (helper !== null) tray[this.rng.int(3)].piece = helper;
       }
@@ -156,7 +223,7 @@ export class BlockGame {
     return JSON.stringify({
       board: this.board, score: this.score, combo: this.combo, sinceClear: this.sinceClear,
       linesCleared: this.linesCleared, placed: this.placed, bestCombo: this.bestCombo,
-      tray: this.tray, rng: this.rng.s, state: this.state,
+      tray: this.tray, rng: this.rng.s, state: this.state, fish: [...this.fish], freed: this.freed, piecesLeft: this.piecesLeft,
     });
   }
 
@@ -165,6 +232,7 @@ export class BlockGame {
     Object.assign(this, {
       board: s.board, score: s.score, combo: s.combo, sinceClear: s.sinceClear,
       linesCleared: s.linesCleared, placed: s.placed, bestCombo: s.bestCombo, tray: s.tray, state: s.state,
+      fish: new Set(s.fish || []), freed: s.freed || 0, piecesLeft: s.piecesLeft,
     });
     this.rng.s = s.rng;
   }
@@ -188,12 +256,17 @@ export class BlockGame {
     for (let c = 0; c < SIZE; c++) if (this.board.every((row) => row[c] !== -1)) cols.push(c);
     const lines = rows.length + cols.length;
     const clearedCells = [];
+    let freedNow = [];
     if (lines) {
       for (const r of rows) for (let c = 0; c < SIZE; c++) clearedCells.push([r, c, this.board[r][c]]);
       for (const c of cols) for (let r = 0; r < SIZE; r++) if (!rows.includes(r)) clearedCells.push([r, c, this.board[r][c]]);
       for (const r of rows) for (let c = 0; c < SIZE; c++) this.board[r][c] = -1;
       for (const c of cols) for (let r = 0; r < SIZE; r++) this.board[r][c] = -1;
-      this.combo = this.sinceClear <= 3 ? this.combo + 1 : 1;
+      // rescue: fish in a cleared line swim free
+      for (const f of [...this.fish]) { const [fr, fc] = f.split(',').map(Number); if (rows.includes(fr) || cols.includes(fc)) { this.fish.delete(f); freedNow.push([fr, fc]); } }
+      this.freed += freedNow.length;
+      points += freedNow.length * 50;
+      this.combo = Math.min(8, this.sinceClear <= 3 ? this.combo + 1 : 1); // combos top out at x8
       this.sinceClear = 0;
       this.bestCombo = Math.max(this.bestCombo, this.combo);
       this.linesCleared += lines;
@@ -207,13 +280,19 @@ export class BlockGame {
     if (perfect) points += 300;
     this.score += points;
 
-    let refilled = false;
+    let refilled = false, tide = false;
+    if (this.rescue) {
+      this.piecesLeft--;
+      if (!this.fish.size) { this.state = 'won'; this.score += this.piecesLeft * 30; return { ok: true, rows, cols, lines, clearedCells, points, combo: lines ? this.combo : 0, perfect, refilled, freed: freedNow || [], won: true }; }
+      if (this.rescue.tideEvery && this.placed % this.rescue.tideEvery === 0) { tide = true; this.tidePush(); }
+      if (this.state === 'playing' && this.piecesLeft <= 0) { this.state = 'over'; this.overReason = 'Out of pieces'; }
+    }
     if (this.tray.every((x) => x === null)) {
       this.refill();
       refilled = true;
     }
-    if (!this.tray.some((x) => x && this.fitsAnywhere(x.piece))) this.state = 'over';
-    return { ok: true, rows, cols, lines, clearedCells, points, combo: lines ? this.combo : 0, perfect, refilled };
+    if (this.state === 'playing' && !this.tray.some((x) => x && this.fitsAnywhere(x.piece))) this.state = 'over';
+    return { ok: true, rows, cols, lines, clearedCells, points, combo: lines ? this.combo : 0, perfect, refilled, freed: freedNow || [], tide };
   }
 
   undo() {
@@ -226,8 +305,8 @@ export class BlockGame {
   }
 }
 
-export function replayBlocks(seed, log) {
-  const g = new BlockGame({ seed });
+export function replayBlocks(seed, log, opts = {}) {
+  const g = new BlockGame({ seed, ...opts });
   for (const a of log) {
     if (!Array.isArray(a)) return { ok: false, reason: 'bad action', game: g };
     if (a[0] === 'p') {

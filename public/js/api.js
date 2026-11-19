@@ -94,7 +94,7 @@ async function sharedSubmit(sh, entry) {
   const prev = doc.scores[id];
   const keepFirst = entry.board === 'daily' || !!BOARDS[entry.board]?.firstOnly;
   if (!prev || (!keepFirst && score > prev.s)) {
-    doc.scores[id] = { s: score, t: now, ...(entry.board === 'daily' || entry.board === 'deep' ? { log: entry.log } : {}) };
+    doc.scores[id] = { s: score, t: now, ...(entry.board === 'daily' || entry.board === 'deep' || entry.board === 'blocksDaily' ? { log: entry.log } : {}) };
   }
   let weekRank;
   const weekId = BOARDS[entry.board]?.arcade && !BOARDS[entry.board].daily ? `${entry.board}Week:${weekKey()}` : null;
@@ -344,6 +344,24 @@ export async function flushPending() {
   }
   update((d) => { d.pending = d.pending.slice(sent); });
   return sent;
+}
+
+/** Today's #1 run on a daily board (to race as a ghost): { name, score, log, me } or null. */
+export async function ghost(board, key) {
+  try {
+    const sh = await sharedDb();
+    if (sh) {
+      const snap = await sh.db.collection('players').get();
+      let best = null;
+      snap.docs.forEach((d) => {
+        const e = (d.data() || {}).scores?.[`${board}:${key}`];
+        if (e && Array.isArray(e.log) && typeof e.s === 'number' && (!best || e.s > best.score)) best = { name: String(d.data().name || 'Top player').slice(0, 40), score: e.s, log: e.log, me: d.id === sh.uid };
+      });
+      return best;
+    }
+    if (inArtifact()) return null;
+    return await req('/ghost?' + new URLSearchParams({ board, key, playerId: load().playerId }).toString());
+  } catch { return null; }
 }
 
 export async function top(board, key) {

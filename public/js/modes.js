@@ -94,4 +94,4 @@ export function blocksSeed(board, key, runSeed) {
 
 // Bump when engine rules change in a way that alters replays. The server
 // rejects submissions from a different version (client is told to update).
-export const ENGINE_VERSION = 5; // 2: Starfish special · 3: fair block trays · 4: arcade feel pass (tower zones, crab beat, sort hints) · 5: crates trap (diagonal refill)
+export const ENGINE_VERSION = 6; // 2: Starfish special · 3: fair block trays · 4: arcade feel pass (tower zones, crab beat, sort hints) · 5: crates trap (diagonal refill) · 6: tougher endless blocks, combo cap

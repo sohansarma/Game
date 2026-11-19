@@ -432,6 +432,12 @@ export function createApi(store, { now = () => new Date(), origin = process.env.
     // Daily Dive: only the first finished attempt of the day is ranked.
     const res = record(boardId(board, key), body.playerId, score, { keepFirst: board === 'daily' || !!BOARDS[board].firstOnly });
     addLeaguePoints(body.playerId, res.improved);
+    // daily ghosts: the current #1 run of Daily Dive / Daily Reef, for everyone to race
+    if ((board === 'daily' || board === 'blocksDaily') && res.rank === 1) {
+      db.ghosts ||= {};
+      for (const k of Object.keys(db.ghosts)) if (k.split(':')[1] < dayKey(new Date(now().getTime() - 3 * 86400000))) delete db.ghosts[k];
+      db.ghosts[boardId(board, key)] = { pid: body.playerId, score, log, seed: Number(body.seed) || 0 };
+    }
     // endless arcade runs also count towards this week's tournament
     if (BOARDS[board].arcade && !BOARDS[board].daily && !BOARDS[board].firstOnly && !gameForBoard(board)?.special) {
       const wk = record(boardId(board + 'Week', weekKey(now())), body.playerId, score);
@@ -446,6 +452,11 @@ export function createApi(store, { now = () => new Date(), origin = process.env.
     try {
       if (req.method === 'GET' && url.pathname === '/api/health') {
         return send(res, 200, { ok: true, v: ENGINE_VERSION }, origin);
+      }
+      if (req.method === 'GET' && url.pathname === '/api/ghost') {
+        const gh = db.ghosts?.[boardId(url.searchParams.get('board'), url.searchParams.get('key'))];
+        if (!gh) throw fail(404, 'no ghost yet');
+        return send(res, 200, { name: db.players[gh.pid]?.name || 'Top player', score: gh.score, log: gh.log, seed: gh.seed, me: gh.pid === url.searchParams.get('playerId') }, origin);
       }
       if (req.method === 'GET' && url.pathname === '/api/league') {
         return send(res, 200, leagueView(url.searchParams.get('playerId')), origin);

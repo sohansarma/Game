@@ -663,3 +663,9 @@ body.cozy .btn, body.cozy .game-card .tag, body.cozy .seg-btn.on { filter: none;
 .more-games[open] > summary { margin-bottom: 10px; }
 .big-stars { display: flex; justify-content: center; gap: 6px; }
 .big-stars .star-off { color: rgba(255,255,255,.28); }
+
+.rescue-grid { display: grid; grid-template-columns: repeat(5, 1fr); gap: 8px; margin: 10px 0; }
+.rescue-lv { display: flex; flex-direction: column; align-items: center; justify-content: center; min-height: 54px; border-radius: 12px; background: var(--panel); border: 2px solid var(--line); color: inherit; }
+.rescue-lv small { font-size: .62rem; }
+.rescue-lv.done { border-color: var(--mint); }
+.rescue-lv:disabled { opacity: .5; }

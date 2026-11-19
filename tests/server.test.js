@@ -276,3 +276,24 @@ test('weekly leagues: verified runs earn points, groups of 30 per division, last
   for (let i = 0; i < 40; i++) pts += L.pointsFor(st, 'D', false);
   assert.equal(pts, L.RUN_POINTS * L.RUNS_PER_DAY, 'daily cap');
 });
+
+test('daily ghosts: the #1 Daily Reef run can be fetched and raced', async () => {
+  const me = await register('Ghost Racer 11');
+  const { BlockGame: BG } = await import('../public/js/blocks.js');
+  const { blocksSeed } = await import('../public/js/modes.js');
+  const key = dayKey();
+  const g = new BG({ seed: blocksSeed('blocksDaily', key) });
+  for (let i = 0; i < 500 && g.state === 'playing'; i++) {
+    let ok = false;
+    for (let s = 0; s < 3 && !ok; s++) { const t = g.tray[s]; if (!t) continue; for (let r = 0; r < 8 && !ok; r++) for (let c = 0; c < 8 && !ok; c++) if (g.canPlace(t.piece, r, c)) ok = g.place(s, r, c).ok; }
+    if (!ok) break;
+  }
+  const res = await post('/api/scores', { board: 'blocksDaily', key, log: g.log, score: g.score, v: ENGINE_VERSION, playerId: me.playerId, token: me.token });
+  assert.equal(res.status, 200, JSON.stringify(res.body));
+  const gh = await get(`/api/ghost?board=blocksDaily&key=${key}`);
+  if (res.body.rank === 1) {
+    assert.equal(gh.status, 200);
+    assert.equal(gh.body.score, g.score);
+    assert.deepEqual(gh.body.log, g.log);
+  } else assert.ok(gh.status === 200 || gh.status === 404);
+});
