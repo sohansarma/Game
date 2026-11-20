@@ -2,22 +2,24 @@
 import { Chess, casualMoveScored } from './chess.js';
 import { findPuzzleAsync } from './chess-puzzles.js';
 
-let worker = null, failed = false, seq = 0;
+let worker = null, pzWorker = null, failed = false, seq = 0;
 const pending = new Map();
 const progressFns = new Map();
 
-function getWorker() {
+// Puzzle generation takes tens of seconds, so it gets its own worker – the bot and hints never queue behind it.
+function getWorker(puzzle = false) {
   if (failed || typeof Worker === 'undefined') return null;
-  if (worker) return worker;
+  if (puzzle ? pzWorker : worker) return puzzle ? pzWorker : worker;
   try {
-    worker = new Worker(new URL('./chess-worker.js', import.meta.url), { type: 'module' });
-    worker.onmessage = (e) => {
+    const w0 = new Worker(new URL('./chess-worker.js', import.meta.url), { type: 'module' });
+    if (puzzle) pzWorker = w0; else worker = w0;
+    w0.onmessage = (e) => {
       if (e.data.progress !== undefined) { progressFns.get(e.data.id)?.(e.data.progress); return; }
       const p = pending.get(e.data.id);
       if (p) { pending.delete(e.data.id); progressFns.delete(e.data.id); p(e.data); }
     };
-    worker.onerror = () => { failed = true; worker = null; for (const p of pending.values()) p({ error: 'worker' }); pending.clear(); };
-    return worker;
+    w0.onerror = () => { if (puzzle) { pzWorker = null; } else { failed = true; worker = null; } for (const p of pending.values()) p({ error: 'worker' }); pending.clear(); };
+    return w0;
   } catch {
     failed = true;
     return null;
@@ -25,7 +27,7 @@ function getWorker() {
 }
 
 function ask(msg, timeoutMs, onProgress) {
-  const w = getWorker();
+  const w = getWorker(msg.kind === 'puzzle');
   if (!w) return Promise.resolve({ error: 'noworker' });
   return new Promise((res) => {
     const id = ++seq;
@@ -59,7 +61,13 @@ export async function reviewGame(ucis, onProgress) {
 }
 
 /** Today's (or any seed's) puzzle, cached in this browser. */
-export async function puzzleFor(seed, multi = false) {
+const inflight = new Map();
+export function puzzleFor(seed, multi = false) {
+  const key = `${multi ? 'm' : ''}${seed}`;
+  if (!inflight.has(key)) inflight.set(key, puzzleForOnce(seed, multi).finally(() => inflight.delete(key)));
+  return inflight.get(key); // a warm-up already running is joined, not repeated
+}
+async function puzzleForOnce(seed, multi) {
   const key = `tidepop.puzzle.v3.${multi ? 'm' : ''}${seed}`;
   try { const c = localStorage.getItem(key); if (c) return JSON.parse(c); } catch { /* storage blocked */ }
   let p = null;
