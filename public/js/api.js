@@ -12,6 +12,8 @@ import * as analytics from './analytics.js';
 
 const BASE = (typeof window !== 'undefined' && window.TIDEPOP_API !== undefined ? window.TIDEPOP_API : '') + '/api';
 let online = null; // null = unknown
+let googleId = null; // the web client id for Sign in with Google, when the server has it set up (public by design)
+export const googleClientId = () => googleId;
 analytics.configure({ base: BASE, off: () => inArtifact() });
 
 // ---------------------------------------------------------------------------
@@ -249,7 +251,7 @@ export async function checkServer() {
   if (await sharedDb()) return (online = true);
   if (inArtifact()) return (online = false); // no Node server behind an artifact
   try {
-    await req('/health', {}, 3000);
+    googleId = (await req('/health', {}, 3000)).google || null;
   } catch {
     online = false;
   }
@@ -775,7 +777,7 @@ export const ugc = {
 export async function accountsAvailable() {
   if (inArtifact()) return false;
   try {
-    await req('/health', {}, 4000);
+    googleId = (await req('/health', {}, 4000)).google || null;
     return true;
   } catch {
     return false;

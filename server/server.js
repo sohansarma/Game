@@ -34,10 +34,10 @@ const SECURITY_HEADERS = {
   'permissions-policy': 'camera=(), microphone=(), geolocation=()',
 };
 
-export function createServer({ dataDir = process.env.DATA_DIR || path.resolve(__dirname, '..', 'data'), now, rate } = {}) {
+export function createServer({ dataDir = process.env.DATA_DIR || path.resolve(__dirname, '..', 'data'), now, rate, google } = {}) {
   const store = createStore(dataDir);
   const events = createEvents(dataDir, { now });
-  const api = createApi(store, { now, rate, events });
+  const api = createApi(store, { now, rate, events, ...(google ? { google } : {}) });
 
   const server = http.createServer(async (req, res) => {
     try {

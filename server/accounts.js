@@ -10,9 +10,9 @@
 // • An account owns one leaderboard player; each signed-in device gets its own
 //   player token, so scores from every device land on the same name.
 
-import { createHash, randomBytes, scrypt as scryptCb, timingSafeEqual, randomUUID } from 'node:crypto';
+import { createHash, randomBytes, randomInt, scrypt as scryptCb, timingSafeEqual, randomUUID } from 'node:crypto';
 import { promisify } from 'node:util';
-import { nameProblem, cleanName } from '../public/js/storage.js';
+import { nameProblem, cleanName, ANIMALS } from '../public/js/storage.js';
 
 const scrypt = promisify(scryptCb);
 const sha = (s) => createHash('sha256').update(s).digest('hex');
@@ -42,10 +42,11 @@ async function hashPassword(password, salt) {
 }
 const recoveryCode = () => randomBytes(10).toString('hex').toUpperCase().match(/.{4}/g).join('-'); // XXXX-XXXX-XXXX-XXXX-XXXX
 
-export function createAccounts({ store, now, fail, players }) {
+export function createAccounts({ store, now, fail, players, google = { enabled: false } }) {
   const { db } = store;
   db.accounts ||= {};
   db.sessions ||= {};
+  db.googleIndex ||= {}; // Google account id (sub) → username. Only the id is kept: no e-mail, name or picture.
   const DUMMY_SALT = randomBytes(16).toString('hex');
 
   function newSession(username) {
@@ -82,7 +83,22 @@ export function createAccounts({ store, now, fail, players }) {
   }
 
   function view(acc) {
-    return { username: acc.display, playerId: acc.playerId, name: players[acc.playerId]?.name || null, saveRev: acc.saveRev || 0, saveAt: acc.saveAt || null };
+    return { username: acc.display, playerId: acc.playerId, name: players[acc.playerId]?.name || null, saveRev: acc.saveRev || 0, saveAt: acc.saveAt || null, google: !!acc.google, password: !!acc.hash };
+  }
+
+  /** Link this device's leaderboard player to a new account, or make a fresh one. */
+  function linkPlayer(body, display) {
+    let playerId = null, token = null;
+    const p = typeof body.playerId === 'string' && players[body.playerId];
+    const owned = p && typeof body.token === 'string' && (p.tokenHash === sha(body.token) || p.tokenHashes?.includes(sha(body.token)));
+    if (owned && !Object.values(db.accounts).some((a) => a.playerId === body.playerId)) playerId = body.playerId;
+    else {
+      const name = typeof body.name === 'string' && !nameProblem(body.name) ? cleanName(body.name) : display;
+      playerId = randomUUID();
+      token = randomBytes(24).toString('hex');
+      players[playerId] = { name, tokenHash: sha(token), created: now().getTime(), levels: {} };
+    }
+    return { playerId, token };
   }
 
   async function signup(body) {
@@ -95,17 +111,7 @@ export function createAccounts({ store, now, fail, players }) {
     const pp = passwordProblem(body.password, u);
     if (pp) throw fail(400, pp);
     if (db.accounts[u]) throw fail(409, 'That username is taken');
-    // link this device's leaderboard player, or make one
-    let playerId = null, token = null;
-    const p = typeof body.playerId === 'string' && players[body.playerId];
-    const owned = p && typeof body.token === 'string' && (p.tokenHash === sha(body.token) || p.tokenHashes?.includes(sha(body.token)));
-    if (owned && !Object.values(db.accounts).some((a) => a.playerId === body.playerId)) playerId = body.playerId;
-    else {
-      const name = typeof body.name === 'string' && !nameProblem(body.name) ? cleanName(body.name) : display;
-      playerId = randomUUID();
-      token = randomBytes(24).toString('hex');
-      players[playerId] = { name, tokenHash: sha(token), created: now().getTime(), levels: {} };
-    }
+    const { playerId, token } = linkPlayer(body, display);
     const salt = randomBytes(16).toString('hex');
     const recovery = recoveryCode();
     db.accounts[u] = {
@@ -119,8 +125,8 @@ export function createAccounts({ store, now, fail, players }) {
   async function checkPassword(acc, password) {
     const t = now().getTime();
     if (acc && acc.lockUntil > t) throw fail(429, `Too many tries – wait ${Math.ceil((acc.lockUntil - t) / 1000)} s and try again`);
-    const h = await hashPassword(typeof password === 'string' ? password : '', acc ? acc.salt : DUMMY_SALT);
-    const ok = !!acc && timingSafeEqual(Buffer.from(h, 'hex'), Buffer.from(acc.hash, 'hex'));
+    const h = await hashPassword(typeof password === 'string' ? password : '', acc?.salt || DUMMY_SALT);
+    const ok = !!acc && !!acc.hash && timingSafeEqual(Buffer.from(h, 'hex'), Buffer.from(acc.hash, 'hex')); // Google-only accounts have no password
     if (acc) {
       if (ok) { acc.fails = 0; acc.lockUntil = 0; }
       else {
@@ -162,10 +168,67 @@ export function createAccounts({ store, now, fail, players }) {
     return { session: newSession(u), token: deviceToken(acc), recovery, ...view(acc) };
   }
 
+  // ---- Sign in with Google (adults only). The account is keyed by Google's stable id; nothing else is stored.
+  async function googleId(idToken) {
+    if (!google.enabled) throw fail(503, 'Google sign-in is not available here');
+    try { return (await google.verify(idToken)).sub; } catch { throw fail(401, "Google couldn't confirm that sign-in – please try again"); }
+  }
+
+  function friendlyUsername() {
+    for (let i = 0; i < 50; i++) {
+      const u = `${ANIMALS[randomInt(ANIMALS.length)].toLowerCase()}${randomInt(1000, 10000)}`;
+      if (!db.accounts[u] && !usernameProblem(u)) return u;
+    }
+    return `tide${randomBytes(4).toString('hex')}`;
+  }
+
+  /** Sign in with Google: opens the linked account, or creates one (13+ only). No recovery code – Google is the recovery. */
+  async function googleSignIn(body) {
+    const sub = await googleId(body.idToken);
+    const known = db.googleIndex[sub];
+    if (known && db.accounts[known]) {
+      const acc = db.accounts[known];
+      return { session: newSession(known), token: deviceToken(acc), created: false, ...view(acc) };
+    }
+    if (body.age !== '13+') throw fail(403, 'Accounts are for players 13 and older');
+    const u = friendlyUsername();
+    const { playerId, token } = linkPlayer(body, u);
+    db.accounts[u] = { display: u, salt: null, hash: null, google: sub, playerId, created: now().getTime(), recSalt: null, recHash: null, fails: 0, lockUntil: 0, save: null, saveRev: 0, saveAt: null };
+    db.googleIndex[sub] = u;
+    store.dirty();
+    return { session: newSession(u), token, created: true, ...view(db.accounts[u]) };
+  }
+
+  /** Add Google as another way into the signed-in account. */
+  async function googleLink(body) {
+    const { acc } = session(body);
+    const sub = await googleId(body.idToken);
+    const owner = db.googleIndex[sub];
+    if (owner && owner !== acc.display.toLowerCase() && db.accounts[owner]) throw fail(409, 'That Google account is already linked to another Tidepop account');
+    if (acc.google && acc.google !== sub) throw fail(409, 'This account is already linked to a different Google account');
+    acc.google = sub;
+    db.googleIndex[sub] = acc.display.toLowerCase();
+    store.dirty();
+    return view(acc);
+  }
+
+  /** Remove Google from an account – only if a password remains, so nobody gets locked out. */
+  function googleUnlink(body) {
+    const { acc } = session(body);
+    if (!acc.hash) throw fail(400, 'Set a password first – otherwise you could not get back in');
+    if (acc.google) delete db.googleIndex[acc.google];
+    delete acc.google;
+    store.dirty();
+    return view(acc);
+  }
+
   async function handle(op, body) {
     switch (op) {
       case 'signup': return signup(body);
       case 'login': return login(body);
+      case 'google': return googleSignIn(body);
+      case 'google-link': return googleLink(body);
+      case 'google-unlink': return googleUnlink(body);
       case 'recover': return recover(body);
       case 'me': return view(session(body).acc);
       case 'logout': {
@@ -190,6 +253,7 @@ export function createAccounts({ store, now, fail, players }) {
       }
       case 'password': {
         const { acc, key } = session(body);
+        if (!acc.hash) throw fail(400, 'This account signs in with Google – there is no password to change');
         if (!(await checkPassword(acc, body.current))) throw fail(401, 'Your current password is wrong');
         const u = acc.display.toLowerCase();
         const pp = passwordProblem(body.password, u);
@@ -202,8 +266,11 @@ export function createAccounts({ store, now, fail, players }) {
       }
       case 'delete': {
         const { acc } = session(body);
-        if (!(await checkPassword(acc, body.password))) throw fail(401, 'Wrong password');
+        // password accounts confirm with the password; Google-only accounts with a fresh Google sign-in
+        if (acc.hash) { if (!(await checkPassword(acc, body.password))) throw fail(401, 'Wrong password'); }
+        else if ((await googleId(body.idToken)) !== acc.google) throw fail(401, 'That is a different Google account');
         const u = acc.display.toLowerCase();
+        if (acc.google) delete db.googleIndex[acc.google];
         for (const [k, s] of Object.entries(db.sessions)) if (s.user === u) delete db.sessions[k];
         const playerId = acc.playerId;
         delete db.accounts[u];

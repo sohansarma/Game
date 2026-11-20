@@ -17,7 +17,8 @@ import { iconURL, PALETTE, clearSpriteCache } from './creatures.js';
 import { sfx, unlockAudio, configureAudio, haptic, purr } from './audio.js';
 import { tideNumber, shareText as tideShareText, moveSquare, tideKey, hardSeed, TideSim } from './arcade/tide.js';
 import { SLOTS as POOL_SLOTS, ITEMS as POOL_ITEMS, ITEM as POOL_ITEM, comfortOf, comfortBonus, found as poolFound, newlyFound, drawPool, POLISH, MAX_STARS, itemComfort } from './pool.js';
-import { startCloud, syncNow, cloudAccount, cloudStatus, onCloudChange, signUp, logIn, logOut, recoverAccount, changePassword, deleteAccount, setClaudeSync } from './cloud.js';
+import { startCloud, syncNow, cloudAccount, cloudStatus, onCloudChange, signUp, logIn, logOut, recoverAccount, changePassword, deleteAccount, setClaudeSync, googleSignIn, linkGoogle, unlinkGoogle } from './cloud.js';
+import { googleSupported, usesNativeGoogle, nativeGoogleToken, renderGoogleButton } from './google.js';
 import { configureCozy, cozyActive, cozySleeping, wakeCozy, onSleep, isNightTime, cozySound, VIBES, VIBE } from './cozy.js';
 import * as api from './api.js';
 import { policy } from './policy.js';
@@ -863,7 +864,7 @@ const ago = (t) => {
 };
 
 /** Username/password form inside a sheet. fields: [{k, label, type, auto}] */
-function authForm({ title, intro = '', fields, submit, footer = '', onSubmit }) {
+function authForm({ title, intro = '', fields, submit, footer = '', onSubmit, extra = null }) {
   return modal(`<h2>${title}</h2>${intro}
     <form class="auth-form" novalidate>
       ${fields.map((f) => `<label class="auth-field"><span>${f.label}</span>
@@ -894,7 +895,39 @@ function authForm({ title, intro = '', fields, submit, footer = '', onSubmit }) 
         }
       };
       for (const a of $$('[data-close]', sheet)) a.onclick = (e) => { e.preventDefault(); closeModal(a.dataset.close); };
+      extra?.(sheet, { finish: (out) => closeModal(out ?? true), msg: (t, bad) => { msg.textContent = t; msg.classList.toggle('bad', !!bad); } });
     },
+  });
+}
+
+/** "or Continue with Google" - only for adults, and only if the server (or the Android app) has it set up. */
+const googleHtml = () => (googleSupported() ? '<div class="auth-or small muted center">or</div><div class="auth-google" id="g-slot"></div><p class="small muted center">Google only tells Tidepop a sign-in id, not your e-mail or name.</p>' : '');
+
+/** Fills #g-slot with Google's button (or the app's native one). handle(idToken) does the work; its result goes to ctl.finish. */
+function wireGoogle(sheet, ctl, handle) {
+  const slot = $('#g-slot', sheet);
+  if (!slot) return;
+  const run = async (getToken) => {
+    try {
+      ctl.msg('One moment...');
+      ctl.finish(await handle(await getToken()));
+    } catch (e) {
+      ctl.msg([401, 403, 409, 503].includes(e.status) || /Google/.test(e.message || '') ? e.message : "Couldn't sign in with Google - try again", true);
+    }
+  };
+  if (usesNativeGoogle()) {
+    slot.innerHTML = '<button type="button" class="btn blue" id="g-native">Continue with Google</button>';
+    $('#g-native', slot).onclick = () => run(() => nativeGoogleToken());
+  } else {
+    renderGoogleButton(slot, (tok) => run(async () => tok), (e) => ctl.msg(e.message, true));
+  }
+}
+
+/** Ask for a fresh Google sign-in (to link it, or to confirm deleting a Google-only account). Resolves with the ID token or null. */
+function askGoogleToken(title, intro) {
+  return modal(`<h2>${title}</h2>${intro}<p class="auth-msg small" role="alert"></p><div class="auth-google" id="g-slot"></div>`, {
+    buttons: [{ label: 'Cancel', value: null, cls: 'ghost' }],
+    onOpen: (sheet) => wireGoogle(sheet, { finish: (t) => closeModal(t), msg: (t, bad) => { const m = $('.auth-msg', sheet); m.textContent = t; m.classList.toggle('bad', !!bad); } }, async (tok) => tok),
   });
 }
 
@@ -919,13 +952,17 @@ async function openSignUp() {
       { k: 'password', label: 'Password (8+ characters)', type: 'password', auto: 'new-password' },
     ],
     submit: 'Create account',
-    footer: '<p class="small center" style="margin-top:10px">Already have one? <a href="#" data-close="login">Log in</a></p>',
+    footer: googleHtml() + '<p class="small center" style="margin-top:10px">Already have one? <a href="#" data-close="login">Log in</a></p>',
     onSubmit: (v) => signUp(v.username, v.password),
+    extra: (sheet, ctl) => wireGoogle(sheet, ctl, googleSignIn),
   });
   if (r === 'login') return openLogIn();
   if (r?.recovery) {
     await showRecoveryCode(r.recovery, true);
     toast(`☁️ Signed in as ${r.username} – progress now saves to the cloud`);
+  } else if (r?.session) {
+    api.track('link', 'google');
+    toast(r.created ? `☁️ Account ready: ${r.username} – progress now saves to the cloud` : `☁️ Welcome back, ${r.username}!`);
   }
   return r;
 }
@@ -940,12 +977,13 @@ async function openLogIn() {
       { k: 'password', label: 'Password', type: 'password', auto: 'current-password' },
     ],
     submit: 'Log in',
-    footer: '<p class="small center" style="margin-top:10px"><a href="#" data-close="forgot">Forgot password?</a> · <a href="#" data-close="signup">Create account</a></p>',
+    footer: googleHtml() + '<p class="small center" style="margin-top:10px"><a href="#" data-close="forgot">Forgot password?</a> · <a href="#" data-close="signup">Create account</a></p>',
     onSubmit: (v) => logIn(v.username, v.password),
+    extra: (sheet, ctl) => wireGoogle(sheet, ctl, googleSignIn),
   });
   if (r === 'forgot') return openRecover();
   if (r === 'signup') return openSignUp();
-  if (r?.session) toast(`☁️ Welcome back, ${r.username}!`);
+  if (r?.session) toast(r.created ? `☁️ Account ready: ${r.username}` : `☁️ Welcome back, ${r.username}!`);
   return r;
 }
 
@@ -975,10 +1013,12 @@ async function renderAccountBox() {
   if (acc?.mode === 'server') {
     box.innerHTML = `<div class="account-card">
       <div class="account-who"><span class="account-avatar">☁️</span><div><b>${esc(acc.username)}</b><div class="small muted">${state}</div></div></div>
-      <p class="small muted">Your progress syncs to every device you log in on.</p>
+      <p class="small muted">Your progress syncs to every device you log in on.${acc.google ? ' <b>Google sign-in is on.</b>' : ''}</p>
       <div class="row" style="flex-wrap:wrap;gap:8px">
         <button class="btn sm blue" data-acc="sync">🔄 Sync now</button>
-        <button class="btn sm ghost" data-acc="password">🔑 Change password</button>
+        ${acc.password ? '<button class="btn sm ghost" data-acc="password">🔑 Change password</button>' : ''}
+        ${googleSupported() && !acc.google ? '<button class="btn sm ghost" data-acc="glink">🔗 Link Google</button>' : ''}
+        ${acc.google && acc.password ? '<button class="btn sm ghost" data-acc="gunlink">Unlink Google</button>' : ''}
         <button class="btn sm ghost" data-acc="logout">Log out</button>
         <button class="btn sm red" data-acc="delete">Delete account</button>
       </div></div>`;
@@ -1016,6 +1056,13 @@ async function accountAction(a) {
   else if (a === 'logout') {
     const ok = await modal('<h2>Log out?</h2><p>Your progress stays on this device and in your account.</p>', { buttons: [{ label: 'Log out', value: true, cls: 'blue' }, { label: 'Cancel', value: false, cls: 'ghost' }], row: true });
     if (ok) { await logOut(); toast('Logged out'); }
+  } else if (a === 'glink') {
+    const tok = await askGoogleToken('🔗 Link Google', '<p class="small muted">Next time you can sign in with one tap. Google only tells Tidepop a sign-in id.</p>');
+    if (tok) {
+      try { await linkGoogle(tok); api.track('link', 'glink'); toast('🔗 Google linked'); } catch (e) { toast(e.message || "Couldn't link Google"); }
+    }
+  } else if (a === 'gunlink') {
+    try { await unlinkGoogle(); toast('Google unlinked'); } catch (e) { toast(e.message || "Couldn't unlink Google"); }
   } else if (a === 'password') {
     const r = await authForm({
       title: '🔑 Change password',
@@ -1024,6 +1071,12 @@ async function accountAction(a) {
       onSubmit: (v) => changePassword(v.current, v.password),
     });
     if (r) toast('🔑 Password changed – other devices will ask you to log in again');
+  } else if (a === 'delete' && !cloudAccount()?.password) {
+    // a Google-only account has no password: confirm with a fresh Google sign-in
+    const tok = await askGoogleToken('🗑️ Delete your account?', '<p>This permanently deletes your account and its cloud save. Progress on <b>this</b> device stays. Confirm by signing in with the same Google account.</p>');
+    if (tok) {
+      try { await deleteAccount(null, tok); toast('Account deleted'); } catch (e) { toast(e.message || "Couldn't delete the account"); }
+    }
   } else if (a === 'delete') {
     const r = await authForm({
       title: '🗑️ Delete your account?',

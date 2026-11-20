@@ -24,7 +24,7 @@ const emit = (merged = false) => { for (const fn of listeners) { try { fn(status
 /** Who is signed in: { mode: 'server', username } | { mode: 'claude' } | null */
 export function cloudAccount() {
   const c = load().cloud;
-  if (c?.mode === 'server' && c.session) return { mode: 'server', username: c.username, syncedAt: c.syncedAt || null };
+  if (c?.mode === 'server' && c.session) return { mode: 'server', username: c.username, syncedAt: c.syncedAt || null, google: !!c.google, password: c.password !== false };
   if (c?.mode === 'claude' && !c.off) return { mode: 'claude', syncedAt: c.syncedAt || null };
   return null;
 }
@@ -131,7 +131,7 @@ export async function startCloud() {
 // ---------------------------------------------------------------- account actions (server)
 function applyLogin(r) {
   update((d) => {
-    d.cloud = { mode: 'server', username: r.username, session: r.session, rev: 0, syncedAt: null };
+    d.cloud = { mode: 'server', username: r.username, session: r.session, rev: 0, syncedAt: null, google: !!r.google, password: r.password !== false };
     // this device now plays as the account's leaderboard player
     if (r.playerId) d.playerId = r.playerId;
     if (r.token) d.token = r.token;
@@ -146,6 +146,29 @@ export async function signUp(username, password) {
   applyLogin(r);
   await syncNow();
   return r; // includes the one-time recovery code
+}
+
+/** Sign in with a Google ID token (adults only). Creates the account the first time. */
+export async function googleSignIn(idToken) {
+  const s = load();
+  if (!policy(s).googleSignIn) throw Object.assign(new Error('Accounts are for players 13 and older'), { status: 403 });
+  const r = await accountCall('google', { idToken, age: ADULT_BAND, playerId: s.playerId, token: s.token, name: s.name });
+  applyLogin(r);
+  await syncNow();
+  return r; // r.created tells a brand-new account from a returning one
+}
+
+/** Add Google as another way into the signed-in account. */
+export async function linkGoogle(idToken) {
+  const r = await accountCall('google-link', { session: load().cloud.session, idToken });
+  setCloud({ google: true });
+  return r;
+}
+
+export async function unlinkGoogle() {
+  const r = await accountCall('google-unlink', { session: load().cloud.session });
+  setCloud({ google: false });
+  return r;
 }
 
 export async function logIn(username, password) {
@@ -181,9 +204,9 @@ export async function logOut() {
   signOutLocal();
 }
 
-export async function deleteAccount(password) {
+export async function deleteAccount(password, idToken) {
   const c = load().cloud;
-  await accountCall('delete', { session: c.session, password });
+  await accountCall('delete', { session: c.session, ...(idToken ? { idToken } : { password }) });
   signOutLocal();
 }
 

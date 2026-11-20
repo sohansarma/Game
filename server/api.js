@@ -9,6 +9,7 @@ import { getLevel, MAX_LEVEL } from '../public/js/levels.js';
 import { BOARDS, acceptableKeys, dayKey, weekKey, dailyConfig, deepConfig, blocksSeed, ENGINE_VERSION } from '../public/js/modes.js';
 import { cleanName, nameProblem } from '../public/js/storage.js';
 import { createAccounts, MAX_SAVE_BYTES } from './accounts.js';
+import { createGoogleVerifier } from './google.js';
 import { noopEvents } from './events.js';
 import { verifyArcade, gameForBoard } from '../public/js/arcade/index.js';
 import * as L from '../public/js/league.js';
@@ -78,11 +79,11 @@ function rateLimiter({ capacity = 40, refillPerSec = 0.5 } = {}) {
   };
 }
 
-export function createApi(store, { now = () => new Date(), origin = process.env.ALLOWED_ORIGIN || '*', rate = {}, events = noopEvents() } = {}) {
+export function createApi(store, { now = () => new Date(), origin = process.env.ALLOWED_ORIGIN || '*', rate = {}, events = noopEvents(), google = createGoogleVerifier() } = {}) {
   const { db } = store;
   const limit = rateLimiter(rate);
   const fail = (status, error) => Object.assign(new Error(error), { status });
-  const accounts = createAccounts({ store, now, fail, players: db.players });
+  const accounts = createAccounts({ store, now, fail, players: db.players, google });
 
   function auth(body) {
     const p = typeof body.playerId === 'string' && db.players[body.playerId];
@@ -545,7 +546,7 @@ export function createApi(store, { now = () => new Date(), origin = process.env.
     const ip = req.socket.remoteAddress || 'x';
     try {
       if (req.method === 'GET' && url.pathname === '/api/health') {
-        return send(res, 200, { ok: true, v: ENGINE_VERSION }, origin);
+        return send(res, 200, { ok: true, v: ENGINE_VERSION, ...(google.enabled ? { google: google.clientIds[0] } : {}) }, origin);
       }
       if (req.method === 'GET' && url.pathname === '/api/ghost') {
         const gh = db.ghosts?.[boardId(url.searchParams.get('board'), url.searchParams.get('key'))];
