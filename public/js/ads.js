@@ -57,8 +57,11 @@ export async function changeAdChoices() {
   await initAds();
 }
 
-/** Counted when the "watch an ad" button is shown, so the dashboard can show offer → start → done. */
-export const noteOffer = () => track('ad', 'offer');
+// every spot counts its own funnel: the end-of-game bonus is offer/start/done, revive is offer-revive/start-revive/done-revive
+const tag = (b, placement) => (placement && placement !== 'endgame' ? `${b}-${placement}` : b);
+
+/** Counted when an ad button is shown, so the dashboard can show offer → start → done per spot. */
+export const noteOffer = (placement = 'endgame') => track('ad', tag('offer', placement));
 
 /**
  * Show a rewarded ad the player asked for. Resolves { rewarded } – grant the reward only when true.
@@ -66,11 +69,11 @@ export const noteOffer = () => track('ad', 'offer');
  */
 export async function showRewarded(placement = 'endgame') {
   if (!adsAvailable() || !(await initAds())) return { rewarded: false, reason: 'unavailable' };
-  track('ad', 'start');
+  track('ad', tag('start', placement));
   let r = 'failed';
   try { r = await bridge().showRewarded({ placement }); } catch { r = 'failed'; }
-  if (r === 'rewarded') { track('ad', 'done'); return { rewarded: true }; }
-  track('ad', r === 'closed' ? 'skip' : r === 'noad' ? 'nofill' : 'fail');
+  if (r === 'rewarded') { track('ad', tag('done', placement)); return { rewarded: true }; }
+  track('ad', tag(r === 'closed' ? 'skip' : r === 'noad' ? 'nofill' : 'fail', placement));
   return { rewarded: false, reason: r };
 }
 

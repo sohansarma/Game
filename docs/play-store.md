@@ -13,6 +13,8 @@ Tidepop is **for everyone, not child-directed**. The code enforces one rule ever
 | Analytics | Anonymous totals only, **no install id** | Random on-device install id (deleted when they switch counts off) |
 | Ads before the age question | Never | Never |
 
+Rewarded-ad spots: **bonus shells** after an arcade game, and **revive** (once per run) in Reef Blocks and Shell Merge when the run ends. A revive is a logged action the server replays, so scores stay verified. It is **off in the Daily challenges and friend challenges**, because those are the same ad-free run for everyone. The server cannot tell whether an ad was actually watched, so a modified client could revive once per all-time run without one; that is the accepted limit.
+
 ## Play Console – Target audience and content
 
 - **Target age groups:** pick the groups you actually want. Choosing any group under 13 puts the app under Play's *Families* policy. Because the game appeals to both, the intended setup is a **mixed audience**: children *and* adults, with a neutral age screen. Confirm in Play Console help which options apply to a mixed-audience app.

@@ -95,3 +95,17 @@ test('the offer is counted and Ad choices re-runs setup for adults only', async 
   await ads.changeAdChoices();
   assert.ok(calls.some((c) => c[0] === 'options'));
 });
+
+test('revive has its own funnel next to the end-of-game bonus', async () => {
+  update((d) => { d.ageBand = '13+'; });
+  const ads = await freshAds();
+  installBridge(); outcome = 'rewarded'; sent.length = 0;
+  ads.noteOffer('revive');
+  assert.equal((await ads.showRewarded('revive')).rewarded, true);
+  outcome = 'closed';
+  await ads.showRewarded('revive');
+  an.flush();
+  const ev = await events();
+  for (const e of ['ad:offer-revive', 'ad:start-revive', 'ad:done-revive', 'ad:skip-revive']) assert.ok(ev.includes(e), e + ' in ' + ev);
+  assert.ok(!ev.includes('ad:start'), 'the bonus funnel is untouched');
+});

@@ -518,7 +518,7 @@ export function createApi(store, { now = () => new Date(), origin = process.env.
     } else {
       const seed = Number(body.seed);
       if (board === 'blocks' && (!Number.isInteger(seed) || seed < 0 || seed > 0xffffffff)) throw fail(400, 'bad seed');
-      const r = replayBlocks(blocksSeed(board, key, seed), log);
+      const r = replayBlocks(blocksSeed(board, key, seed), log, { noRevive: board === 'blocksDaily' });
       if (!r.ok) throw fail(422, 'replay failed: ' + r.reason);
       if (r.game.state !== 'over') throw fail(422, 'game not finished');
       score = r.game.score;

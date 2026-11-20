@@ -3119,8 +3119,38 @@ async function playArcade(id, { daily, seed: forcedSeed, challenge } = {}) {
   }
 }
 
+/**
+ * Android app only: after a game over, offer ONE revive for a rewarded ad (never in Daily runs or friend challenges).
+ * Resolves true when the player watched the ad and the sim was revived – the caller then resumes play.
+ */
+async function offerRevive(sim, title) {
+  if (!adsAvailable() || !sim.canRevive?.()) return false;
+  noteOffer('revive');
+  const r = await modal(`<h2>${title}</h2><p>Watch a short ad to clear some space and keep playing. You can do this once per run.</p>`, {
+    dismissable: false, row: true,
+    buttons: [{ label: '📺 Revive', value: 'ad', cls: 'green' }, { label: 'End the run', value: 'end', cls: 'ghost' }],
+  });
+  if (r !== 'ad') return false;
+  const res = await showRewarded('revive');
+  if (!res.rewarded) { toast(res.reason === 'closed' ? 'Watch the whole ad to revive' : 'No ad right now – your run is saved'); return false; }
+  return sim.revive();
+}
+
 async function endArcade(run) {
-  if (run.ended) return;
+  if (run.ended || run.offering) return;
+  if (!run.daily && !run.challenge) {
+    run.offering = true;
+    const revived = await offerRevive(run.sim, run.sim.overReason || 'Game over!');
+    run.offering = false;
+    if (revived) {
+      sfx.win();
+      view?.rebuild?.();
+      view?.renderControls?.();
+      view?.hooks?.onChange?.(run.sim);
+      toast('🌊 Space cleared – keep going!');
+      return;
+    }
+  }
   run.ended = true;
   const g = ARCADE_BY_ID[run.id];
   const score = run.sim.score;
@@ -3692,6 +3722,20 @@ function playBlocks(opts) {
         if (game.undosLeft > 0 && game.prev && !run.rescue) {
           const u = await modal('<h2>Out of room!</h2><p>You still have an undo – take back your last piece?</p>', { buttons: [{ label: '↶ Undo last piece', value: 'undo', cls: 'green' }, { label: 'End the run', value: 'end', cls: 'ghost' }], dismissable: false });
           if (u === 'undo' && game.undo()) { sfx.swap(); refresh(); view?.sync?.(); return; }
+        }
+        // Android app: one revive per endless run for a rewarded ad (not in the Daily, which is the same ad-free run for everyone)
+        if (!run.daily && !run.rescue && !run.revivePending) {
+          run.revivePending = true;
+          const revived = await offerRevive(game, 'Out of room!');
+          run.revivePending = false;
+          if (revived) {
+            sfx.win();
+            refresh();
+            view?.sync?.();
+            update((d) => { d.blocksRun = { seed, log: game.log }; });
+            toast('🌊 Space cleared – keep going!');
+            return;
+          }
         }
         setTimeout(() => (run.rescue ? endRescue(run) : endBlocks(run)), 600);
       }

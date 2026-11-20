@@ -52,7 +52,7 @@ export function verifyArcade(board, key, seed, log) {
   if (!daily && (!Number.isInteger(seed) || seed < 0 || seed > 0xffffffff)) return { ok: false, reason: 'bad seed' };
   let r;
   try {
-    r = game.replay(arcadeSeed(game.id, daily, key, seed), log);
+    r = game.replay(arcadeSeed(game.id, daily, key, seed), log, { noRevive: daily }); // the daily run is the same ad-free run for everyone
   } catch {
     return { ok: false, reason: 'replay crashed' };
   }

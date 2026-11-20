@@ -69,6 +69,7 @@ export class BlockGame {
     this.placed = 0;
     this.bestCombo = 0;
     this.undosLeft = undos;
+    this.revived = false; // one revive per endless run (a rewarded ad in the Android app)
     this.state = 'playing';
     this.log = [];
     this.prev = null;
@@ -295,6 +296,42 @@ export class BlockGame {
     return { ok: true, rows, cols, lines, clearedCells, points, combo: lines ? this.combo : 0, perfect, refilled, freed: freedNow || [], tide };
   }
 
+  /** A run that ran out of room can be revived once (endless runs only, never rescue levels). */
+  canRevive() {
+    return this.state === 'over' && !this.revived && !this.rescue && this.placed > 0;
+  }
+
+  /**
+   * Revive: the fullest rows and columns are cleared (no points) and a fresh tray is dealt, then play goes on.
+   * Deterministic, so the server replays it exactly; it is the 'r' action in the log.
+   */
+  revive() {
+    if (!this.canRevive()) return false;
+    this.log.push(['r']);
+    this.revived = true;
+    this.prev = null;
+    this.combo = 0;
+    this.sinceClear = 0;
+    const lines = [];
+    for (let i = 0; i < SIZE; i++) {
+      lines.push({ row: true, i, n: this.board[i].filter((v) => v !== -1).length });
+      lines.push({ row: false, i, n: this.board.filter((r) => r[i] !== -1).length });
+    }
+    // fullest first; ties go to rows, then the lower index, so every replay picks the same lines
+    lines.sort((a, b) => b.n - a.n || (a.row === b.row ? a.i - b.i : a.row ? -1 : 1));
+    let used = 0;
+    const clear = () => {
+      const l = lines[used++];
+      for (let k = 0; k < SIZE; k++) { if (l.row) this.board[l.i][k] = -1; else this.board[k][l.i] = -1; }
+    };
+    for (let k = 0; k < 4; k++) clear();
+    this.refill();
+    // make sure something fits: clear another line and deal again if not
+    while (used < lines.length && !this.tray.some((x) => x && this.fitsAnywhere(x.piece))) { clear(); this.refill(); }
+    this.state = this.tray.some((x) => x && this.fitsAnywhere(x.piece)) ? 'playing' : 'over';
+    return this.state === 'playing';
+  }
+
   undo() {
     if (!this.prev || this.undosLeft <= 0) return false;
     this.loadState(this.prev);
@@ -305,14 +342,18 @@ export class BlockGame {
   }
 }
 
+/** opts.noRevive: refuse a revive in the log (the Daily board is the same ad-free run for everyone). */
 export function replayBlocks(seed, log, opts = {}) {
-  const g = new BlockGame({ seed, ...opts });
+  const { noRevive, ...gameOpts } = opts;
+  const g = new BlockGame({ seed, ...gameOpts });
   for (const a of log) {
     if (!Array.isArray(a)) return { ok: false, reason: 'bad action', game: g };
     if (a[0] === 'p') {
       if (!g.place(a[1], a[2], a[3]).ok) return { ok: false, reason: 'invalid placement', game: g };
     } else if (a[0] === 'u') {
       if (!g.undo()) return { ok: false, reason: 'invalid undo', game: g };
+    } else if (a[0] === 'r') {
+      if (noRevive || !g.revive()) return { ok: false, reason: 'invalid revive', game: g };
     } else return { ok: false, reason: 'unknown action', game: g };
   }
   return { ok: true, game: g };

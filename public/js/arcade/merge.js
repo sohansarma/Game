@@ -29,6 +29,7 @@ class MergeSim {
     this.best = 2;
     this.over = false;
     this.overReason = '';
+    this.revived = false; // one revive per run (a rewarded ad in the Android app)
     this.log = [];
     this.spawn();
     this.spawn();
@@ -134,6 +135,29 @@ class MergeSim {
     return true;
   }
 
+  /** Out of moves (not cashed out, not the 2048 win) and not revived yet. */
+  canRevive() {
+    return this.over && !this.revived && this.overReason === 'No more moves!';
+  }
+
+  /**
+   * Revive: the six smallest shells are taken off the board (ties: top-left first) and play goes on.
+   * Deterministic ('r' in the log), so the server replays it exactly.
+   */
+  revive() {
+    if (!this.canRevive()) return false;
+    this.log.push(['r']);
+    const all = [];
+    for (let r = 0; r < N; r++) for (let c = 0; c < N; c++) if (this.grid[r][c]) all.push([r, c, this.grid[r][c].v]);
+    all.sort((a, b) => a[2] - b[2] || a[0] - b[0] || a[1] - b[1]);
+    for (const [r, c] of all.slice(0, 6)) this.grid[r][c] = null;
+    this.revived = true;
+    this.over = false;
+    this.overReason = '';
+    this.snap = null;
+    return true;
+  }
+
   canMove() {
     for (let r = 0; r < N; r++)
       for (let c = 0; c < N; c++) {
@@ -153,10 +177,11 @@ class MergeSim {
   }
 }
 
-function replay(seed, log) {
+function replay(seed, log, opts = {}) {
   const sim = new MergeSim(seed);
   for (const a of log) {
     if (!Array.isArray(a)) return { ok: false, reason: 'bad action', sim };
+    if (a[0] === 'r') { if (opts.noRevive || !sim.revive()) return { ok: false, reason: 'invalid revive', sim }; continue; } // the only action allowed after game over
     if (sim.over) return { ok: false, reason: 'input after game over', sim };
     if (a[0] === 'm') { if (!sim.move(a[1]).ok) return { ok: false, reason: 'invalid move', sim }; }
     else if (a[0] === 'u') { if (!sim.undo()) return { ok: false, reason: 'invalid undo', sim }; }

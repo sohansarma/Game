@@ -69,7 +69,7 @@ function verifyLocally(entry) {
     if (!r.ok || r.game.state === 'playing') throw Object.assign(new Error('replay failed'), { status: 422 });
     g = r.game;
   } else {
-    const r = replayBlocks(blocksSeed(board, entry.key, entry.seed), entry.log);
+    const r = replayBlocks(blocksSeed(board, entry.key, entry.seed), entry.log, { noRevive: board === 'blocksDaily' });
     if (!r.ok || r.game.state !== 'over') throw Object.assign(new Error('replay failed'), { status: 422 });
     g = r.game;
   }

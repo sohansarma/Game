@@ -22,7 +22,7 @@ Each event is `{ e: name, b: bucket, n?: number }` plus `aud` (`a` adult / `c` c
 | `perf` | `fast` / `mid` / `slow` | page load time (<1 s, <3 s, slower) |
 | `install` | `pwa` | the web app was installed |
 | `consent` | `granted` / `denied` / `notrequired` | ad-consent result (adults) |
-| `ad` | `offer` → `start` → `done` / `skip` / `nofill` / `fail` | rewarded-ad funnel |
+| `ad` | `offer` → `start` → `done` / `skip` / `nofill` / `fail` | rewarded-ad funnel for the end-of-game bonus; the revive spot has its own buckets with a `-revive` suffix (`offer-revive`, `start-revive`, `done-revive`, …) |
 | `link` | `google`, `glink` | Google sign-in / link used |
 
 Nothing is sent until the age question is answered. Events are kept 180 days.
