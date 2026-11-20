@@ -1,0 +1,7 @@
+{
+  "appId": "app.tidepop.arcade",
+  "appName": "Tidepop",
+  "webDir": "www",
+  "server": { "androidScheme": "https" },
+  "android": { "allowMixedContent": false }
+}

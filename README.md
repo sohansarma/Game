@@ -145,7 +145,8 @@ Players can make games for each other without writing code:
 - Works offline (service worker) and syncs when you're back online. Progress can be exported and imported as a save code. Reset needs a two-step confirmation.
 
 **Privacy**
-- No accounts, emails, ads, analytics or trackers.
+- The website has no ads and no third-party trackers. Accounts (optional, 13+) need no email. Anonymous usage counts are optional and can be switched off, which also deletes the install id (adults only; under-13s never get one). See [`docs/analytics.md`](docs/analytics.md) and [`public/privacy.html`](public/privacy.html).
+- The Android app adds optional rewarded ads and Google sign-in for adults only; under-13 players only ever see child-directed, non-personalised ads. See [`docs/play-store.md`](docs/play-store.md).
 - Players choose their own name (3–20 characters); the same rules run on the device and the server: no links, emails or phone numbers, reserved and offensive words blocked.
 - The server stores only the nickname, a random ID, a token hash and scores. IP addresses are never written to disk.
 - Daily boards are deleted after 30 days and weekly boards after 12 weeks. "Delete my online scores" removes everything about you.

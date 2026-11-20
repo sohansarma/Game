@@ -9,8 +9,10 @@
 //   @capacitor-community/admob    – rewarded ads + Google's consent form (UMP)
 //   @capgo/capacitor-social-login – Sign in with Google (Credential Manager)
 //
-// NOTE: written against those plugins' documented APIs but not yet run on a
-// device – test with AdMob test ads and a test Google account before release.
+// NOTE: method, event and option names were checked against the published
+// type definitions of @capacitor-community/admob 8.4 and
+// @capgo/capacitor-social-login 8.7, but this has not been run on a device
+// yet – test with AdMob test ads and a test Google account before release.
 (function () {
   var C = window.Capacitor;
   if (!C || typeof C.isNativePlatform !== 'function' || !C.isNativePlatform()) return;
@@ -18,6 +20,7 @@
   var N = (window.TidepopNative = {});
   var IDS = window.TIDEPOP_ADMOB || {};
 
+  var RATING = { G: 'General', PG: 'ParentalGuidance', T: 'Teen', MA: 'MatureAudience' };
   var AdMob = P.AdMob;
   if (AdMob) {
     var cfg = { mode: 'child' };
@@ -29,7 +32,7 @@
           initializeForTesting: !!IDS.testing,
           tagForChildDirectedTreatment: !!c.childDirected,
           tagForUnderAgeOfConsent: !!c.underAge,
-          maxAdContentRating: c.maxRating || 'G',
+          maxAdContentRating: RATING[c.maxRating] || 'General', // the plugin wants the words, not the letters
         });
       },
       // Google's consent form (UMP). The SDK itself then limits ads to what the person agreed to.
