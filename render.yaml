@@ -1,15 +1,26 @@
-# One-click deploy on Render (free web service). Note: the free plan has no
-# persistent disk, so leaderboards AND player accounts/cloud saves reset when
-# the service is redeployed or restarted. For real players add a disk (paid
-# plan, mount it and set DATA_DIR to the mount path) or use Fly.io volumes.
+# Deploy on Render. Player accounts, cloud saves, leaderboards AND analytics
+# (db.json + analytics.db) live in DATA_DIR, so it MUST be on a persistent disk.
+# Render only offers persistent disks on paid plans, so this blueprint uses
+# "starter" (about $7/month plus $0.25/GB for the disk). On the free plan
+# everything resets on every deploy/restart – fine for a demo, not for real players.
+# Fly.io volumes work the same way: mount one and set DATA_DIR to its path.
+# Set ADMIN_KEY (Render dashboard → Environment) to read /admin and moderate.
 services:
   - type: web
     name: tidepop
     runtime: node
-    plan: free
+    plan: starter
     buildCommand: "echo no build needed"
     startCommand: node server/server.js
     healthCheckPath: /api/health
+    disk:
+      name: tidepop-data
+      mountPath: /data
+      sizeGB: 1
     envVars:
       - key: DATA_DIR
-        value: ./data
+        value: /data
+      - key: NODE_VERSION
+        value: "22"
+      - key: ADMIN_KEY
+        sync: false

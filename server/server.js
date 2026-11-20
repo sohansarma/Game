@@ -1,4 +1,4 @@
-// Tidepop server – zero dependencies (Node 18+).
+// Tidepop server – zero npm dependencies (Node 22+: detailed analytics uses the built-in node:sqlite).
 //  * serves the PWA from ../public
 //  * free leaderboard API with server-side replay verification
 //
@@ -10,6 +10,7 @@ import { fileURLToPath } from 'node:url';
 import path from 'node:path';
 import { createStore } from './store.js';
 import { createApi } from './api.js';
+import { createEvents } from './events.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const PUBLIC = path.resolve(__dirname, '..', 'public');
@@ -35,12 +36,14 @@ const SECURITY_HEADERS = {
 
 export function createServer({ dataDir = process.env.DATA_DIR || path.resolve(__dirname, '..', 'data'), now, rate } = {}) {
   const store = createStore(dataDir);
-  const api = createApi(store, { now, rate });
+  const events = createEvents(dataDir, { now });
+  const api = createApi(store, { now, rate, events });
 
   const server = http.createServer(async (req, res) => {
     try {
       const url = new URL(req.url, 'http://localhost');
       if (url.pathname.startsWith('/api/')) return await api.handle(req, res, url);
+      if (url.pathname === '/admin') return await serveAdmin(res);
       return await serveStatic(url.pathname, res);
     } catch (e) {
       console.error(e);
@@ -48,8 +51,15 @@ export function createServer({ dataDir = process.env.DATA_DIR || path.resolve(__
       res.end(JSON.stringify({ error: 'server error' }));
     }
   });
-  server.on('close', () => store.flush());
-  return { server, store };
+  server.on('close', () => { store.flush(); events.close(); });
+  return { server, store, events };
+}
+
+/** The team dashboard. The page itself holds no data; it asks /api/admin/report with the team key. */
+async function serveAdmin(res) {
+  const body = await readFile(path.join(__dirname, 'admin.html'));
+  res.writeHead(200, { ...SECURITY_HEADERS, 'content-type': MIME['.html'], 'cache-control': 'no-store', 'x-robots-tag': 'noindex', 'content-security-policy': "default-src 'self'; style-src 'unsafe-inline'; script-src 'unsafe-inline'" });
+  res.end(body);
 }
 
 async function serveStatic(pathname, res) {
@@ -85,10 +95,11 @@ async function serveStatic(pathname, res) {
 
 if (import.meta.url === `file://${process.argv[1]}`) {
   const port = Number(process.env.PORT || 8080);
-  const { server, store } = createServer();
+  const { server, store, events } = createServer();
   server.listen(port, () => console.log(`Tidepop running on http://localhost:${port}`));
   const shutdown = () => {
     store.flush();
+    events.close();
     process.exit(0);
   };
   process.on('SIGINT', shutdown);

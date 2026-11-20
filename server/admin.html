@@ -1,0 +1,98 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="robots" content="noindex">
+<title>Tidepop – team dashboard</title>
+<style>
+  :root { --bg:#f4f9ff; --card:#fff; --fg:#10233f; --muted:#4b6283; --line:rgba(0,0,0,.12); --accent:#0b63a8; --bar:#2f8fd8; --warn:#b3261e; }
+  @media (prefers-color-scheme: dark) { :root { --bg:#0e2a52; --card:#14335f; --fg:#eef6ff; --muted:#a9c3e6; --line:rgba(255,255,255,.18); --accent:#8fe3ff; --bar:#5cc3f0; --warn:#ff9a92; } }
+  * { box-sizing: border-box; }
+  body { margin:0; background:var(--bg); color:var(--fg); font:15px/1.5 system-ui,-apple-system,"Segoe UI",sans-serif; }
+  main { max-width:1000px; margin:0 auto; padding:16px; }
+  h1 { font-size:1.4rem; margin:6px 0 2px; } h2 { font-size:1.05rem; margin:0 0 8px; }
+  .muted { color:var(--muted); font-size:.9rem; }
+  .bar { display:flex; gap:8px; flex-wrap:wrap; align-items:center; margin:10px 0 16px; }
+  input, select, button { font:inherit; padding:7px 10px; border-radius:8px; border:1px solid var(--line); background:var(--card); color:var(--fg); }
+  button { cursor:pointer; background:var(--accent); color:var(--bg); border:0; font-weight:600; }
+  .grid { display:grid; grid-template-columns:repeat(auto-fit,minmax(150px,1fr)); gap:10px; margin-bottom:14px; }
+  .tile, section { background:var(--card); border:1px solid var(--line); border-radius:12px; padding:12px 14px; }
+  .tile b { display:block; font-size:1.5rem; } section { margin-bottom:14px; overflow-x:auto; }
+  table { border-collapse:collapse; width:100%; font-size:.9rem; } th, td { text-align:right; padding:4px 8px; border-bottom:1px solid var(--line); white-space:nowrap; }
+  th:first-child, td:first-child { text-align:left; } th { color:var(--muted); font-weight:600; }
+  .spark { display:flex; align-items:flex-end; gap:2px; height:70px; } .spark i { flex:1; background:var(--bar); min-height:2px; border-radius:2px 2px 0 0; }
+  .err { color:var(--warn); } .hide { display:none; }
+</style>
+</head>
+<body>
+<main>
+  <h1>🐚 Tidepop – team dashboard</h1>
+  <p class="muted">Anonymous usage only. Adults who leave counts on have a random install id; under-13 players are counted without any id. Times are UTC.</p>
+  <div class="bar">
+    <input id="key" type="password" placeholder="Team key" autocomplete="off" aria-label="Team key">
+    <select id="days" aria-label="Range"><option value="7">7 days</option><option value="30" selected>30 days</option><option value="90">90 days</option></select>
+    <button id="go">Load</button><span id="msg" class="muted" role="status"></span>
+  </div>
+  <div id="out" class="hide">
+    <div class="grid" id="tiles"></div>
+    <section><h2>Active installs per day</h2><div class="spark" id="spark" role="img" aria-label="Active installs per day"></div><div class="muted" id="sparkcap"></div></section>
+    <section><h2>Retention (adult installs, by first day)</h2><div id="ret"></div></section>
+    <section><h2>Games</h2><div id="games"></div></section>
+    <section><h2>Funnel steps</h2><div id="funnel"></div></section>
+    <section><h2>Ads &amp; consent</h2><div id="ads"></div></section>
+    <section><h2>Errors &amp; speed</h2><div id="errs"></div></section>
+    <section><h2>Daily event totals (adults / under-13)</h2><div id="daily"></div></section>
+  </div>
+</main>
+<script>
+const $ = (id) => document.getElementById(id);
+const esc = (s) => String(s).replace(/[&<>"]/g, (c) => ({ '&':'&amp;', '<':'&lt;', '>':'&gt;', '"':'&quot;' }[c]));
+const pct = (a, b) => (b ? Math.round((a / b) * 100) + '%' : '–');
+const table = (head, rows) => rows.length ? `<table><thead><tr>${head.map((h) => `<th>${esc(h)}</th>`).join('')}</tr></thead><tbody>${rows.map((r) => `<tr>${r.map((c) => `<td>${esc(c)}</td>`).join('')}</tr>`).join('')}</tbody></table>` : '<p class="muted">Nothing yet.</p>';
+const kv = (o) => table(['Item', 'Count'], Object.entries(o || {}));
+try { $('key').value = sessionStorage.getItem('tp-admin') || ''; } catch {}
+
+async function load() {
+  const key = $('key').value.trim();
+  $('msg').textContent = 'Loading…';
+  try {
+    const r = await fetch('/api/admin/report?days=' + $('days').value, { headers: { 'x-admin-key': key } });
+    if (r.status === 403) throw new Error('Wrong team key');
+    if (!r.ok) throw new Error('Server error ' + r.status);
+    const { enabled, report: R } = await r.json();
+    try { sessionStorage.setItem('tp-admin', key); } catch {}
+    if (!enabled || !R) { $('msg').textContent = 'Detailed analytics needs Node 22+ on the server (daily tallies still work).'; return; }
+    render(R);
+    $('msg').textContent = `${R.from} → ${R.to}`;
+  } catch (e) { $('msg').innerHTML = `<span class="err">${esc(e.message)}</span>`; }
+}
+
+function render(R) {
+  $('out').classList.remove('hide');
+  const last = R.days[R.days.length - 1];
+  const sum = (o) => Object.values(o || {}).reduce((a, b) => a + b, 0);
+  const opens = Object.values(R.perDay).reduce((n, d) => n + (d.open ? d.open.a + d.open.c : 0), 0);
+  const games = Object.values(R.games).reduce((n, g) => n + g.start, 0);
+  $('tiles').innerHTML = [
+    ['Active today', R.dau[last] || 0], ['New installs (range)', sum(R.newInstalls)], ['Opens (all players)', opens],
+    ['Games started', games], ['Errors', sum(R.errors)], ['Ad plays completed', R.ads.done || 0],
+  ].map(([k, v]) => `<div class="tile"><span class="muted">${esc(k)}</span><b>${esc(v)}</b></div>`).join('');
+  const max = Math.max(1, ...R.days.map((d) => R.dau[d] || 0));
+  $('spark').innerHTML = R.days.map((d) => `<i title="${d}: ${R.dau[d] || 0}" style="height:${((R.dau[d] || 0) / max) * 100}%"></i>`).join('');
+  $('sparkcap').textContent = `peak ${max}`;
+  const rc = Object.entries(R.retention).sort();
+  $('ret').innerHTML = table(['First day', 'Installs', 'Day 1', 'Day 7', 'Day 30'], rc.map(([d, c]) => [d, c.size, pct(c.d1, c.size), pct(c.d7, c.size), pct(c.d30, c.size)]));
+  $('games').innerHTML = table(['Game', 'Started', 'Finished', 'Finish rate', 'Verified plays'], Object.entries(R.games).sort((a, b) => b[1].start - a[1].start).map(([g, v]) => [g, v.start, v.end, v.finishRate == null ? '–' : Math.round(v.finishRate * 100) + '%', v.game]));
+  $('funnel').innerHTML = kv(R.funnel);
+  $('ads').innerHTML = `<h3 class="muted">Ads</h3>${kv(R.ads)}<h3 class="muted">Consent</h3>${kv(R.consent)}<h3 class="muted">Sign-in / account links</h3>${kv(R.links)}`;
+  $('errs').innerHTML = `<h3 class="muted">Errors</h3>${kv(R.errors)}<h3 class="muted">Load speed</h3>${kv(R.perf)}`;
+  const names = [...new Set(Object.values(R.perDay).flatMap((d) => Object.keys(d)))].sort();
+  $('daily').innerHTML = table(['Day', ...names], [...R.days].reverse().map((d) => [d, ...names.map((n) => { const e = (R.perDay[d] || {})[n]; return e ? `${e.a} / ${e.c}` : '·'; })]));
+}
+$('go').onclick = load;
+$('key').onkeydown = (e) => { if (e.key === 'Enter') load(); };
+if ($('key').value) load();
+</script>
+</body>
+</html>

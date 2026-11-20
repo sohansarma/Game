@@ -2,13 +2,14 @@
 // player's action log through the shared game engine, so a modified client
 // cannot simply post a high number.
 
-import { createHash, randomBytes, randomUUID, randomInt } from 'node:crypto';
+import { createHash, randomBytes, randomUUID, randomInt, timingSafeEqual } from 'node:crypto';
 import { replay } from '../public/js/engine.js';
 import { replayBlocks } from '../public/js/blocks.js';
 import { getLevel, MAX_LEVEL } from '../public/js/levels.js';
 import { BOARDS, acceptableKeys, dayKey, weekKey, dailyConfig, deepConfig, blocksSeed, ENGINE_VERSION } from '../public/js/modes.js';
 import { cleanName, nameProblem } from '../public/js/storage.js';
 import { createAccounts, MAX_SAVE_BYTES } from './accounts.js';
+import { noopEvents } from './events.js';
 import { verifyArcade, gameForBoard } from '../public/js/arcade/index.js';
 import * as L from '../public/js/league.js';
 import { sanitize as ugcSanitize, replay as ugcReplay } from '../public/js/maker/engine.js';
@@ -32,7 +33,7 @@ function send(res, code, body, origin) {
     'content-type': 'application/json',
     'cache-control': 'no-store',
     'access-control-allow-origin': origin,
-    'access-control-allow-headers': 'content-type',
+    'access-control-allow-headers': 'content-type, x-admin-key',
     'access-control-allow-methods': 'GET, POST, OPTIONS',
     'x-content-type-options': 'nosniff',
   });
@@ -77,7 +78,7 @@ function rateLimiter({ capacity = 40, refillPerSec = 0.5 } = {}) {
   };
 }
 
-export function createApi(store, { now = () => new Date(), origin = process.env.ALLOWED_ORIGIN || '*', rate = {} } = {}) {
+export function createApi(store, { now = () => new Date(), origin = process.env.ALLOWED_ORIGIN || '*', rate = {}, events = noopEvents() } = {}) {
   const { db } = store;
   const limit = rateLimiter(rate);
   const fail = (status, error) => Object.assign(new Error(error), { status });
@@ -182,7 +183,50 @@ export function createApi(store, { now = () => new Date(), origin = process.env.
   }
 
   // anonymous usage counts the app may send (see /privacy.html)
-  const METRIC_EVENTS = new Set(['open', 'ret', 'onboard', 'game', 'share', 'ref', 'tide', 'chest', 'signup', 'publish']);
+  // 'start'/'end' pair up per game (finish rate); 'funnel' = onboarding/sign-up steps; 'err' = client or API
+  // failures; 'ad' = rewarded-ad offer/start/done/skip/fail; 'consent' = ad-consent result; 'perf' = load speed
+  // bucket; 'link' = how an account was made or linked; 'install' = PWA/app install.
+  const METRIC_EVENTS = new Set(['open', 'ret', 'onboard', 'game', 'share', 'ref', 'tide', 'chest', 'signup', 'publish',
+    'start', 'end', 'err', 'funnel', 'install', 'ad', 'consent', 'perf', 'link']);
+  const BUCKET_RE = /^[a-z0-9_-]{1,16}$/;
+  const IID_RE = /^[a-f0-9]{32}$/;
+  const MAX_BATCH = 25;
+
+  /**
+   * Validate and store a batch of anonymous events. Children (aud 'c', or no audience given) never get an
+   * install id stored – their events only add to the tallies.
+   */
+  function ingest(list, meta = {}) {
+    if (!Array.isArray(list) || !list.length || list.length > MAX_BATCH) throw fail(400, 'bad event');
+    const clean = list.map((x) => {
+      const e = String(x?.e ?? ''), b = String(x?.b ?? '-');
+      if (!METRIC_EVENTS.has(e) || !BUCKET_RE.test(b)) throw fail(400, 'bad event');
+      const n = x?.n === undefined || x?.n === null ? null : Number(x.n);
+      if (n !== null && (!Number.isFinite(n) || n < 0 || n > 86400)) throw fail(400, 'bad event');
+      return { e, b, n: n === null ? null : Math.round(n) };
+    });
+    const adult = meta.aud === 'a';
+    const iid = adult && typeof meta.iid === 'string' && IID_RE.test(meta.iid) ? meta.iid : null;
+    const plat = meta.plat === 'app' ? 'app' : 'web';
+    const day = dayKey(now());
+    db.metrics ||= {};
+    const cutoff = dayKey(new Date(now().getTime() - 120 * 86400000));
+    for (const k of Object.keys(db.metrics)) if (k < cutoff) delete db.metrics[k];
+    const d = (db.metrics[day] ||= {});
+    for (const { e, b } of clean) {
+      const ev = (d[e] ||= {});
+      ev[b] = (ev[b] || 0) + 1;
+    }
+    store.dirty();
+    events.add(clean, { aud: adult ? 'a' : 'c', plat, iid });
+  }
+
+  const adminOk = (req, url) => {
+    const want = process.env.ADMIN_KEY;
+    const got = String(req.headers['x-admin-key'] || url.searchParams.get('key') || '');
+    if (!want || got.length !== want.length) return false;
+    return timingSafeEqual(Buffer.from(got), Buffer.from(want));
+  };
 
   // ---- community games (Creator Studio)
   function ugcSummary(rec, me) {
@@ -511,6 +555,10 @@ export function createApi(store, { now = () => new Date(), origin = process.env.
       if (req.method === 'GET' && url.pathname === '/api/league') {
         return send(res, 200, leagueView(url.searchParams.get('playerId')), origin);
       }
+      if (req.method === 'GET' && url.pathname === '/api/admin/report') {
+        if (!adminOk(req, url)) throw fail(403, 'team only');
+        return send(res, 200, { enabled: events.enabled, report: events.report(Number(url.searchParams.get('days')) || 30), tallies: db.metrics || {} }, origin);
+      }
       if (req.method === 'GET' && url.pathname === '/api/metrics') {
         // daily tallies for the team (needs ADMIN_KEY); nothing per player is ever stored
         if (!process.env.ADMIN_KEY || url.searchParams.get('key') !== process.env.ADMIN_KEY) throw fail(403, 'team only');
@@ -566,17 +614,21 @@ export function createApi(store, { now = () => new Date(), origin = process.env.
         return send(res, 200, { ok: true, shells: r.shells, result: r }, origin);
       }
       if (url.pathname === '/api/event') {
-        // anonymous usage counts: an event name and a coarse bucket, tallied per day
+        // original single-event form (no audience, so never an install id)
         const body = await readBody(req, 512);
-        const e = String(body.e || ''), b = String(body.b || '-');
-        if (!METRIC_EVENTS.has(e) || !/^[a-z0-9_-]{1,16}$/.test(b)) throw fail(400, 'bad event');
-        const day = dayKey(now());
-        db.metrics ||= {};
-        for (const k of Object.keys(db.metrics)) if (k < dayKey(new Date(now().getTime() - 120 * 86400000))) delete db.metrics[k];
-        const d = (db.metrics[day] ||= {});
-        const ev = (d[e] ||= {});
-        ev[b] = (ev[b] || 0) + 1;
-        store.dirty();
+        ingest([{ e: body.e, b: body.b || '-' }]);
+        return send(res, 200, { ok: true }, origin);
+      }
+      if (url.pathname === '/api/events') {
+        const body = await readBody(req, 4096);
+        ingest(body.list, { aud: body.aud, iid: body.iid, plat: body.plat });
+        return send(res, 200, { ok: true }, origin);
+      }
+      if (url.pathname === '/api/events/forget') {
+        // "delete my usage data": removes everything stored under this install id
+        const body = await readBody(req, 512);
+        if (typeof body.iid !== 'string' || !IID_RE.test(body.iid)) throw fail(400, 'bad id');
+        events.forget(body.iid);
         return send(res, 200, { ok: true }, origin);
       }
       const body = await readBody(req, url.pathname === '/api/account/save' ? MAX_SAVE_BYTES + 8192 : MAX_BODY);
