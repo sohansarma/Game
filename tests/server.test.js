@@ -362,5 +362,11 @@ test('online ludo: a seat nobody plays any more is handed to a bot after a pause
   const a = rebuild(m, 'host'), b = rebuild(m, 'guest');
   assert.equal(a.isAi(2), true);
   assert.deepEqual(a.game.tokens, b.game.tokens);
+  // the game really moves on when it is the absent seat's turn: a bot plays it
+  const seat = 2; a.game.turn = seat; a.game.phase = 'roll';
+  const before = a.game.tokens.map((r) => [...r]);
+  a.runBots();
+  assert.notEqual(a.game.turn, seat, 'the bot took the absent player\'s turn');
+  assert.ok(a.game.over || JSON.stringify(before) !== JSON.stringify(a.game.tokens) || a.game.turn !== seat);
   assert.equal((await call(ps[1], { action: 'move', code: 'XYZ34', moves: ['r'] })).status, 409, 'the absent player cannot move any more');
 });

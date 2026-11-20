@@ -288,7 +288,10 @@ export class LudoVersus {
   }
   runBots() {
     let guard = 0;
-    while (!this.game.over && this.isAi(this.game.turn) && guard++ < 20000) this.game.aiStep(this.skill, this.rng);
+    while (!this.game.over && this.isAi(this.game.turn) && guard++ < 20000) {
+      this.game.players[this.game.turn] = 'ai'; // a seat handed to a bot plays like any other bot
+      this.game.aiStep(this.skill, this.rng);
+    }
     if (this.game.over) this.over = true;
   }
   roll() {
