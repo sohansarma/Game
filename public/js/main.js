@@ -21,6 +21,7 @@ import { startCloud, syncNow, cloudAccount, cloudStatus, onCloudChange, signUp, 
 import { configureCozy, cozyActive, cozySleeping, wakeCozy, onSleep, isNightTime, cozySound, VIBES, VIBE } from './cozy.js';
 import * as api from './api.js';
 import { policy } from './policy.js';
+import * as analytics from './analytics.js';
 import * as live from './liveops.js';
 import { DIVISIONS, PROMOTE, DEMOTE } from './league.js';
 import { ACHIEVEMENTS, checkAchievements } from './achievements.js';
@@ -74,6 +75,7 @@ async function boot() {
     if (merged && !view && !isModalOpen() && currentScreen() === 'hub') showHub();
     if (currentScreen() === 'settings') renderAccountBox();
   });
+  analytics.start();
   startCloud().catch(() => {});
   showHub();
   // anonymous counts: one "open" a day with how long since install (for retention), and share landings
@@ -346,6 +348,7 @@ async function playChessPuzzle({ daily }) {
     if (r === 'next') playChessPuzzle({ daily: false });
     else arcadeMenu('chess');
   };
+  startRun('chess');
   view = new mod.default({
     canvas: $('#ar-canvas', el), controls: $('#ar-controls', el), sim, reducedMotion: load().settings.reducedMotion,
     hooks: {
@@ -462,6 +465,7 @@ async function playCubeFree(n, { daily = false } = {}) {
     if (solveSecs(entry) !== Infinity && solveSecs(entry) <= Math.min(...times().map(solveSecs))) sfx.win();
     show();
   };
+  startRun('cube');
   view = new mod.default({
     canvas: $('#ar-canvas', el), controls: $('#ar-controls', el), sim, reducedMotion: load().settings.reducedMotion,
     hooks: {
@@ -599,6 +603,7 @@ async function playTide(opts = {}) {
     const box = $('#ar-hud', el);
     if (box) box.innerHTML = mod.hud(sim).map((h) => `<div class="hstat ${h.big ? 'big' : ''}"><span class="lbl">${esc(String(h.label))}</span><b>${h.value}</b></div>`).join('');
   };
+  startRun('tide');
   view = new mod.default({
     canvas: $('#ar-canvas', el), controls: $('#ar-controls', el), sim, reducedMotion: load().settings.reducedMotion,
     hooks: { onChange: () => { refresh(); saveLive(); }, onOver: () => endTide(run) },
@@ -1082,6 +1087,8 @@ async function askAge() {
     buttons: [{ label: 'Under 13', value: 'u13', cls: 'blue' }, { label: '13 or older', value: '13+', cls: 'green' }],
   });
   update((d) => { d.ageBand = r; if (r === 'u13') d.name = randomNickname(); });
+  analytics.ageAnswered();
+  api.track('funnel', 'age');
   return r;
 }
 const isKid = () => policy().isChild;
@@ -1462,6 +1469,7 @@ function playMatch(run) {
     }
   };
 
+  startRun('tidepop');
   view = new MatchView($('#g-canvas', el), game, {
     reducedMotion: s.settings.reducedMotion,
     onUpdate: (score) => {
@@ -1809,11 +1817,20 @@ function weekly() {
  * game stickers; returns true if it was the hot game (2x shells).
  * kind: 'level' (Shell Swap), 'tide' (Tide of the Day solved), 'versus'.
  */
+let runStart = null; // { id, t } of the game on screen, for the finish rate and play time
+function startRun(id) {
+  runStart = { id, t: Date.now() };
+  api.track('start', id);
+  if (!load().firstGameSent) { update((d) => { d.firstGameSent = 1; }); api.track('funnel', 'firstgame'); }
+}
+
 function noteGameEnd(id, isBest, kind) {
   const hot = id === hotGameId();
   const day = dayKey();
   const season = live.seasonAt(day);
   api.track('game', id);
+  api.track('end', id, runStart && runStart.id === id ? (Date.now() - runStart.t) / 1000 : undefined);
+  runStart = null;
   if (kind === 'tide') api.track('tide', 'solved');
   const before = live.tierOfXp(live.passState(load(), season).xp, season);
   let sticker = null;
@@ -2752,6 +2769,7 @@ async function playVersus(id, sim, online, extra = {}) {
     pushed = mine.length;
     api.matches.push(online.code, mine).catch(() => toast('Move not sent yet – check your connection'));
   };
+  startRun(id);
   view = new mod.default({
     canvas: $('#ar-canvas', el),
     controls: $('#ar-controls', el),
@@ -3016,6 +3034,7 @@ async function playArcade(id, { daily, seed: forcedSeed, challenge } = {}) {
     const box = $('#ar-hud', el);
     if (box) box.innerHTML = mod.hud(sim).map((h) => `<div class="hstat ${h.warn ? 'warn' : ''} ${h.big ? 'big' : ''}"><span class="lbl">${esc(h.label)}</span><b>${h.value}</b></div>`).join('');
   };
+  startRun(id);
   view = new mod.default({
     canvas: $('#ar-canvas', el),
     controls: $('#ar-controls', el),
@@ -3254,6 +3273,7 @@ async function playUgc(g, { test = false } = {}) {
     <div class="mode-label">${test ? '🧪 Test play – not ranked' : `${spec.hero} ${esc(spec.title)} · by ${esc(g.owner)}`}</div>`);
   applyTable(el, 'ugc');
   const refresh = () => { const box = $('#ar-hud', el); if (box) box.innerHTML = mod.hud(sim).map((h) => `<div class="hstat ${h.warn ? 'warn' : ''} ${h.big ? 'big' : ''}"><span class="lbl">${esc(h.label)}</span><b>${h.value}</b></div>`).join(''); };
+  startRun('community');
   view = new mod.default({
     canvas: $('#ar-canvas', el), controls: $('#ar-controls', el), sim, reducedMotion: load().settings.reducedMotion,
     hooks: { onChange: refresh, onOver: () => endUgc(run), onQuit: () => { sim.quit(); endUgc(run); } },
@@ -3580,6 +3600,7 @@ function playBlocks(opts) {
     $('#b-undo .cnt', el).textContent = game.undosLeft;
     $('#b-undo', el).disabled = !(game.undosLeft > 0 && game.prev);
   }
+  startRun('reef');
   view = new BlocksView($('#b-canvas', el), game, {
     reducedMotion: s.settings.reducedMotion,
     onPlaced: async (res) => {
@@ -3823,6 +3844,7 @@ function wireSwitches(root) {
       update((d) => { d.settings[k] = v; if (k === 'reducedMotion') d.settings.reducedMotionUser = true; });
       applySettings();
       if (k === 'reducedMotion') clearSpriteCache();
+      if (k === 'analytics' && !v) { analytics.forgetUsage(); toast('Usage counts are off – your anonymous usage id was deleted'); }
       sfx.tap();
     };
   }
@@ -3870,7 +3892,7 @@ function showSettings() {
       ${cozySleeping() ? '<button class="btn sm blue" id="s-wake" style="margin-top:8px">🌧️ Bring the rain back</button>' : ''}
       <h3 style="margin-top:18px">Leaderboards</h3>
       ${sw('leaderboard', '🏆 Take part in online leaderboards', 'Only your name and scores are shared')}
-      ${sw('analytics', '📊 Send anonymous usage counts', 'No player ID, no cookies – just tallies like "a game ended"')}
+      ${sw('analytics', '📊 Send anonymous usage counts', isKid() ? 'Just tallies like "a game ended" – no id, no cookies' : 'No name or account. A random id kept on this device shows how many players come back. Off = deleted')}
       <div class="row" style="margin-top:10px;flex-wrap:wrap;gap:10px">
         <button class="btn sm ghost" id="s-forget">Delete my online scores</button>
       </div>

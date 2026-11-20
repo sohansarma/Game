@@ -8,9 +8,11 @@ import { replayBlocks } from './blocks.js';
 import { getLevel } from './levels.js';
 import { verifyArcade } from './arcade/index.js';
 import { BOARDS, acceptableKeys, dailyConfig, deepConfig, blocksSeed, dayKey, weekKey } from './modes.js';
+import * as analytics from './analytics.js';
 
 const BASE = (typeof window !== 'undefined' && window.TIDEPOP_API !== undefined ? window.TIDEPOP_API : '') + '/api';
 let online = null; // null = unknown
+analytics.configure({ base: BASE, off: () => inArtifact() });
 
 // ---------------------------------------------------------------------------
 // Shared-database backend. When the game runs as a claude.ai Artifact there
@@ -157,6 +159,7 @@ async function req(path, opts = {}, timeout = 5000) {
     return body;
   } catch (e) {
     if (!e.status) online = false;
+    if (!e.status || e.status >= 500) analytics.apiError();
     throw e;
   } finally {
     clearTimeout(t);
@@ -239,15 +242,8 @@ export async function leaguePoints(improved) {
   await ref.set(d);
 }
 
-/** Anonymous usage count (no ids, no cookies). Server mode only; off if the player opted out. */
-export function track(e, b = '-') {
-  try {
-    if (inArtifact() || load().settings.analytics === false) return;
-    const body = JSON.stringify({ e, b: String(b).toLowerCase().replace(/[^a-z0-9_-]/g, '').slice(0, 16) || '-' });
-    if (navigator.sendBeacon) navigator.sendBeacon(BASE + '/event', new Blob([body], { type: 'application/json' }));
-    else fetch(BASE + '/event', { method: 'POST', body, headers: { 'content-type': 'application/json' }, keepalive: true }).catch(() => {});
-  } catch { /* never let counting break the game */ }
-}
+/** Anonymous usage count: batched, and only sent once the age screen is answered (see analytics.js). */
+export const track = analytics.track;
 
 export async function checkServer() {
   if (await sharedDb()) return (online = true);
