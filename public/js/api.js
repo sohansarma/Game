@@ -520,15 +520,16 @@ export const matches = {
   },
 
   /** Poll a match; calls cb(match) when it changes. Returns a stop function. */
-  watch(code, cb, ms = 2500) {
+  watch(code, cb, ms = 2500, onPoll = null) {
     let last = '';
     let stopped = false;
     const tick = async () => {
       if (stopped) return;
       try {
         const m = await this.get(code);
-        const sig = JSON.stringify([m?.hostMoves, m?.guestMoves, m?.joined, m?.resigned, m?.hostReact, m?.guestReact, m?.seats]);
+        const sig = JSON.stringify([m?.hostMoves, m?.guestMoves, m?.joined, m?.resigned, m?.hostReact, m?.guestReact, m?.seats, m?.botFrom]);
         if (sig !== last) { last = sig; cb(m); }
+        onPoll?.(m); // every poll, even when nothing changed (a stalled table is exactly when nothing changes)
       } catch { /* offline – try again */ }
       if (!stopped) setTimeout(tick, document.hidden ? ms * 4 : ms);
     };

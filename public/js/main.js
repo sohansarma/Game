@@ -2791,6 +2791,17 @@ async function playVersus(id, sim, online, extra = {}) {
     const stopFlush = () => document.removeEventListener('visibilitychange', flush);
     run.stopFlush = stopFlush;
     if (online.justCreated) shareCode(online.code, id);
+    // a table where nobody moves for a while: say who we're waiting for, then offer their seat to a bot
+    const checkStall = (m) => {
+      if (id !== 'ludo' || !Array.isArray(m?.seats) || sim.over || currentRun !== run) return;
+      const mySeat = sim.mySide;
+        const total = (m.seats || []).reduce((n, x) => n + (x.moves?.length || 0), 0);
+        if (online.stallTotal !== total || sim.game.turn === mySeat || sim.over) { online.stallTotal = total; online.stallAt = Date.now(); online.stallAsked = false; }
+        else if (!online.stallAsked && Date.now() - online.stallAt > 50000 && !sim.isAi(sim.game.turn)) {
+          online.stallAsked = true;
+          api.matches.botify(online.code, sim.game.turn).catch(() => { online.stallAsked = false; online.stallAt = Date.now(); });
+        } else if (Date.now() - online.stallAt > 12000 && Date.now() - (online.stallToastAt || 0) > 20000) { online.stallToastAt = Date.now(); toast(`Waiting for ${sim.labelOf(sim.game.turn)}… a bot steps in after a minute`); }
+    };
     run.stopWatch = api.matches.watch(online.code, (m) => {
       if (!m || currentRun !== run) return;
       if (m.joined && !online.match.joined) { online.match = m; online.joinedNow = true; toast(`🎉 ${m.me === 'host' ? m.guestName : m.hostName} joined!`); sfx.win(); }
@@ -2840,13 +2851,6 @@ async function playVersus(id, sim, online, extra = {}) {
           if (!res.ok) break;
           view.remoteEvents(res.events);
         }
-        // nobody has moved for a while and it's someone else's turn: offer their seat to a bot
-        const total = m.seats.reduce((n, x) => n + (x.moves?.length || 0), 0);
-        if (online.stallTotal !== total || sim.game.turn === mySeat || sim.over) { online.stallTotal = total; online.stallAt = Date.now(); online.stallAsked = false; }
-        else if (!online.stallAsked && Date.now() - online.stallAt > 50000 && !sim.isAi(sim.game.turn)) {
-          online.stallAsked = true;
-          api.botify(online.code, sim.game.turn).catch(() => { online.stallAsked = false; online.stallAt = Date.now(); });
-        } else if (Date.now() - online.stallAt > 12000) toast(`Waiting for ${sim.labelOf(sim.game.turn)}… a bot steps in after a minute`);
         refresh();
       }
       const opp = online.role === 'host' ? m.guestMoves : m.hostMoves;
@@ -2877,7 +2881,8 @@ async function playVersus(id, sim, online, extra = {}) {
       }
       refresh();
       if (id === 'ludo' && sim.over) setTimeout(() => endVersus(run), 1500);
-    });
+      checkStall(m);
+    }, 2500, checkStall);
   }
 }
 
