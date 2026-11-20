@@ -18,20 +18,22 @@ const post = (p, body) => fetch(base + p, { method: 'POST', headers: { 'content-
 const acc = (op, body) => post('/api/account/' + op, body);
 
 test('sign up validates username and password', async () => {
-  assert.equal((await acc('signup', { username: 'ab', password: 'goodpass1' })).status, 400);
-  assert.equal((await acc('signup', { username: 'Admin', password: 'goodpass1' })).status, 400);
-  assert.equal((await acc('signup', { username: 'sohan', password: 'short' })).status, 400);
-  assert.equal((await acc('signup', { username: 'sohan', password: 'password' })).status, 400);
-  assert.equal((await acc('signup', { username: 'sohan', password: 'mysohanpw' })).status, 400, 'username inside password');
+  assert.equal((await acc('signup', { username: 'olderkid', password: 'goodpass1' })).status, 403, 'no age answer → no account');
+  assert.equal((await acc('signup', { age: 'u13', username: 'olderkid', password: 'goodpass1' })).status, 403, 'under 13 → no account');
+  assert.equal((await acc('signup', { age: '13+', username: 'ab', password: 'goodpass1' })).status, 400);
+  assert.equal((await acc('signup', { age: '13+', username: 'Admin', password: 'goodpass1' })).status, 400);
+  assert.equal((await acc('signup', { age: '13+', username: 'sohan', password: 'short' })).status, 400);
+  assert.equal((await acc('signup', { age: '13+', username: 'sohan', password: 'password' })).status, 400);
+  assert.equal((await acc('signup', { age: '13+', username: 'sohan', password: 'mysohanpw' })).status, 400, 'username inside password');
 });
 
 test('sign up links this device, log in elsewhere, scores land on one player', async () => {
   const reg = (await post('/api/register', { name: 'Night Owl' })).body;
-  const s = await acc('signup', { username: 'Sohan_28', password: 'rainy-nights-42', playerId: reg.playerId, token: reg.token });
+  const s = await acc('signup', { age: '13+', username: 'Sohan_28', password: 'rainy-nights-42', playerId: reg.playerId, token: reg.token });
   assert.equal(s.status, 200, s.body.error);
   assert.equal(s.body.playerId, reg.playerId, 'existing leaderboard player kept');
   assert.match(s.body.recovery, /^[0-9A-F]{4}(-[0-9A-F]{4}){4}$/);
-  assert.equal((await acc('signup', { username: 'sohan_28', password: 'another-pass-9' })).status, 409, 'usernames are case-insensitive');
+  assert.equal((await acc('signup', { age: '13+', username: 'sohan_28', password: 'another-pass-9' })).status, 409, 'usernames are case-insensitive');
   // second device
   const l = await acc('login', { username: 'SOHAN_28', password: 'rainy-nights-42' });
   assert.equal(l.status, 200);
@@ -49,7 +51,7 @@ test('sign up links this device, log in elsewhere, scores land on one player', a
 });
 
 test('cloud save: revisions stop silent overwrites', async () => {
-  const a = (await acc('signup', { username: 'savetester', password: 'cloudy-day-77' })).body;
+  const a = (await acc('signup', { age: '13+', username: 'savetester', password: 'cloudy-day-77' })).body;
   const b = (await acc('login', { username: 'savetester', password: 'cloudy-day-77' })).body;
   assert.deepEqual((await acc('save', { session: a.session, op: 'get' })).body, { save: null, rev: 0, at: null });
   const save1 = { ...defaultSave(), shells: 120 };
@@ -68,7 +70,7 @@ test('cloud save: revisions stop silent overwrites', async () => {
 });
 
 test('wrong passwords lock the account for a while', async () => {
-  await acc('signup', { username: 'locktest', password: 'safe-harbour-1' });
+  await acc('signup', { age: '13+', username: 'locktest', password: 'safe-harbour-1' });
   for (let i = 0; i < 5; i++) assert.equal((await acc('login', { username: 'locktest', password: 'wrong-guess-' + i })).status, 401);
   const locked = await acc('login', { username: 'locktest', password: 'safe-harbour-1' });
   assert.equal(locked.status, 429, 'even the right password waits during the lock');
@@ -76,7 +78,7 @@ test('wrong passwords lock the account for a while', async () => {
 });
 
 test('recovery code resets the password and signs out other devices', async () => {
-  const s = (await acc('signup', { username: 'forgetful', password: 'first-pass-11' })).body;
+  const s = (await acc('signup', { age: '13+', username: 'forgetful', password: 'first-pass-11' })).body;
   assert.equal((await acc('recover', { username: 'forgetful', code: 'AAAA-BBBB-CCCC-DDDD-EEEE', password: 'second-pass-22' })).status, 401);
   const r = await acc('recover', { username: 'forgetful', code: s.recovery.toLowerCase(), password: 'second-pass-22' });
   assert.equal(r.status, 200, r.body.error);
@@ -87,7 +89,7 @@ test('recovery code resets the password and signs out other devices', async () =
 });
 
 test('change password, log out, delete account', async () => {
-  const s = (await acc('signup', { username: 'tidyuser', password: 'orig-pass-55' })).body;
+  const s = (await acc('signup', { age: '13+', username: 'tidyuser', password: 'orig-pass-55' })).body;
   const other = (await acc('login', { username: 'tidyuser', password: 'orig-pass-55' })).body;
   assert.equal((await acc('password', { session: s.session, current: 'nope-nope-1', password: 'new-pass-66x' })).status, 401);
   assert.equal((await acc('password', { session: s.session, current: 'orig-pass-55', password: 'new-pass-66x' })).status, 200);

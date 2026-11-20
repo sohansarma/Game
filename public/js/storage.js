@@ -168,6 +168,8 @@ export function mergeSaves(a, b, { firstMerge = false } = {}) {
   const m = { ...older, ...newer };
   m.createdAt = Math.min(a.createdAt || Date.now(), b.createdAt || Date.now());
   m.onboarded = !!(a.onboarded || b.onboarded);
+  // age: if either device says under 13, the merged save is a child's (never loosen a restriction)
+  if (a.ageBand || b.ageBand) m.ageBand = a.ageBand === 'u13' || b.ageBand === 'u13' ? 'u13' : a.ageBand || b.ageBand;
   m.updatedAt = Math.max(a.updatedAt || 0, b.updatedAt || 0);
   // match-3 levels: best stars and score per level
   m.levels = { ...(older.levels || {}) };

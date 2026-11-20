@@ -86,6 +86,8 @@ export function createAccounts({ store, now, fail, players }) {
   }
 
   async function signup(body) {
+    // the client only offers accounts after the age screen said 13+; the server won't create one otherwise
+    if (body.age !== '13+') throw fail(403, 'Accounts are for players 13 and older');
     const display = typeof body.username === 'string' ? body.username.trim() : '';
     const u = display.toLowerCase();
     const up = usernameProblem(display);

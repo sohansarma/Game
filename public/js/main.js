@@ -20,6 +20,7 @@ import { SLOTS as POOL_SLOTS, ITEMS as POOL_ITEMS, ITEM as POOL_ITEM, comfortOf,
 import { startCloud, syncNow, cloudAccount, cloudStatus, onCloudChange, signUp, logIn, logOut, recoverAccount, changePassword, deleteAccount, setClaudeSync } from './cloud.js';
 import { configureCozy, cozyActive, cozySleeping, wakeCozy, onSleep, isNightTime, cozySound, VIBES, VIBE } from './cozy.js';
 import * as api from './api.js';
+import { policy } from './policy.js';
 import * as live from './liveops.js';
 import { DIVISIONS, PROMOTE, DEMOTE } from './league.js';
 import { ACHIEVEMENTS, checkAchievements } from './achievements.js';
@@ -925,6 +926,7 @@ async function openSignUp() {
 }
 
 async function openLogIn() {
+  if (!policy().accounts) { toast('Accounts are for players 13 and older – your progress stays safe on this device'); return null; }
   const r = await authForm({
     title: '☁️ Log in',
     intro: '<p class="small muted">Your progress from other devices will be combined with this one – nothing is lost.</p>',
@@ -981,6 +983,10 @@ async function renderAccountBox() {
       <div class="account-who"><span class="account-avatar">✳️</span><div><b>Your Claude account</b><div class="small muted">${on ? state : 'Cloud save is off on this device'}</div></div></div>
       <p class="small muted">${on ? 'Progress saves privately to your Claude account – open Tidepop on any device signed in to Claude to continue.' : 'Turn it on to keep your progress in sync across devices.'}</p>
       <div class="row" style="gap:8px">${on ? '<button class="btn sm blue" data-acc="sync">🔄 Sync now</button><button class="btn sm ghost" data-acc="claude-off">Turn off</button>' : '<button class="btn sm green" data-acc="claude-on">☁️ Turn on cloud save</button>'}</div></div>`;
+  } else if (!policy().accounts) {
+    box.innerHTML = `<div class="account-card">
+      <div class="account-who"><span class="account-avatar">💾</span><div><b>Your progress</b><div class="small muted">Saved on this device</div></div></div>
+      <p class="small muted">Accounts are for players 13 and older. To play on another device, use the save code below – it never leaves your hands.</p></div>`;
   } else {
     box.innerHTML = '<div class="account-card"><p class="small muted">Checking for the Tidepop server…</p></div>';
     const ok = await api.accountsAvailable();
@@ -1060,7 +1066,7 @@ async function petPip(btn) {
 
 /** A gentle nudge on the Arcade once someone has played a bit. */
 function accountNudgeHtml(s) {
-  if (cloudAccount() || api.inArtifact() || !api.isOnline()) return '';
+  if (cloudAccount() || api.inArtifact() || !api.isOnline() || !policy(s).accounts) return '';
   const played = Object.values(s.arcade || {}).reduce((n, g) => n + (g.games || 0), 0) + (s.stats.gamesPlayed || 0);
   if (played < 3 || (s.nudgeHiddenUntil || 0) > Date.now()) return '';
   return `<div class="account-nudge" id="u-nudge"><span>☁️</span><div class="grow"><b>Don't lose your progress</b><div class="small">Free account · play on any device</div></div>
@@ -1078,7 +1084,7 @@ async function askAge() {
   update((d) => { d.ageBand = r; if (r === 'u13') d.name = randomNickname(); });
   return r;
 }
-const isKid = () => load().ageBand === 'u13';
+const isKid = () => policy().isChild;
 
 async function onboarding() {
   await askAge();

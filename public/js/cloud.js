@@ -8,6 +8,7 @@
 
 import { load, save, update, replaceSave, mergeSaves, cloudCopy, onSaveChange, LOCAL_ONLY } from './storage.js';
 import { accountCall, claudeSaveDoc, inArtifact } from './api.js';
+import { policy, ADULT_BAND } from './policy.js';
 
 const listeners = new Set();
 let timer = null;
@@ -140,7 +141,8 @@ function applyLogin(r) {
 
 export async function signUp(username, password) {
   const s = load();
-  const r = await accountCall('signup', { username, password, playerId: s.playerId, token: s.token, name: s.name });
+  if (!policy(s).accounts) throw Object.assign(new Error('Accounts are for players 13 and older'), { status: 403 });
+  const r = await accountCall('signup', { username, password, age: ADULT_BAND, playerId: s.playerId, token: s.token, name: s.name });
   applyLogin(r);
   await syncNow();
   return r; // includes the one-time recovery code
