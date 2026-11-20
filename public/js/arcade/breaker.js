@@ -4,7 +4,7 @@
 // World 100 x 150. Bricks: 10 columns; tougher bricks take more hits.
 // Power-ups: W = wide paddle, + = extra life, P = bonus pearl,
 // M = multiball (two more pearls), S = sticky paddle (catch, aim, relaunch).
-// The coral creeps down one row every 30 s you take on a wall.
+// The coral creeps down one row every 20 s you take on a wall.
 // Score: brick hit 5, break 10 x level, pearl 50, level clear 100 x level.
 
 import { Rng, hashString } from '../rng.js';
@@ -136,7 +136,7 @@ class BreakerSim {
       }
     }
     this.drops = this.drops.filter((p) => !p.taken && p.y < WH);
-    // the coral creeps down a row every 30 s (never closer than row 17)
+    // the coral creeps down a row every 20 s (never closer than row 17)
     if (!this.attached) {
       this.levelTick++;
       if (this.levelTick % 1200 === 0 && this.bricks.length) {

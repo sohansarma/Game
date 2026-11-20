@@ -14,6 +14,8 @@ import * as L from '../public/js/league.js';
 import { sanitize as ugcSanitize, replay as ugcReplay } from '../public/js/maker/engine.js';
 
 const MAX_BODY = 64 * 1024;
+// a vote needs a real play: 10+ seconds, some input and a score (an empty throwaway run doesn't earn one)
+const realPlay = (sim, log) => (sim.tick || 0) >= 600 && Array.isArray(log) && log.length >= 3 && (sim.score || 0) > 0;
 const LIMITS = { daily: 60, deep: 600, blocksDaily: 3000, blocks: 5000, stars: 400, ugc: 40000 };
 const TOP_N = 50;
 const KEEP_PER_BOARD = 1000;
@@ -260,7 +262,7 @@ export function createApi(store, { now = () => new Date(), origin = process.env.
             const r = ugcReplay(sp, seed, body.log);
             if (!r.ok || !r.sim.over) throw fail(422, 'replay failed');
             // a real play: at least 10 seconds (an empty throwaway run doesn't earn a vote)
-            if ((r.sim.tick || 0) >= 600) (rec.verified ||= {})[body.playerId] = true;
+            if (realPlay(r.sim, body.log)) (rec.verified ||= {})[body.playerId] = true;
           }
           (rec.plays ||= {})[body.playerId] = Math.min(99999, (rec.plays[body.playerId] || 0) + 1);
           (rec.playedAt ||= {})[body.playerId] = t;
@@ -452,7 +454,7 @@ export function createApi(store, { now = () => new Date(), origin = process.env.
       const r = ugcReplay(spec, seed, log);
       if (!r.ok) throw fail(422, 'replay failed: ' + r.reason);
       if (typeof body.score === 'number' && body.score !== r.sim.score) throw fail(422, 'score mismatch');
-      if ((r.sim.tick || 0) >= 600) (rec.verified ||= {})[body.playerId] = true;
+      if (realPlay(r.sim, log)) (rec.verified ||= {})[body.playerId] = true;
       return { ok: true, ...record(boardId('ugc', key), body.playerId, r.sim.score), verified: r.sim.score };
     }
     if (!acceptableKeys(board, now()).includes(key)) throw fail(422, 'this board is closed');

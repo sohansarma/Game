@@ -128,3 +128,21 @@ Round 4: all six former NOT-YET reviewers now say YES; with the seven Round 3 YE
 | 54 | Shell Swap: win celebration capped at ~3 s; flash radius clamped; tides every 4 moves (always shows); levels 1–3 forgiving; teaching levels ≥10 moves | critic, match-3 | ✅ |
 | 55 | Cube: reversed-scramble check ignores the order of commuting moves (L R = R L) | speedcuber | ✅ |
 | 56 | Chess: today's daily puzzle is warmed in a background worker 8 s after launch | chess | ✅ |
+
+### Round 5 – full 13-reviewer re-review (in progress)
+| Reviewer | Verdict | Score | Notes |
+|---|---|---|---|
+| Growth | YES | 8 | launch items only: production origin in OG tags, persistent disk, ads/CMP |
+| Live-ops | YES | 8.5 | no live-ops code changed |
+| Match-3 | YES | 8 | tide still skipped on 12/24 in 2 of 6 hint runs; tutorial a little gentler |
+| Creator | YES | 8 | **idle runs still earned a vote** → fixed (57) |
+| Arcade B | YES | 8.5 | breaker help text said 30 s → 20 s |
+| Speedcuber | YES | 8 | a cube rotation still hides the reversed scramble (needs state comparison) |
+| UX | YES | 8.5 | hub timer pill overflowed at 200% text → wraps (58) |
+| Reef Blocks | YES | 8.5 | rescue short; popups overlap |
+| Arcade A | YES | 8 | ghosts only local for Puffer/Serpent |
+
+| # | Item | From | Status |
+|---|---|---|---|
+| 57 | A rating/report vote needs a real play: ≥10 s, ≥3 inputs and a score > 0; held games show "⏸ Under review" in lists; breaker help says 20 s | creator, arcade B | ✅ |
+| 58 | Hub header wraps at large text | UX | ✅ |

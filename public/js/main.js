@@ -3344,7 +3344,7 @@ async function showStudio() {
   const owed = games.reduce((sum, g) => sum + Math.max(0, others(g) - (claimed[g.id] || 0)) * 5, 0);
   mine.innerHTML = games.length ? `${owed ? `<button class="btn wide green" id="st-claim">🎁 Collect ${owed} 🐚 creator rewards</button>` : ''}
     ${games.map((g) => `<div class="item"><span style="font-size:1.6rem">${g.hero}</span><span class="grow" style="text-align:left;min-width:0"><b>${esc(g.title)}</b> <span class="small muted">v${g.version}</span>
-      <div class="small muted">▶ ${fmt(g.plays)} plays · 👥 ${g.players} players · <span class="star-on">★</span> ${g.ratings ? g.rating.toFixed(1) + ` (${g.ratings})` : '–'}${g.reports ? ` · 🚩 ${g.reports}` : ''}</div></span>
+      <div class="small muted">▶ ${fmt(g.plays)} plays · 👥 ${g.players} players · <span class="star-on">★</span> ${g.ratings ? g.rating.toFixed(1) + ` (${g.ratings})` : '–'}${g.held ? ' · ⏸ Under review' : g.reports ? ` · 🚩 ${g.reports}` : ''}</div></span>
       <button class="btn sm blue" data-edit="${g.id}">✏️</button><button class="btn sm ghost" data-del="${g.id}" aria-label="Unpublish">🗑️</button></div>`).join('')}
     <p class="small muted">You earn 5 🐚 for every new player who tries your games.</p>` : '<p class="muted small">Nothing published yet – pick a template above to start.</p>';
   $('#st-claim', mine) && ($('#st-claim', mine).onclick = () => {

@@ -281,4 +281,4 @@ export const HOW = `<div class="tip">🧱 <b>Drag</b> left and right to move the
 <div class="tip">🎯 Where the pearl hits the paddle sets its angle. Brighter coral needs more hits.</div>
 <div class="tip">★ Some bricks drop power-ups: <b>W</b> wide paddle, <b>+</b> extra life, <b>M</b> multiball, <b>S</b> sticky clam (catch the pearl, then aim and fire), <b>●</b> bonus pearl (+50).</div>
 <div class="tip">🔗 Break several bricks before the pearl comes back for a <b>chain</b> bonus – listen for the notes climbing.</div>
-<div class="tip">⚡ Clear the wall for a big bonus – but don't dawdle: the coral creeps down every 30 seconds, and if it reaches your clam you lose a pearl. <b>Hold and drag</b> before a serve to aim it. You have 3 pearls.</div>`;
+<div class="tip">⚡ Clear the wall for a big bonus – but don't dawdle: the coral creeps down every 20 seconds, and if it reaches your clam you lose a pearl. <b>Hold and drag</b> before a serve to aim it. You have 3 pearls.</div>`;
