@@ -44,6 +44,7 @@ export function createServer({ dataDir = process.env.DATA_DIR || path.resolve(__
       const url = new URL(req.url, 'http://localhost');
       if (url.pathname.startsWith('/api/')) return await api.handle(req, res, url);
       if (url.pathname === '/admin') return await serveAdmin(res);
+      if (url.pathname === '/app-ads.txt') return serveAppAds(res);
       return await serveStatic(url.pathname, res);
     } catch (e) {
       console.error(e);
@@ -53,6 +54,20 @@ export function createServer({ dataDir = process.env.DATA_DIR || path.resolve(__
   });
   server.on('close', () => { store.flush(); events.close(); });
   return { server, store, events };
+}
+
+/**
+ * app-ads.txt: AdMob checks it on the developer website before it pays an app. Set ADMOB_PUBLISHER_ID
+ * (pub-XXXXXXXXXXXXXXXX, from admob.google.com → Settings) and list this site as the developer website in Play Console.
+ */
+function serveAppAds(res) {
+  const pub = (process.env.ADMOB_PUBLISHER_ID || '').trim();
+  if (!/^pub-\d{10,20}$/.test(pub)) {
+    res.writeHead(404, SECURITY_HEADERS);
+    return res.end('not set up');
+  }
+  res.writeHead(200, { ...SECURITY_HEADERS, 'content-type': MIME['.txt'], 'cache-control': 'public, max-age=3600' });
+  res.end(`google.com, ${pub}, DIRECT, f08c47fec0942fa0\n`);
 }
 
 /** The team dashboard. The page itself holds no data; it asks /api/admin/report with the team key. */

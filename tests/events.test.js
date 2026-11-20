@@ -100,3 +100,15 @@ test('the dashboard page is served without data and is not indexed', async () =>
   assert.equal(r.headers.get('x-robots-tag'), 'noindex');
   assert.match(await r.text(), /team dashboard/);
 });
+
+test('app-ads.txt is served only when the AdMob publisher id is set', async () => {
+  assert.equal((await fetch(base + '/app-ads.txt')).status, 404);
+  process.env.ADMOB_PUBLISHER_ID = 'pub-1234567890123456';
+  const r = await fetch(base + '/app-ads.txt');
+  delete process.env.ADMOB_PUBLISHER_ID;
+  assert.equal(r.status, 200);
+  assert.equal(await r.text(), 'google.com, pub-1234567890123456, DIRECT, f08c47fec0942fa0\n');
+  process.env.ADMOB_PUBLISHER_ID = 'not-an-id';
+  assert.equal((await fetch(base + '/app-ads.txt')).status, 404);
+  delete process.env.ADMOB_PUBLISHER_ID;
+});

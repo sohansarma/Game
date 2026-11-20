@@ -46,3 +46,26 @@ Rewarded-ad spots: **bonus shells** after an arcade game, and **revive** (once p
 - [ ] Declare the **AD_ID** permission use in the Play Console "Advertising ID" question (ads: yes).
 - [ ] Add `app-ads.txt` on your developer website so AdMob can verify the app.
 - [ ] Provide Google Play test credentials only if reviewers need to sign in (username/password accounts work without any).
+
+## Ready-made pieces (already in the repo)
+
+| What | Where |
+|---|---|
+| Android project (Capacitor 8, AdMob + Google sign-in plugins, icons, splash) | `android-app/android/` |
+| Cloud build for the APK / signed bundle (no Android Studio needed) | `.github/workflows/android.yml` |
+| Rename the package before first upload | `android-app/scripts/set-package.mjs` |
+| Store text, icon, feature graphic, 6 screenshots | `store/` |
+| Account-deletion page (Play requires a public link) | `public/delete-account.html` |
+| `app-ads.txt` for AdMob verification | served at `/app-ads.txt` when `ADMOB_PUBLISHER_ID` is set |
+| "What's still missing?" checklist | `npm run preflight` |
+
+## Release in order
+
+1. `npm run preflight` – fix every ❌.
+2. Choose the package name: `cd android-app && node scripts/set-package.mjs com.yourdomain.tidepop`, then commit.
+3. AdMob: create the app and one **Rewarded** ad unit; set `ADMOB_PUBLISHER_ID` on the server, and `ADMOB_APP_ID` / `ADMOB_REWARDED_ID` as GitHub variables. Link the app to the Play listing once it exists.
+4. Google Cloud: create the Web and Android OAuth clients (see `android-app/README.md`); set `GOOGLE_CLIENT_IDS` on the server.
+5. GitHub → Actions → **Android app** → *debug*. Install the APK on a phone and run the on-device checks in `android-app/README.md`.
+6. Create an upload keystore (`keytool -genkey -v -keystore upload.jks -alias upload -keyalg RSA -keysize 2048 -validity 10000`), keep it and its passwords safe (losing it blocks updates), add the four `ANDROID_*` secrets.
+7. Actions → **Android app** → *release*. Download the `.aab`.
+8. Play Console: create the app, fill the forms from `store/listing.md` and the tables above, upload the `.aab` to **Internal testing**, add yourself as a tester, test, then move to Production. New personal developer accounts may have to run a closed test with a minimum number of testers for a set period before production access – check the current requirement in Play Console.

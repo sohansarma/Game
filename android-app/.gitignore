@@ -1,2 +1,8 @@
 node_modules/
 www/
+
+# signing keys and secrets - NEVER commit these
+*.jks
+*.keystore
+keystore.properties
+android/keystore.properties

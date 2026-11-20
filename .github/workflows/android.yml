@@ -1,0 +1,74 @@
+# Builds the Android app in the cloud, so no local Android Studio is needed.
+# Run it from the Actions tab → "Android app" → Run workflow.
+#
+# One-time setup (Settings → Secrets and variables → Actions):
+#   Variables:  TIDEPOP_API_URL   https://your-server.example   (required)
+#               ADMOB_APP_ID      ca-app-pub-XXXXXXXXXXXXXXXX~YYYYYYYYYY   (release only)
+#               ADMOB_REWARDED_ID ca-app-pub-XXXXXXXXXXXXXXXX/ZZZZZZZZZZ   (release only)
+#   Secrets:    ANDROID_KEYSTORE_BASE64   the upload keystore, base64 encoded   (release only)
+#               ANDROID_KEYSTORE_PASSWORD, ANDROID_KEY_ALIAS, ANDROID_KEY_PASSWORD   (release only)
+# "debug" builds an installable test APK with Google's TEST ads. "release" builds the signed bundle (.aab) for Play.
+name: Android app
+on:
+  workflow_dispatch:
+    inputs:
+      kind:
+        description: Build type
+        type: choice
+        options: [debug, release]
+        default: debug
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: android-app
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: android-app/package-lock.json
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 21
+      - run: npm ci
+      - name: Check the settings this build needs
+        run: |
+          [ -n "${{ vars.TIDEPOP_API_URL }}" ] || { echo "Set the TIDEPOP_API_URL repository variable"; exit 1; }
+          if [ "${{ inputs.kind }}" = "release" ]; then
+            for v in "${{ vars.ADMOB_APP_ID }}" "${{ vars.ADMOB_REWARDED_ID }}" "${{ secrets.ANDROID_KEYSTORE_BASE64 }}"; do
+              [ -n "$v" ] || { echo "A release build needs ADMOB_APP_ID, ADMOB_REWARDED_ID and ANDROID_KEYSTORE_BASE64 (see the top of this workflow)"; exit 1; }
+            done
+          fi
+      - name: Build debug APK
+        if: inputs.kind == 'debug'
+        run: |
+          TIDEPOP_API_URL="${{ vars.TIDEPOP_API_URL }}" npm run sync
+          cd android && ./gradlew assembleDebug -PTIDEPOP_VERSION_CODE=${{ github.run_number }}
+      - uses: actions/upload-artifact@v4
+        if: inputs.kind == 'debug'
+        with:
+          name: tidepop-debug-apk
+          path: android-app/android/app/build/outputs/apk/debug/*.apk
+      - name: Build signed release bundle
+        if: inputs.kind == 'release'
+        env:
+          TIDEPOP_API_URL: ${{ vars.TIDEPOP_API_URL }}
+          ADMOB_TESTING: "false"
+          ADMOB_REWARDED_ID: ${{ vars.ADMOB_REWARDED_ID }}
+          TIDEPOP_KEYSTORE: release.keystore
+          TIDEPOP_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          TIDEPOP_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+          TIDEPOP_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+        run: |
+          echo "${{ secrets.ANDROID_KEYSTORE_BASE64 }}" | base64 -d > android/release.keystore
+          npm run sync
+          cd android && ./gradlew bundleRelease -PADMOB_APP_ID="${{ vars.ADMOB_APP_ID }}" -PTIDEPOP_VERSION_CODE=${{ github.run_number }}
+      - uses: actions/upload-artifact@v4
+        if: inputs.kind == 'release'
+        with:
+          name: tidepop-release-aab
+          path: android-app/android/app/build/outputs/bundle/release/*.aab
