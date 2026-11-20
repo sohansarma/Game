@@ -2725,7 +2725,7 @@ async function playVersus(id, sim, online, extra = {}) {
     }
     box.innerHTML = stats.map((h) => `<div class="hstat ${h.big ? 'big' : ''}"><span class="lbl">${esc(String(h.label))}</span><b>${h.value}</b></div>`).join('');
     const lbl = $('#ar-label', el);
-    if (lbl) lbl.innerHTML = online ? (online.match.joined || online.joinedNow ? `Playing ${esc(online.role === 'host' ? online.match.guestName || 'your friend' : online.match.hostName || 'your friend')} · moves sync automatically` : `Waiting for a friend to join with code <b>${online.code}</b>`) : sim.level ? `Casual game vs ${esc(CASUAL_LEVELS[sim.level - 1].name)} (${CASUAL_LEVELS[sim.level - 1].elo})${sim.clock ? '' : ' · no clock'}` : 'Friendly game · not ranked';
+    if (lbl) lbl.innerHTML = online ? (online.match.joined || online.joinedNow ? `Playing ${Array.isArray(online.match.seats) && online.match.seats.length > 2 ? `${online.match.seats.length} friends` : esc(online.role === 'host' ? online.match.guestName || 'your friend' : online.match.hostName || 'your friend')} · moves sync automatically` : `Waiting for a friend to join with code <b>${online.code}</b>`) : sim.level ? `Casual game vs ${esc(CASUAL_LEVELS[sim.level - 1].name)} (${CASUAL_LEVELS[sim.level - 1].elo})${sim.clock ? '' : ' · no clock'}` : 'Friendly game · not ranked';
   };
   let pushed = online ? myMovesOf(sim, id, online.role, online.match).length : 0;
   let applied = online ? (online.role === 'host' ? online.match.guestMoves : online.match.hostMoves).length : 0;
@@ -2822,6 +2822,11 @@ async function playVersus(id, sim, online, extra = {}) {
           } else (online.reacts ||= {})[x.seat] ??= x.react?.at ?? null;
           if (x.name) sim.names[x.seat] = x.name;
         }
+        if (m.botFrom && Object.keys(m.botFrom).some((k) => sim.botFrom[k] === undefined)) {
+          Object.assign(sim.botFrom, m.botFrom);
+          sim.runBots();
+          toast('🤖 A bot is playing for the friend who left');
+        }
         for (let guard = 0; guard < 400 && !sim.over; guard++) {
           const seat = sim.game.turn;
           if (seat === mySeat) break;
@@ -2835,6 +2840,13 @@ async function playVersus(id, sim, online, extra = {}) {
           if (!res.ok) break;
           view.remoteEvents(res.events);
         }
+        // nobody has moved for a while and it's someone else's turn: offer their seat to a bot
+        const total = m.seats.reduce((n, x) => n + (x.moves?.length || 0), 0);
+        if (online.stallTotal !== total || sim.game.turn === mySeat || sim.over) { online.stallTotal = total; online.stallAt = Date.now(); online.stallAsked = false; }
+        else if (!online.stallAsked && Date.now() - online.stallAt > 50000 && !sim.isAi(sim.game.turn)) {
+          online.stallAsked = true;
+          api.botify(online.code, sim.game.turn).catch(() => { online.stallAsked = false; online.stallAt = Date.now(); });
+        } else if (Date.now() - online.stallAt > 12000) toast(`Waiting for ${sim.labelOf(sim.game.turn)}… a bot steps in after a minute`);
         refresh();
       }
       const opp = online.role === 'host' ? m.guestMoves : m.hostMoves;
@@ -3937,4 +3949,11 @@ document.addEventListener('dblclick', (e) => { if (e.target.closest?.('canvas'))
 // handy for debugging from the console
 window.tidepop = { load, save, getLevel, SPECIAL, view: () => view };
 
+// warm today's chess puzzle in the background (a worker; it takes a while on a phone) so opening it is instant
+setTimeout(() => {
+  try {
+    if (puzzleStats().days[dayKey()]) return;
+    import('./arcade/chess-ai.js').then((m) => m.puzzleFor(hashString('tidepop-chess-puzzle-' + dayKey()), true)).catch(() => {});
+  } catch { /* optional */ }
+}, 8000);
 boot();

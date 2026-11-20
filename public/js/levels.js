@@ -93,10 +93,10 @@ function cratePattern(kind, n, hp) {
   return cells;
 }
 
-/** Tide levels from 12 on (every third level, never a boss): a wave every 5 moves, 4 later on. */
+/** Tide levels from 12 on (every third level, never a boss): a wave every 4 moves (so it always shows up). */
 export function tideOf(n) {
   if (n < 9 || n % 10 === 0 || n % 3 !== 0) return 0;
-  return n >= 40 ? 4 : 5;
+  return 4;
 }
 
 /** The static part of a level: layout + objective kinds. */

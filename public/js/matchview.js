@@ -102,8 +102,14 @@ export class MatchView {
     this.busy = true;
     this.clearHint();
     const base = this.speed;
+    let endAt = 0;
     for (const step of steps) {
       if (this.destroyed) return;
+      if (this.game.state !== 'playing') {
+        // a win or loss celebration never lasts more than ~3 s unless you're enjoying it
+        endAt ||= performance.now();
+        if (!this.ff && performance.now() - endAt > 3000) this.fastForward();
+      }
       if (step.type === 'finale' || (this.game.state !== 'playing' && step.type === 'end')) this.speed = base / 3;
       await this.playStep(step);
       this.hooks.onUpdate?.(this.viewScore, step);
@@ -529,7 +535,7 @@ export class MatchView {
         ctx.globalAlpha = sp.flash * 0.7;
         ctx.fillStyle = '#fff';
         ctx.beginPath();
-        ctx.arc(cx, cy, size * 0.45, 0, Math.PI * 2);
+        ctx.arc(cx, cy, Math.max(0.5, size * 0.45), 0, Math.PI * 2);
         ctx.fill();
       }
     }

@@ -252,7 +252,8 @@ export class ChessCasual extends ChessBase {
 // ---------------------------------------------------------------- ludo
 export class LudoVersus {
   /** seats: 4 x 'human' | 'ai' | null; mine: seats controlled here (null = every human seat is local) */
-  constructor({ seed, seats, mine = null, names = {}, first = null, rules = null, skill = 0.6, dice = null }) {
+  constructor({ seed, seats, mine = null, names = {}, first = null, rules = null, skill = 0.6, dice = null, botFrom = null }) {
+    this.botFrom = botFrom || {}; // seat -> number of its own moves after which a bot plays it (an absent player)
     this.rng = new Rng(seed);
     // online (server) games: each seat's rolls come from the server, in order
     this.dice = dice;
@@ -270,7 +271,7 @@ export class LudoVersus {
   labelOf(seat) {
     if (this.names[seat]) return this.names[seat];
     const c = COLORS[seat][0].toUpperCase() + COLORS[seat].slice(1);
-    return this.seats[seat] === 'ai' ? `${c} bot` : this.mine?.includes(seat) && this.mine.length === 1 ? 'You' : c;
+    return this.isAi(seat) ? `${c} bot` : this.mine?.includes(seat) && this.mine.length === 1 ? 'You' : c;
   }
   isLocal(seat) {
     return this.seats[seat] === 'human' && (this.mine === null || this.mine.includes(seat));
@@ -280,9 +281,14 @@ export class LudoVersus {
   }
   canRoll() { return this.myTurn() && this.game.phase === 'roll'; }
   canMove() { return this.myTurn() && this.game.phase === 'move'; }
+  isAi(seat) {
+    if (this.seats[seat] === 'ai') return true;
+    const from = this.botFrom?.[seat];
+    return from !== undefined && this.moves.filter(([s]) => s === seat).length >= from;
+  }
   runBots() {
     let guard = 0;
-    while (!this.game.over && this.seats[this.game.turn] === 'ai' && guard++ < 20000) this.game.aiStep(this.skill, this.rng);
+    while (!this.game.over && this.isAi(this.game.turn) && guard++ < 20000) this.game.aiStep(this.skill, this.rng);
     if (this.game.over) this.over = true;
   }
   roll() {
@@ -312,8 +318,9 @@ export class LudoVersus {
     g.events = [];
     if (a === 'r') {
       if (g.phase !== 'roll') return { ok: false };
-      const forced = this.dice && this.seats[seat] === 'human' ? this.dieFor(seat) : undefined;
-      if (this.dice && this.seats[seat] === 'human' && forced === undefined) return { ok: false, waiting: true };
+      const human = this.seats[seat] === 'human' && !this.isAi(seat);
+      const forced = this.dice && human ? this.dieFor(seat) : undefined;
+      if (this.dice && human && forced === undefined) return { ok: false, waiting: true };
       if (g.doRoll(forced) === null) return { ok: false };
     }
     else if (g.phase !== 'move' || !g.move(a)) return { ok: false };
@@ -395,7 +402,7 @@ function rebuildSeats(match, me) {
   if (dice) for (const s of human) dice[s] ||= [];
   const roleSeat = { host: order[0], guest: order[1], guest2: order[2], guest3: order[3] };
   const mySeat = me && roleSeat[me] !== undefined ? roleSeat[me] : Number.isInteger(match.mySeat) ? match.mySeat : hs;
-  const v = new LudoVersus({ seed: match.seed, seats, mine: [mySeat], names, first: hs, dice, rules: match.opts.rules || null });
+  const v = new LudoVersus({ seed: match.seed, seats, mine: [mySeat], names, first: hs, dice, rules: match.opts.rules || null, botFrom: match.botFrom || null });
   for (let guard = 0; guard < 8000 && !v.over; guard++) {
     const seat = v.game.turn;
     const next = lists[seat]?.shift();
@@ -407,7 +414,8 @@ function rebuildSeats(match, me) {
 
 export function describe(match) {
   if (match.game === 'chess') return `♟️ Chess · host plays ${match.opts.hostSide === 'w' ? 'White' : 'Black'}`;
-  return `🎲 Ludo · ${match.opts.bots ? '2 players + 2 bots' : '2 players'}`;
+  const n = Math.max(2, Math.min(4, match.opts.players || match.players || 2));
+  return `🎲 Ludo · ${n} players${match.opts.bots ? ' + bots' : ''}`;
 }
 
 export { LEVELS };

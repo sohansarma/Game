@@ -300,7 +300,7 @@ export function createApi(store, { now = () => new Date(), origin = process.env.
   function matchView(m, playerId) {
     const sides = [['host', m.host], ['guest', m.guest], ...(m.extra || []).map((x, i) => [ROLES[i + 2], x])].filter(([, x]) => x);
     return {
-      ...(m.game === 'ludo' ? { seats: sides.map(([role, x]) => ({ role, seat: seatOfRole(m, role), name: db.players[x.pid]?.name || 'Player', moves: x.moves, dice: x.dice || [], react: x.react || null })), mySeat: roleOf(m, playerId) ? seatOfRole(m, roleOf(m, playerId)) : null, players: m.opts.players || 2 } : {}),
+      ...(m.game === 'ludo' ? { botFrom: m.botFrom || {}, seats: sides.map(([role, x]) => ({ role, seat: seatOfRole(m, role), name: db.players[x.pid]?.name || 'Player', moves: x.moves, dice: x.dice || [], react: x.react || null })), mySeat: roleOf(m, playerId) ? seatOfRole(m, roleOf(m, playerId)) : null, players: m.opts.players || 2 } : {}),
       code: m.code, game: m.game, seed: m.seed, opts: m.opts,
       hostName: db.players[m.host.pid]?.name || 'Host', guestName: m.guest ? db.players[m.guest.pid]?.name || 'Guest' : null,
       hostMoves: m.host.moves, guestMoves: m.guest?.moves || [], joined: !!m.guest,
@@ -355,6 +355,7 @@ export function createApi(store, { now = () => new Date(), origin = process.env.
         const mv = body.moves;
         const okMove = m.game === 'chess' ? (x) => typeof x === 'string' && /^[a-h][1-8][a-h][1-8][qrbn]?$/.test(x) : (x) => x === 'r' || (Number.isInteger(x) && x >= 0 && x < 4);
         if (!Array.isArray(mv) || mv.length > MATCH_GAMES[m.game] || !mv.every(okMove)) throw fail(400, 'bad moves');
+        if (m.game === 'ludo' && m.botFrom?.[seatOfRole(m, roleOf(m, body.playerId))] !== undefined) throw fail(409, 'A bot is playing your seat now');
         // moves are append-only: the new list must extend the stored one
         if (mv.length < side.moves.length || side.moves.some((x, i) => x !== mv[i])) throw fail(409, 'moves out of sync');
         // Ludo dice are rolled here, when the roll is posted – nobody can work
@@ -376,6 +377,24 @@ export function createApi(store, { now = () => new Date(), origin = process.env.
         if (!side) throw fail(403, 'not in this match');
         if (!['😊', '😂', '😎', '😤', '🎉', '👏', '😭', '🙈', '🦈', '👍', '🙏'].includes(body.emoji)) throw fail(400, 'bad reaction');
         side.react = { e: body.emoji, at: now };
+        store.dirty();
+        return { ok: true };
+      }
+      case 'botify': {
+        // a friend left a Ludo table: after 45 s of nobody moving, a bot plays that seat from its next move
+        if (!m || m.game !== 'ludo') throw fail(404, 'No such table');
+        const role = roleOf(m, body.playerId);
+        if (!role) throw fail(403, 'not in this match');
+        const seat = Number(body.seat);
+        if (!Number.isInteger(seat) || seat < 0 || seat > 3) throw fail(400, 'bad seat');
+        if (seat === seatOfRole(m, role)) throw fail(400, "You can't hand over your own seat");
+        m.botFrom ||= {};
+        if (m.botFrom[seat] !== undefined) return { ok: true };
+        if (now - m.at < Number(process.env.TIDEPOP_BOTIFY_MS || 45000)) throw fail(409, 'Give them a little longer');
+        const owner = ROLES.map((r) => [r, seatOfRole(m, r)]).find(([, s]) => s === seat);
+        const side = owner && (owner[0] === 'host' ? m.host : owner[0] === 'guest' ? m.guest : (m.extra || [])[ROLES.indexOf(owner[0]) - 2]);
+        m.botFrom[seat] = side ? side.moves.length : 0;
+        m.at = now;
         store.dirty();
         return { ok: true };
       }

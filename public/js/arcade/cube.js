@@ -318,7 +318,18 @@ export class CubeDaily extends CubeFree {
   constructor(seed) { super(seed, 3); this.daily = true; }
   get htm() { return faceTurns(this.mine).length; }
   get reversedScramble() {
-    const mine = faceTurns(this.mine), inv = faceTurns(this.scrambleRaw.slice().reverse().map(inverse));
+    // moves on the same axis commute (L R = R L), so compare runs of same-axis turns in a fixed order
+    const canon = (list) => {
+      const out = [];
+      for (let i = 0; i < list.length;) {
+        let j = i;
+        while (j < list.length && list[j].a === list[i].a) j++;
+        out.push(...list.slice(i, j).sort((x, y) => x.l - y.l || x.q - y.q));
+        i = j;
+      }
+      return out;
+    };
+    const mine = canon(faceTurns(this.mine)), inv = canon(faceTurns(this.scrambleRaw.slice().reverse().map(inverse)));
     return mine.length === inv.length && mine.every((m, i) => m.a === inv[i].a && m.l === inv[i].l && m.q === inv[i].q);
   }
   get score() { return this.solved && !this.reversedScramble ? Math.max(1, 1000 - this.htm) : 0; }

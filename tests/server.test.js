@@ -344,3 +344,23 @@ test('online ludo for four: everyone joins one code, seats are fixed, all rebuil
   assert.equal(m.mySeat, 3);
   assert.ok(m.seats.every((x) => x.dice.length > 0), 'every person rolled server dice');
 });
+
+test('online ludo: a seat nobody plays any more is handed to a bot after a pause, on every phone', async () => {
+  const { rebuild } = await import('../public/js/versus.js');
+  const ps = [await register('Mum Otter 11'), await register('Dad Otter 12'), await register('Kid Otter 13')];
+  const call = (who, body) => post('/api/match', { ...body, playerId: who.playerId, token: who.token });
+  assert.equal((await call(ps[0], { action: 'create', code: 'XYZ34', game: 'ludo', seed: 5, opts: { hostColour: 0, players: 3, bots: true } })).status, 200);
+  for (const p of ps.slice(1)) assert.equal((await call(p, { action: 'join', code: 'XYZ34' })).status, 200);
+  assert.equal((await call(ps[0], { action: 'botify', code: 'XYZ34', seat: 2 })).status, 409, 'too soon');
+  process.env.TIDEPOP_BOTIFY_MS = '0';
+  try {
+    assert.equal((await call(ps[0], { action: 'botify', code: 'XYZ34', seat: 0 })).status, 400, 'not your own seat');
+    assert.equal((await call(ps[0], { action: 'botify', code: 'XYZ34', seat: 2 })).status, 200);
+  } finally { delete process.env.TIDEPOP_BOTIFY_MS; }
+  const m = (await get(`/api/match?code=XYZ34&playerId=${ps[0].playerId}`)).body;
+  assert.equal(m.botFrom[2], 0);
+  const a = rebuild(m, 'host'), b = rebuild(m, 'guest');
+  assert.equal(a.isAi(2), true);
+  assert.deepEqual(a.game.tokens, b.game.tokens);
+  assert.equal((await call(ps[1], { action: 'move', code: 'XYZ34', moves: ['r'] })).status, 409, 'the absent player cannot move any more');
+});

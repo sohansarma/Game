@@ -497,6 +497,11 @@ export const matches = {
     return req('/match', { method: 'POST', body: JSON.stringify({ action: 'move', code, moves, playerId: p.playerId, token: p.token }) });
   },
 
+  async botify(code, seat) {
+    const p = await ensureRegistered();
+    return req('/match', { method: 'POST', body: JSON.stringify({ action: 'botify', code, seat, playerId: p.playerId, token: p.token }) });
+  },
+
   async react(code, emoji) {
     const sh = await sharedDb();
     if (sh) { await writeMine(sh, (doc) => { if (doc.matches[code]) doc.matches[code].react = { e: emoji, at: Date.now() }; }); return { ok: true }; }

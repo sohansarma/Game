@@ -64,7 +64,7 @@ export function tuneLevel(n) {
   if (hasScore && recipe.goals.length === 1) {
     t.moves = Math.min(30, 18 + Math.floor(n / 5));
     const scores = seeds.map((s) => botPlay(configFor(recipe, { ...t, target: 1e12 }, s), rand).score);
-    t.target = round(quantile(scores, 1 - win), 500);
+    t.target = round(quantile(scores, 1 - win) * (n <= 3 ? 0.7 : 1), 500); // the tutorial levels forgive a casual player
   } else {
     // play with "infinite" moves and record when the goal was reached
     const measure = () => seeds.map((s) => {
@@ -75,7 +75,7 @@ export function tuneLevel(n) {
     // collect goals grow until a level takes real moves (no 2-move wins)
     const hasCollect = recipe.goals.some((g) => g.type === 'collect');
     while (hasCollect && quantile(needed, win) + 1 < 14 && t.collect < 90) { t.collect += 4; needed = measure(); }
-    t.moves = Math.max(7, Math.min(45, quantile(needed, win) + 1));
+    t.moves = Math.max(n <= 8 ? 10 : 7, Math.min(45, quantile(needed, win) + 1));
   }
 
   // star thresholds from a run at the final move count
