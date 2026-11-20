@@ -120,3 +120,11 @@ Round 3: **7 of 13 YES**, average **7.8/10**.
 | Chess | **YES** | 5 → 6 → 7.5 → 8 | first daily puzzle takes ~30 s to generate on-device (precompute/prefetch) |
 
 Round 4: all six former NOT-YET reviewers now say YES; with the seven Round 3 YES votes that is **13 of 13**, average ≈ 8.2/10.
+
+### Round 4 polish (engine v9) – done before the full 13-reviewer Round 5
+| # | Item | From | Status |
+|---|---|---|---|
+| 53 | Ludo: a player who leaves a 3–4 person table is replaced by a **bot after ~50 s** (server `botify`, `botFrom` per seat, identical on every phone); "Waiting for X…" hint; table label/`describe()` say the real player count | ludo | ✅ |
+| 54 | Shell Swap: win celebration capped at ~3 s; flash radius clamped; tides every 4 moves (always shows); levels 1–3 forgiving; teaching levels ≥10 moves | critic, match-3 | ✅ |
+| 55 | Cube: reversed-scramble check ignores the order of commuting moves (L R = R L) | speedcuber | ✅ |
+| 56 | Chess: today's daily puzzle is warmed in a background worker 8 s after launch | chess | ✅ |
