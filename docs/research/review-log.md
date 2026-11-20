@@ -129,20 +129,28 @@ Round 4: all six former NOT-YET reviewers now say YES; with the seven Round 3 YE
 | 55 | Cube: reversed-scramble check ignores the order of commuting moves (L R = R L) | speedcuber | ✅ |
 | 56 | Chess: today's daily puzzle is warmed in a background worker 8 s after launch | chess | ✅ |
 
-### Round 5 – full 13-reviewer re-review (in progress)
-| Reviewer | Verdict | Score | Notes |
+### Round 5 – full 13-reviewer re-review (all 13 say YES)
+| Reviewer | Verdict | Score (R1 → … → R5) | Found this round → fixed |
 |---|---|---|---|
-| Growth | YES | 8 | launch items only: production origin in OG tags, persistent disk, ads/CMP |
-| Live-ops | YES | 8.5 | no live-ops code changed |
-| Match-3 | YES | 8 | tide still skipped on 12/24 in 2 of 6 hint runs; tutorial a little gentler |
-| Creator | YES | 8 | **idle runs still earned a vote** → fixed (57) |
-| Arcade B | YES | 8.5 | breaker help text said 30 s → 20 s |
-| Speedcuber | YES | 8 | a cube rotation still hides the reversed scramble (needs state comparison) |
-| UX | YES | 8.5 | hub timer pill overflowed at 200% text → wraps (58) |
-| Reef Blocks | YES | 8.5 | rescue short; popups overlap |
-| Arcade A | YES | 8 | ghosts only local for Puffer/Serpent |
+| Growth | **YES** | 5 → 7 → 8 → 8 | launch items only: production origin in OG tags, persistent disk, ads/CMP |
+| Live-ops | **YES** | 5 → 7 → 8 → 8.5 | no regressions |
+| Match-3 | **YES** | 5 → 6 → 7 → 8 | tide still skipped on levels 12/24 in some runs; tutorial a little gentler (open, polish) |
+| Critic | **YES** | 5 → 6.5 → 7 → 8 | Hard/Super-hard labels overstate difficulty (open, polish) |
+| Creator | **YES** | 5 → 6 → 8 → 8 | idle runs still earned a vote → **fixed (57)** |
+| Arcade B | **YES** | 5 → 7 → 8 → 8.5 | breaker help said 30 s → 20 s |
+| Arcade A | **YES** | 5 → 6.5 → 7.5 → 8 | Puffer/Serpent ghosts local only (open) |
+| Reef Blocks | **YES** | 5 → 6.5 → 8 → 8.5 | rescue short; popups overlap (open) |
+| Speedcuber | **YES** | 5 → 6.5 → 7.5 → 8 | a cube rotation hides the reversed scramble (open) |
+| UX | **YES** | 5 → 7 → 8 → 8.5 | hub pill overflowed at 200% text → **fixed (58)** |
+| Daily puzzle | **YES** | 5 → 7 → 8 → 8.5 | days change at UTC midnight (open) |
+| Chess | NOT YET → **YES** | 5 → 6 → 7.5 → 8 (7 in 5a) | background warm-up shared the bot's worker → **own puzzle worker, joins in-flight warm-up (59)** |
+| Ludo | NOT YET → **YES** | 5 → 7 → 8 → 9 (7 in 5a) | bot takeover never fired in the live app (4 client bugs) → **fixed and verified with 3–4 browsers (60)** |
 
 | # | Item | From | Status |
 |---|---|---|---|
-| 57 | A rating/report vote needs a real play: ≥10 s, ≥3 inputs and a score > 0; held games show "⏸ Under review" in lists; breaker help says 20 s | creator, arcade B | ✅ |
-| 58 | Hub header wraps at large text | UX | ✅ |
+| 59 | Chess puzzles generated in their own worker; `puzzleFor` joins a request already running; bot reply 0.4–2.6 s with the warm-up on | chess | ✅ |
+| 60 | Ludo takeover: `api.matches.botify`, stall check on every poll, `botFrom` in the watch signature, seat flipped to `ai`; `scripts/e2e-ludo-leaver.mjs` | ludo | ✅ |
+
+**Round 5 result: 13 of 13 YES, average ≈ 8.3/10.**
+
+Open, none blocking: production origin/disk/ads setup (business); cube rotation vs reversed-scramble check; tide on Shell Swap 12/24; Puffer/Serpent ghosts local-only; no moderator screen in server mode; a returning player can't retake a seat a bot now plays; online bot dice seeded; very fast taps through the name dialog (<450 ms input guard).
