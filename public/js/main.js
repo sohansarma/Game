@@ -23,6 +23,7 @@ import { configureCozy, cozyActive, cozySleeping, wakeCozy, onSleep, isNightTime
 import * as api from './api.js';
 import { policy } from './policy.js';
 import * as analytics from './analytics.js';
+import { adsAvailable, initAds, showRewarded, noteOffer, canChangeAdChoices, changeAdChoices } from './ads.js';
 import * as live from './liveops.js';
 import { DIVISIONS, PROMOTE, DEMOTE } from './league.js';
 import { ACHIEVEMENTS, checkAchievements } from './achievements.js';
@@ -77,6 +78,7 @@ async function boot() {
     if (currentScreen() === 'settings') renderAccountBox();
   });
   analytics.start();
+  if (load().ageBand) initAds(); // Android app only: Google's consent form for adults, child settings for under 13
   startCloud().catch(() => {});
   showHub();
   // anonymous counts: one "open" a day with how long since install (for retention), and share landings
@@ -1142,6 +1144,7 @@ async function askAge() {
   update((d) => { d.ageBand = r; if (r === 'u13') d.name = randomNickname(); });
   analytics.ageAnswered();
   api.track('funnel', 'age');
+  initAds();
   return r;
 }
 const isKid = () => policy().isChild;
@@ -3126,6 +3129,7 @@ async function endArcade(run) {
   const isBest = score > prev.best;
   const hot = noteGameEnd(run.id, isBest);
   const shells = Math.min(60, 2 + Math.floor(score / g.shellsPer)) * (hot ? 2 : 1);
+  const adBonus = Math.min(60, shells); // what a rewarded ad adds: the shells just earned again, up to 60
   update((d) => {
     d.arcade ||= {};
     const a = { best: 0, games: 0, daily: {}, ...(d.arcade[run.id] || {}) };
@@ -3153,9 +3157,29 @@ async function endArcade(run) {
     ${run.challenge && score === run.challenge.score ? `<div class="tip">⚔️ <b>It's a tie</b> with ${esc(run.challenge.who)} at ${fmt(score)}! Rematch to settle it.</div>` : ''}
     ${run.challenge && score !== run.challenge.score ? (score > run.challenge.score ? `<div class="tip">⚔️ <b>You beat ${esc(run.challenge.who)}!</b> ${fmt(score)} vs ${fmt(run.challenge.score)} – send it back to them!</div>` : `<div class="tip">⚔️ ${esc(run.challenge.who)} wins this one: ${fmt(run.challenge.score)} vs ${fmt(score)}. Rematch?</div>`) : ''}
     ${(() => { const before = tierOf(g, prev.best).tier, after = tierOf(g, Math.max(prev.best, score)).tier; return after && after !== before ? `<div class="reward">🎖️ Ranked up: ${after.icon} ${after.name}!</div>` : ''; })()}
-    <div class="reward">+${shells} 🐚${hot ? ' (🔥 2×)' : ''}</div>
+    <div class="reward" id="r-reward">+${shells} 🐚${hot ? ' (🔥 2×)' : ''}</div>
+    ${adsAvailable() ? `<button class="btn sm gold" id="r-ad" type="button">📺 Watch a short ad: +${adBonus} 🐚</button>` : ''}
     <p class="muted small" id="r-rank">Checking leaderboard…</p>`, {
     dismissable: false,
+    onOpen: (sheet) => {
+      const ad = $('#r-ad', sheet);
+      if (!ad) return;
+      noteOffer();
+      ad.onclick = async () => {
+        ad.disabled = true;
+        const res = await showRewarded('endgame');
+        if (res.rewarded) {
+          update((d) => { d.shells += adBonus; });
+          const rw = $('#r-reward', sheet);
+          if (rw) rw.textContent = `+${shells + adBonus} 🐚 (ad bonus +${adBonus})`;
+          ad.remove();
+          sfx.coin?.();
+        } else {
+          ad.textContent = res.reason === 'closed' ? 'Watch the whole ad to get the bonus' : 'No ad right now – try later';
+          setTimeout(() => { if (ad.isConnected) { ad.textContent = `📺 Watch a short ad: +${adBonus} 🐚`; ad.disabled = false; } }, 3000);
+        }
+      };
+    },
     buttons: [
       { label: run.challenge && score <= run.challenge.score ? '⚔️ Rematch (same run)' : '↻ Play again', value: run.challenge && score <= run.challenge.score ? 'rematch' : 'again', cls: 'green' },
       { label: '⚔️ Challenge a friend', value: 'challenge', cls: 'blue' },
@@ -3943,6 +3967,7 @@ function showSettings() {
       <p class="small" style="margin:8px 0 4px">⏲️ Sleep timer – fade the rain out after</p>
       <div class="seg" data-cozy="sleepTimer">${[[0, 'Off'], [15, '15 min'], [30, '30 min'], [60, '1 hour'], [90, '1½ h']].map(([v, l]) => `<button class="seg-btn ${Number(s.settings.sleepTimer || 0) === v ? 'on' : ''}" data-v="${v}">${l}</button>`).join('')}</div>
       ${cozySleeping() ? '<button class="btn sm blue" id="s-wake" style="margin-top:8px">🌧️ Bring the rain back</button>' : ''}
+      ${canChangeAdChoices() ? '<h3 style="margin-top:18px">Ads</h3><p class="small muted">Ads are optional rewards you choose to watch. You can review your ad choices any time.</p><button class="btn sm ghost" id="s-adchoices">Ad choices</button>' : ''}
       <h3 style="margin-top:18px">Leaderboards</h3>
       ${sw('leaderboard', '🏆 Take part in online leaderboards', 'Only your name and scores are shared')}
       ${sw('analytics', '📊 Send anonymous usage counts', isKid() ? 'Just tallies like "a game ended" – no id, no cookies' : 'No name or account. A random id kept on this device shows how many players come back. Off = deleted')}
@@ -3975,6 +4000,7 @@ function showSettings() {
   vol.oninput = () => { update((d) => { d.settings.cozyVol = Number(vol.value) / 100; }); applySettings(); };
   $('#s-wake', el)?.addEventListener('click', () => { wakeCozy(); sfx.tap(); showSettings(); });
   $('#s-back', el).onclick = () => { sfx.tap(); showHub(); };
+  $('#s-adchoices', el)?.addEventListener('click', () => changeAdChoices());
   $('#s-help', el).onclick = () => howToPlay();
   const checkName = wireNameField(el, (ok) => { $('#s-save-name', el).disabled = !ok; });
   if (isKid()) $('#nf-input', el).readOnly = true;
