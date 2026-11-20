@@ -108,3 +108,15 @@ Round 3: **7 of 13 YES**, average **7.8/10**.
 | 50 | Breaker tap serves along the drawn line, paddle stays while aiming, coral creeps every 20 s, serve text; Merge popups capped; modal key guard 450 ms; zero runs never become ghosts | arcade A/B | ✅ |
 | 51 | Accessibility: reduce-motion re-read every start; welcome dialog heading; timer wraps at 200% | UX | ✅ |
 | 52 | Creator: a vote needs a ≥10 s play; play report retries; privacy page gets a controller & rights section (fill-ins for operator/contact/hosting) | creator, growth | ✅ |
+
+## Round 4 – re-review of the six NOT-YET reviewers
+| Reviewer | Verdict | Score (R1 → R2 → R3 → R4) | Follow-ups (not blocking) |
+|---|---|---|---|
+| Live-ops | **YES** | 5 → 7 → 8 → 8.5 | late-joiner "needs ~330 XP/day" on First Tide; sink for heavy players after the album |
+| Match-3 | **YES** | 5 → 6 → 7 → 8 | levels 1–3 still losable by casual play; level 6 spike (7 moves); tide skippable on 12/24/39 |
+| Speedcuber | **YES** | 5 → 6.5 → 7.5 → 8 | reversed-scramble check beatable by reordering commuting moves |
+| Critic | **YES** | 5 → 6.5 → 7 → 8 | cap untapped celebration at 3 s; clamp flash radius; Hard/Super hard labels overstate |
+| Ludo | **YES** | 5 → 7 → 8 → 9 | a player who leaves freezes a 3–4 person table (needs bot takeover); stale "2 players" text |
+| Chess | **YES** | 5 → 6 → 7.5 → 8 | first daily puzzle takes ~30 s to generate on-device (precompute/prefetch) |
+
+Round 4: all six former NOT-YET reviewers now say YES; with the seven Round 3 YES votes that is **13 of 13**, average ≈ 8.2/10.
