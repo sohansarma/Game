@@ -1,6 +1,7 @@
 // Ludo table: rotating board (your colour sits bottom-left), a name tag per
-// seat and ONE shared dice tray at the bottom centre. Every throw slides from
-// the thrower's tag into the tray, so the dice is always in the same place.
+// seat and ONE dice tray that travels to whoever's turn it is – it sits right
+// beside that player's name tag (top row or bottom row, on their side), and
+// every throw slides from the thrower's tag into it.
 //
 // sim interface: { game, mySide, canRoll(), canMove(), roll() -> {ok, events, end?},
 //                  move(t) -> {ok, events, end?}, labelOf?(seat), isLocal?(seat) }
@@ -146,8 +147,8 @@ export default class LudoView {
     this.canvas.height = Math.max(1, Math.round(rect.height * dpr));
     this.W = rect.width;
     this.H = rect.height;
-    this.panelH = 54;
-    this.trayS = 54;
+    this.panelH = 56;
+    this.trayS = 56;
     const avail = Math.min(rect.width - 6, rect.height - this.panelH * 2 - 20 - 60); // 60: message strip under the table
     this.frame = Math.max(8, Math.round(avail * 0.028));
     // whole device pixels per square, so every grid line is crisp and even
@@ -167,24 +168,50 @@ export default class LudoView {
   /** The name tag in front of each seat, on the table above/below the board. */
   panelRect(seat) {
     const corner = this.cornerOf(seat);
-    const gap = this.trayS + 20; // the dice tray sits between the two bottom tags
+    const gap = this.trayS + 40; // room for the dice tray between the two tags of a row
     const w = Math.min((this.W - gap) / 2 - 8, 172), h = this.panelH;
     const x = corner === 0 || corner === 3 ? this.W / 2 - gap / 2 - w : this.W / 2 + gap / 2;
     const y = corner < 2 ? this.oy - this.frame - h - 8 : this.oy + this.size + this.frame + 8;
     return { x, y, w, h, right: corner === 1 || corner === 2 };
   }
 
-  /** The one dice tray everybody throws into (bottom centre, under the board). */
-  trayRect() {
-    const S = this.trayS;
-    const y = this.oy + this.size + this.frame + 8 + (this.panelH - S) / 2;
-    return { x: this.W / 2 - S / 2, y, s: S };
+  /** Whose turn the dice belongs to right now (the thrower while a throw plays). */
+  diceSeat(now = performance.now()) {
+    const d = this.die;
+    return d.rollT0 && now - d.rollT0 < (d.dur || 0) + 400 ? d.seat : this.activeSeat;
   }
 
-  /** Where the dice rests (same for every seat). */
+  /** Where the dice tray belongs for `seat`: in that seat's row (above or
+   *  below the board), tucked right up against that seat's name tag. */
+  trayTarget(seat) {
+    const S = this.trayS, p = this.panelRect(seat);
+    const x = p.right ? p.x - S - 6 : p.x + p.w + 6;
+    return { x, y: p.y + (p.h - S) / 2, s: S };
+  }
+
+  /** The dice tray as drawn – it glides to the new player when the turn changes. */
+  trayRect() {
+    const goal = this.trayTarget(this.diceSeat());
+    const cur = this.trayPos;
+    if (!cur || this.reduced || cur.s !== goal.s) { this.trayPos = { ...goal }; return goal; }
+    return { x: cur.x, y: cur.y, s: goal.s };
+  }
+
+  /** Ease the tray towards its seat (called once per frame). */
+  stepTray(dt) {
+    const goal = this.trayTarget(this.diceSeat());
+    const cur = (this.trayPos ||= { ...goal });
+    const k = this.reduced ? 1 : 1 - Math.exp(-dt / 70);
+    cur.x += (goal.x - cur.x) * k;
+    cur.y += (goal.y - cur.y) * k;
+    cur.s = goal.s;
+    if (Math.abs(goal.x - cur.x) < 0.3 && Math.abs(goal.y - cur.y) < 0.3) { cur.x = goal.x; cur.y = goal.y; }
+  }
+
+  /** Where the dice rests inside the tray – big enough to read at a glance. */
   diceRect() {
     const t = this.trayRect();
-    const d = Math.round(t.s * 0.56);
+    const d = Math.round(t.s * 0.7);
     return { x: t.x + (t.s - d) / 2, y: t.y + (t.s - d) / 2, s: d };
   }
 
@@ -203,7 +230,7 @@ export default class LudoView {
       if (this.busy()) return;
       const seat = this.game.turn;
       if (this.sim.canRoll()) {
-        const t = this.trayRect(), pr = this.panelRect(seat), pad = 14;
+        const t = this.trayTarget(seat), pr = this.panelRect(seat), pad = 14;
         const onTray = x >= t.x - pad && x <= t.x + t.s + pad && y >= t.y - pad && y <= t.y + t.s + pad;
         const onTag = x >= pr.x - 6 && x <= pr.x + pr.w + 6 && y >= pr.y - 6 && y <= pr.y + pr.h + 6;
         if (onTray || onTag) return this.doRoll();
@@ -417,6 +444,8 @@ export default class LudoView {
       }
       if (this.anim || this.queue.length) this.settled = false;
     }
+    this.stepTray(Math.min(100, now - (this.lastNow ?? now)));
+    this.lastNow = now;
     this.draw(now);
     this.raf = requestAnimationFrame(this.loop);
   }
@@ -451,7 +480,7 @@ export default class LudoView {
   drawTray(now) {
     const ctx = this.ctx, g = this.game;
     const t = this.trayRect(), d = this.diceRect();
-    const seat = this.die.rollT0 && now - this.die.rollT0 < (this.die.dur || 0) + 400 ? this.die.seat : this.activeSeat;
+    const seat = this.diceSeat(now);
     const col = COLORS[seat] || 'red';
     const canTap = !g.over && this.sim.canRoll() && this.isLocal(g.turn) && !this.busy();
     ctx.save();
@@ -486,7 +515,8 @@ export default class LudoView {
       const pose = throwPose(tt, st.from[0], st.from[1], cx, cy);
       drawDie3D(ctx, pose.x, pose.y - pose.z * d.s * 0.8, d.s * (1 + pose.z * 0.25), st.value, pose.spin, st.yaw || 0);
     } else {
-      drawDie3D(ctx, cx, cy - (canTap && !this.reduced ? Math.abs(Math.sin(now / 300)) * 2 : 0), d.s, st.value, 0, st.yaw || 0);
+      // at rest: straight, face-on, so the number is clear
+      drawDie3D(ctx, cx, cy - (canTap && !this.reduced ? Math.abs(Math.sin(now / 300)) * 2 : 0), d.s, st.value, 0, 0);
     }
   }
 

@@ -106,15 +106,20 @@ const apply = (M, v) => [M[0][0] * v[0] + M[0][1] * v[1] + M[0][2] * v[2], M[1][
 const SHOW = {
   1: rotX(0), 6: rotY(Math.PI), 2: rotY(-Math.PI / 2), 5: rotY(Math.PI / 2), 3: rotX(Math.PI / 2), 4: rotX(-Math.PI / 2),
 };
-const TILT = mul(rotX(-0.42), rotY(0.38)); // look slightly from above-right, like a camera over a table
+// look slightly from above-right while it tumbles; `k` 0 = perfectly face-on
+const tiltOf = (k) => mul(rotX(-0.42 * k), rotY(0.38 * k));
 
 /**
  * Draw a die. `spin` 0..1 = how much leftover tumble (1 = mid-throw).
- * `yaw` turns it on the table so dice don't all look identical.
+ * `yaw` turns it while it tumbles; at rest (spin 0) the die is always drawn
+ * straight and face-on so the number is easy to read.
  */
 export function drawDie(ctx, cx, cy, size, value, spin = 0, yaw = 0, color = '#fbfbf7', pipColor = '#1d1b22') {
   const tumble = mul(rotX(spin * 7.3), mul(rotY(spin * 5.1), rotZ(spin * 3.7)));
-  const M = mul(TILT, mul(rotZ(yaw), mul(tumble, SHOW[value] || SHOW[1])));
+  // In the air it's a tilted 3D cube; as it settles it turns square-on to
+  // the viewer, so the resting die reads as a flat, upright face.
+  const k = Math.min(1, spin * 2.5);
+  const M = mul(tiltOf(k), mul(rotZ(yaw * k), mul(tumble, SHOW[value] || SHOW[1])));
   const h = size / 2;
   const light = norm([-0.2, -0.35, 0.92]); // lamp over the player's shoulder
   const proj = (p) => {
