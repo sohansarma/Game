@@ -2896,7 +2896,10 @@ function shareCode(code, id) {
 }
 
 async function versusPause(run) {
-  const r = await modal('<h2>Menu</h2>', { buttons: [{ label: '▶ Resume', value: null, cls: 'green' }, { label: run.online ? '🏳️ Resign' : '🏁 End game', value: 'end', cls: 'ghost' }, { label: run.online ? '🕹️ Back to arcade (match stays open)' : '🕹️ Back to arcade', value: 'hub', cls: 'ghost' }] });
+  // Ludo: the 3D table look can be switched off (raised board, cube-shaped die)
+  const view3d = run.id === 'ludo' ? `<div class="setting"><span>🧊 3D view</span><button class="switch" role="switch" data-k="ludo3d" aria-checked="${load().settings.ludo3d !== false}"></button></div>` : '';
+  const r = await modal(`<h2>Menu</h2>${view3d}`, { buttons: [{ label: '▶ Resume', value: null, cls: 'green' }, { label: run.online ? '🏳️ Resign' : '🏁 End game', value: 'end', cls: 'ghost' }, { label: run.online ? '🕹️ Back to arcade (match stays open)' : '🕹️ Back to arcade', value: 'hub', cls: 'ghost' }], onOpen: (sheet) => wireSwitches(sheet) });
+  if (run.id === 'ludo' && view) { view.trayPos = null; view.placeReactions?.(); }
   if (r === 'end') view?.hooks.onQuit?.();
   else if (r === 'hub') { run.stopWatch?.(); showHub(); }
 }

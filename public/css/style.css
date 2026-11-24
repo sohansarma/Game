@@ -594,9 +594,11 @@ body.cozy .btn, body.cozy .game-card .tag, body.cozy .seg-btn.on { filter: none;
 .rule input { width: 22px; height: 22px; margin-top: 2px; accent-color: var(--gold); flex: 0 0 auto; }
 .rule > span { display: flex; flex-direction: column; gap: 2px; }
 .board-wrap { position: relative; }
-.ludo-react { position: absolute; right: 8px; bottom: 8px; display: flex; flex-direction: column; align-items: flex-end; gap: 6px; z-index: 4; }
-.lr-btn { width: 48px; height: 48px; border-radius: 50%; font-size: 1.5rem; background: rgba(20,12,6,.75); border: 2px solid rgba(255,214,94,.4); }
-.lr-row { display: flex; gap: 4px; padding: 6px; border-radius: 999px; background: rgba(20,12,6,.85); border: 1px solid rgba(255,214,94,.3); }
+/* one 😊 per local player, pinned to the edge of their own name tag */
+.ludo-react { position: absolute; width: 34px; height: 34px; z-index: 4; }
+.lr-btn { width: 34px; height: 34px; padding: 0; border-radius: 50%; font-size: 1.1rem; line-height: 1; background: rgba(20,12,6,.9); border: 2px solid rgba(255,214,94,.55); box-shadow: 0 2px 6px rgba(0,0,0,.4); }
+.lr-row { position: absolute; top: 40px; left: 0; display: flex; gap: 4px; padding: 6px; border-radius: 999px; background: rgba(20,12,6,.92); border: 1px solid rgba(255,214,94,.3); }
+.ludo-react.up .lr-row { top: auto; bottom: 40px; }
 .lr-row[hidden] { display: none; }
 .lr-e { width: 44px; height: 44px; font-size: 1.4rem; border-radius: 50%; background: transparent; border: 0; }
 .modal .sheet .rule { flex-direction: row; align-items: flex-start; text-align: left; }

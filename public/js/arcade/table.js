@@ -108,18 +108,22 @@ const SHOW = {
 };
 // look slightly from above-right while it tumbles; `k` 0 = perfectly face-on
 const tiltOf = (k) => mul(rotX(-0.42 * k), rotY(0.38 * k));
+// the resting '3D' pose: the number still faces you, upright, with a sliver
+// of the top and right side showing so it reads as a real cube
+const REST3D = mul(rotX(-0.34), rotY(-0.3));
 
 /**
  * Draw a die. `spin` 0..1 = how much leftover tumble (1 = mid-throw).
  * `yaw` turns it while it tumbles; at rest (spin 0) the die is always drawn
  * straight and face-on so the number is easy to read.
  */
-export function drawDie(ctx, cx, cy, size, value, spin = 0, yaw = 0, color = '#fbfbf7', pipColor = '#1d1b22') {
+export function drawDie(ctx, cx, cy, size, value, spin = 0, yaw = 0, color = '#fbfbf7', pipColor = '#1d1b22', rest3d = false) {
   const tumble = mul(rotX(spin * 7.3), mul(rotY(spin * 5.1), rotZ(spin * 3.7)));
   // In the air it's a tilted 3D cube; as it settles it turns square-on to
   // the viewer, so the resting die reads as a flat, upright face.
   const k = Math.min(1, spin * 2.5);
-  const M = mul(tiltOf(k), mul(rotZ(yaw * k), mul(tumble, SHOW[value] || SHOW[1])));
+  const view = rest3d ? REST3D : tiltOf(k);
+  const M = mul(view, mul(rotZ(yaw * k), mul(tumble, SHOW[value] || SHOW[1])));
   const h = size / 2;
   const light = norm([-0.2, -0.35, 0.92]); // lamp over the player's shoulder
   const proj = (p) => {
@@ -142,6 +146,7 @@ export function drawDie(ctx, cx, cy, size, value, spin = 0, yaw = 0, color = '#f
     ctx.closePath();
     ctx.fill();
   }
+  const front = faces[faces.length - 1];
   for (const f of faces) {
     const c = f.n;
     const corner = (su, sv) => proj([c[0] + f.u[0] * su + f.v[0] * sv, c[1] + f.u[1] * su + f.v[1] * sv, c[2] + f.u[2] * su + f.v[2] * sv]);
@@ -168,7 +173,8 @@ export function drawDie(ctx, cx, cy, size, value, spin = 0, yaw = 0, color = '#f
       }
       ctx.closePath();
       ctx.fillStyle = f.F.val === 1 && pipColor === '#1d1b22' ? '#c62828' : pipColor;
-      ctx.globalAlpha = 0.55 + 0.45 * Math.min(1, f.n[2] * 1.6);
+      // in 3D rest the side faces' pips are faint, so only the rolled number stands out
+      ctx.globalAlpha = rest3d && spin === 0 && f !== front ? 0.28 : 0.55 + 0.45 * Math.min(1, f.n[2] * 1.6);
       ctx.fill();
       ctx.globalAlpha = 1;
     }

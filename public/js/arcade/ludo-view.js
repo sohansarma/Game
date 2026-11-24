@@ -97,29 +97,61 @@ export default class LudoView {
     this.reacts = this.reacts.filter((r) => now - r.t0 < 1800);
   }
 
-  /** The 😊 button: pick a reaction for your seat (or whoever's turn it is in pass & play). */
+  /** A 😊 button on the name tag of every seat played on this phone (just
+   *  yours online or vs bots; everyone's in pass & play). Each one sends a
+   *  reaction from its own seat, so it floats up from the right player. */
   mountReactionButton() {
     const wrap = this.canvas.parentElement;
-    if (!wrap || wrap.querySelector('.ludo-react')) return;
-    const box = document.createElement('div');
-    box.className = 'ludo-react';
-    box.innerHTML = `<div class="lr-row" hidden>${REACTIONS.map((e) => `<button class="lr-e" aria-label="React ${e}">${e}</button>`).join('')}</div><button class="lr-btn" aria-label="Send a reaction" aria-expanded="false">😊</button>`;
-    wrap.appendChild(box);
-    const row = box.querySelector('.lr-row'), btn = box.querySelector('.lr-btn');
-    btn.onclick = () => { row.hidden = !row.hidden; btn.setAttribute('aria-expanded', String(!row.hidden)); };
-    for (const b of box.querySelectorAll('.lr-e')) b.onclick = () => {
-      const seat = this.sim.mySide ?? this.game.turn;
-      this.react(seat, b.textContent);
-      this.hooks.onReact?.(b.textContent); // online: send it to the other phone
-      haptic(8);
-      row.hidden = true;
-      btn.setAttribute('aria-expanded', 'false');
-    };
-    this.reactBox = box;
+    if (!wrap) return;
+    wrap.querySelectorAll('.ludo-react').forEach((n) => n.remove());
+    this.reactBtns = [];
+    this.game.players.forEach((pl, seat) => {
+      if (!pl || !this.isLocal(seat)) return;
+      const box = document.createElement('div');
+      box.className = 'ludo-react';
+      box.innerHTML = `<div class="lr-row" hidden>${REACTIONS.map((e) => `<button class="lr-e" aria-label="React ${e}">${e}</button>`).join('')}</div><button class="lr-btn" aria-label="Send a reaction as ${this.label(seat)}" aria-expanded="false">😊</button>`;
+      wrap.appendChild(box);
+      const row = box.querySelector('.lr-row'), btn = box.querySelector('.lr-btn');
+      const close = () => { row.hidden = true; btn.setAttribute('aria-expanded', 'false'); };
+      btn.onclick = () => {
+        const open = row.hidden;
+        for (const o of this.reactBtns) o.close();
+        row.hidden = !open;
+        btn.setAttribute('aria-expanded', String(open));
+        if (open) { // centre the row on the button, kept inside the table
+          const W = wrap.clientWidth, bx = box.offsetLeft, rw = row.offsetWidth;
+          const left = Math.max(4, Math.min(W - rw - 4, bx + 17 - rw / 2));
+          row.style.left = `${left - bx}px`;
+        }
+      };
+      for (const b of box.querySelectorAll('.lr-e')) b.onclick = () => {
+        this.react(seat, b.textContent);
+        this.hooks.onReact?.(b.textContent); // online: send it to the other phones
+        haptic(8);
+        close();
+      };
+      this.reactBtns.push({ seat, box, close });
+    });
+    this.placeReactions();
+  }
+
+  /** Pin each 😊 to its seat's tag: on the outer edge (away from the board),
+   *  at the end nearest the middle of the table. */
+  placeReactions() {
+    if (!this.reactBtns?.length) return;
+    const ox = this.canvas.offsetLeft, oy = this.canvas.offsetTop;
+    for (const { seat, box } of this.reactBtns) {
+      const p = this.panelRect(seat), top = this.cornerOf(seat) < 2, B = 34;
+      const cx = p.right ? p.x + 20 : p.x + p.w - 20;
+      const cy = top ? p.y - 8 : p.y + p.h + 8; // mostly outside the tag, clear of its text
+      box.style.left = `${ox + cx - B / 2}px`;
+      box.style.top = `${oy + cy - B / 2}px`;
+      box.classList.toggle('up', !top); // the emoji row opens over the player's own tag, not off the screen edge
+    }
   }
 
   destroy() {
-    this.reactBox?.remove();
+    for (const r of this.reactBtns || []) r.box.remove();
     this.destroyed = true;
     clearTimeout(this.autoTimer);
     cancelAnimationFrame(this.raf);
@@ -149,7 +181,8 @@ export default class LudoView {
     this.H = rect.height;
     this.panelH = 56;
     this.trayS = 56;
-    const avail = Math.min(rect.width - 6, rect.height - this.panelH * 2 - 20 - 60); // 60: message strip under the table
+    this.badge = 26; // room above/below the tag rows for the 😊 buttons
+    const avail = Math.min(rect.width - 6, rect.height - this.panelH * 2 - 20 - 60 - this.badge * 2 - 10); // 60: message strip under the table
     this.frame = Math.max(8, Math.round(avail * 0.028));
     // whole device pixels per square, so every grid line is crisp and even
     const snap = (v) => Math.round(v * dpr) / dpr;
@@ -157,7 +190,18 @@ export default class LudoView {
     const size = this.cell * 15;
     this.size = size;
     this.ox = snap((rect.width - size) / 2);
-    this.oy = snap(this.panelH + 10 + this.frame + Math.max(0, (rect.height - this.panelH * 2 - 20 - 60 - (size + this.frame * 2)) / 2));
+    this.oy = snap(this.badge + this.panelH + 10 + this.frame + Math.max(0, (rect.height - this.panelH * 2 - 20 - 60 - this.badge * 2 - 10 - (size + this.frame * 2)) / 2));
+    this.placeReactions?.();
+  }
+
+  /** The 3D look (raised board, cube-shaped resting die) – a per-phone setting, on by default. */
+  get is3d() {
+    return load().settings.ludo3d !== false;
+  }
+
+  /** How far the board's 3D front edge drops below the frame (0 in 2D). */
+  get slab() {
+    return this.is3d ? Math.max(6, Math.round(this.frame * 0.7)) : 0;
   }
 
   /** Display corner (0 TL, 1 TR, 2 BR, 3 BL) of a seat after rotation. */
@@ -171,7 +215,7 @@ export default class LudoView {
     const gap = this.trayS + 40; // room for the dice tray between the two tags of a row
     const w = Math.min((this.W - gap) / 2 - 8, 172), h = this.panelH;
     const x = corner === 0 || corner === 3 ? this.W / 2 - gap / 2 - w : this.W / 2 + gap / 2;
-    const y = corner < 2 ? this.oy - this.frame - h - 8 : this.oy + this.size + this.frame + 8;
+    const y = corner < 2 ? this.oy - this.frame - h - 8 : this.oy + this.size + this.frame + 8 + this.slab;
     return { x, y, w, h, right: corner === 1 || corner === 2 };
   }
 
@@ -485,6 +529,11 @@ export default class LudoView {
     const canTap = !g.over && this.sim.canRoll() && this.isLocal(g.turn) && !this.busy();
     ctx.save();
     softShadow(ctx, t.x + t.s / 2, t.y + t.s - 2, t.s * 0.55, 9, 0.5);
+    if (this.is3d) { // the tray's side wall
+      roundedRect(ctx, t.x, t.y + 5, t.s, t.s, 14);
+      ctx.fillStyle = '#1a0f08';
+      ctx.fill();
+    }
     // coloured rim = whose turn it is
     roundedRect(ctx, t.x, t.y, t.s, t.s, 14);
     ctx.fillStyle = DARK[col];
@@ -513,10 +562,11 @@ export default class LudoView {
     const tt = (now - (st.rollT0 || 0)) / (st.dur || 1);
     if (st.rollT0 && tt < 1 && st.from) {
       const pose = throwPose(tt, st.from[0], st.from[1], cx, cy);
-      drawDie3D(ctx, pose.x, pose.y - pose.z * d.s * 0.8, d.s * (1 + pose.z * 0.25), st.value, pose.spin, st.yaw || 0);
+      drawDie3D(ctx, pose.x, pose.y - pose.z * d.s * 0.8, d.s * (1 + pose.z * 0.25), st.value, pose.spin, st.yaw || 0, undefined, undefined, this.is3d);
     } else {
-      // at rest: straight, face-on, so the number is clear
-      drawDie3D(ctx, cx, cy - (canTap && !this.reduced ? Math.abs(Math.sin(now / 300)) * 2 : 0), d.s, st.value, 0, 0);
+      // at rest: straight and upright so the number is clear (3D: a cube
+      // with its top and side showing; 2D: perfectly face-on)
+      drawDie3D(ctx, cx, cy - (canTap && !this.reduced ? Math.abs(Math.sin(now / 300)) * 2 : 0), d.s * (this.is3d ? 0.9 : 1), st.value, 0, 0, undefined, undefined, this.is3d);
     }
   }
 
@@ -586,6 +636,21 @@ export default class LudoView {
     roundedRect(ctx, bx, by, bs, bs, 12);
     ctx.fill();
     ctx.restore();
+    if (this.is3d) {
+      // 3D: the board is a thick slab – its front edge shows under the frame
+      const D = this.slab;
+      ctx.save();
+      ctx.shadowColor = 'rgba(0,0,0,0.55)';
+      ctx.shadowBlur = 18;
+      ctx.shadowOffsetY = D + 6;
+      roundedRect(ctx, bx, by + D, bs, bs, 12);
+      const side = ctx.createLinearGradient(0, by + bs - 12, 0, by + bs + D);
+      side.addColorStop(0, '#5a3418');
+      side.addColorStop(1, '#2a1608');
+      ctx.fillStyle = side;
+      ctx.fill();
+      ctx.restore();
+    }
     ctx.save();
     roundedRect(ctx, bx, by, bs, bs, 12);
     ctx.clip();
@@ -608,7 +673,7 @@ export default class LudoView {
       ctx.fillStyle = 'rgba(20,12,6,0.85)';
       const w = Math.min(this.W - 20, 320);
       // under the table row when there's room, so the board stays clear
-      const below = this.oy + this.size + this.frame + 8 + this.panelH + 12;
+      const below = this.oy + this.size + this.frame + 8 + this.slab + this.panelH + 12;
       const cy = below + 40 <= this.H ? below + 20 : this.oy + this.size / 2;
       roundedRect(ctx, this.W / 2 - w / 2, cy - 20, w, 40, 20);
       ctx.fill();
