@@ -1,6 +1,6 @@
 // Offline support: cache the app shell, serve it cache-first, and never
 // cache API calls (leaderboards must be live).
-const VERSION = 'tidepop-v31';
+const VERSION = 'tidepop-v32';
 const SHELL = [
   './', 'index.html', 'config.js', 'manifest.webmanifest', 'css/style.css',
   'js/main.js', 'js/engine.js', 'js/rng.js', 'js/blocks.js', 'js/levels.js', 'js/level-tuning.js', 'js/modes.js',
@@ -9,7 +9,9 @@ const SHELL = [
 ];
 
 self.addEventListener('install', (e) => {
-  e.waitUntil(caches.open(VERSION).then((c) => c.addAll(SHELL)).then(() => self.skipWaiting()));
+  // cache: 'reload' skips the browser's HTTP cache, so a new version never
+  // installs a mix of fresh and stale files
+  e.waitUntil(caches.open(VERSION).then((c) => c.addAll(SHELL.map((u) => new Request(u, { cache: 'reload' })))).then(() => self.skipWaiting()));
 });
 
 self.addEventListener('activate', (e) => {
