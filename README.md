@@ -184,7 +184,7 @@ The page is private until you share it from its Share menu. Players need Contrib
 | **Fly.io / any VPS / home server** | Game and leaderboard with permanent storage | `docker build -t tidepop . && docker run -p 8080:8080 -v tidepop-data:/data tidepop` |
 | **Split** | Static game on Pages, API anywhere | Set `window.TIDEPOP_API = 'https://your-api.example'` in `public/config.js`. CORS is open by default; restrict it with `ALLOWED_ORIGIN`. |
 
-Server environment variables: `PORT` (default 8080), `DATA_DIR` (default `./data`), `ALLOWED_ORIGIN` (default `*`).
+Server environment variables: `PORT` (default 8080), `DATA_DIR` (default `./data`), `ALLOWED_ORIGIN` (default `*`). Set `TRUST_PROXY=1` when the server runs behind a proxy (Render, Fly, a load balancer): the client's address is then read from `CF-Connecting-IP` / `X-Forwarded-For`, which the per-IP rate limit and **📡 Nearby tables** (open online tables shown to phones on the same Wi-Fi) need. Network addresses are only ever held in memory, as a salted hash.
 
 ---
 

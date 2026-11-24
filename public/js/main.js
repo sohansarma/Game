@@ -101,7 +101,10 @@ async function boot() {
     if (dailyStatus().canClaim) setTimeout(() => toast('🎁 Your daily treasure is ready – tap the gift at the top'), 900);
     maybeSuggestCozy();
   }
+  const joinParam = (new URLSearchParams(location.search).get('join') || '').toUpperCase();
+  if (joinParam) { try { history.replaceState(null, '', location.pathname + location.hash); } catch { /* sandboxed */ } }
   if (ch) acceptChallenge(ch);
+  else if (joinParam && validCode(joinParam)) joinCode(joinParam);
   else if (s.onboarded && new URLSearchParams(location.search).has('tide')) {
     const n = Number(new URLSearchParams(location.search).get('tide'));
     try { history.replaceState(null, '', location.pathname + location.hash); } catch { /* sandboxed */ }
@@ -2261,7 +2264,8 @@ async function versusMenu(id) {
   const recent = Object.entries(load().versus || {}).filter(([, v]) => v.game === id && Date.now() - v.at < 7 * 86400000);
   const r = await modal(`<h2>${g.icon} Play a friend</h2>
     <p class="muted small">Friendly games aren't ranked – just bragging rights.</p>
-    ${recent.length ? `<div class="list">${recent.map(([code, v]) => `<button class="item" data-code="${code}"><span class="grow" style="text-align:left"><b>${code}</b> · ${v.role === 'host' ? 'you created' : 'you joined'}</span><span class="val">Resume ▶</span></button>`).join('')}</div>` : ''}`, {
+    ${recent.length ? `<div class="list">${recent.map(([code, v]) => `<button class="item" data-code="${code}"><span class="grow" style="text-align:left"><b>${code}</b> · ${v.role === 'host' ? 'you created' : 'you joined'}</span><span class="val">Resume ▶</span></button>`).join('')}</div>` : ''}
+    <div id="nearby" class="nearby" aria-live="polite"></div>`, {
     buttons: [
       { label: '📱 Same device (pass & play)', value: 'local', cls: 'green' },
       { label: '🌐 Create online match', value: 'create', cls: 'blue' },
@@ -2270,9 +2274,11 @@ async function versusMenu(id) {
     ],
     onOpen: (sheet) => {
       for (const b of $$('[data-code]', sheet)) b.onclick = () => { closeModal('resume:' + b.dataset.code); };
+      watchNearby($('#nearby', sheet), id);
     },
   });
   if (!r || r === 'back') return arcadeMenu(id);
+  if (r.startsWith('nearby:')) return joinCode(r.slice(7));
   if (r === 'local') return localVersus(id);
   if (r.startsWith('resume:')) return openOnline(r.slice(7));
   if (!(await api.matches.available())) {
@@ -2622,12 +2628,14 @@ async function createOnline(id) {
     const b = await modal(`<h2>🎲 Online Ludo</h2><p class="small">You are <b>${LUDO_COLOURS[me][2]} ${LUDO_COLOURS[me][0]}</b>. Everyone rolls on their own phone – the server rolls the dice. The first friend to join sits opposite you (your partner in Team Up).</p>
       <div class="seg" role="group" aria-label="How many people"><button class="seg-btn on" data-n="2">2 people</button><button class="seg-btn" data-n="3">3 people</button><button class="seg-btn" data-n="4">4 people</button></div>
       <label class="rule"><input type="checkbox" id="ol-bots"><span><b>Fill empty seats with bots</b></span></label>
+      <label class="rule"><input type="checkbox" id="ol-near" ${load().settings.nearbyShare !== false ? 'checked' : ''}><span><b>📡 Show to friends on my Wi-Fi</b><span class="small muted">Anyone on the same Wi-Fi sees this table and can tap to join – no code needed</span></span></label>
       <label class="rule"><input type="checkbox" data-rule="teams" ${hr.teams ? 'checked' : ''}><span><b>🤝 Team Up</b><span class="small muted">You and the person opposite play together (4 people, or 2 + bots)</span></span></label>
       <div class="rule-list">${LUDO_RULES.map(([k, name, desc]) => `<label class="rule"><input type="checkbox" data-rule="${k}" ${hr[k] ? 'checked' : ''}><span><b>${name}</b><span class="small muted">${desc}</span></span></label>`).join('')}</div>`, {
       buttons: [{ label: '▶ Create the table', value: 'go', cls: 'green' }, { label: 'Back', value: null, cls: 'ghost' }],
       onOpen: (sheet) => {
         for (const bt of $$('[data-n]', sheet)) bt.onclick = () => { players = Number(bt.dataset.n); $$('[data-n]', sheet).forEach((x) => x.classList.toggle('on', x === bt)); };
         $('#ol-bots', sheet).onchange = (e) => { bots = e.target.checked; };
+        $('#ol-near', sheet).onchange = (e) => { update((d) => { d.settings.nearbyShare = e.target.checked; }); };
         for (const cb of $$('[data-rule]', sheet)) cb.onchange = () => { hr[cb.dataset.rule] = cb.checked; };
       },
     });
@@ -2637,7 +2645,7 @@ async function createOnline(id) {
   }
   const code = newCode();
   try {
-    await api.matches.create(code, id, randSeed(), opts);
+    await api.matches.create(code, id, randSeed(), opts, load().settings.nearbyShare !== false);
   } catch (e) {
     toast(e.message || "Couldn't create the match");
     return versusMenu(id);
@@ -2656,6 +2664,11 @@ async function joinOnline() {
   });
   if (r !== 'go') return showHub();
   if (!validCode(code)) { toast('Codes are 5 letters/numbers, like K7PQX'); return joinOnline(); }
+  return joinCode(code);
+}
+
+/** Take a seat at table `code` (typed, tapped in Nearby, or from a join link). */
+async function joinCode(code) {
   try {
     const m = await api.matches.join(code);
     update((d) => { d.versus = { ...(d.versus || {}), [code]: { game: m.game, role: m.me || 'guest', at: Date.now() } }; });
@@ -2669,6 +2682,33 @@ async function joinOnline() {
     toast(e.message || "Couldn't join that match");
     joinOnline();
   }
+}
+
+/** Live list of open tables on this Wi-Fi inside the Play a friend sheet. */
+function watchNearby(box, id) {
+  if (!box) return;
+  const g = ARCADE_BY_ID[id];
+  let shown = '';
+  const tick = async () => {
+    if (!box.isConnected || !isModalOpen()) return;
+    let tables = [];
+    try { tables = await api.matches.nearby(id); } catch { tables = []; }
+    if (!box.isConnected) return;
+    const html = tables.length
+      ? `<h3>📡 Nearby tables</h3><div class="list">${tables.map((t) => {
+        const who = id === 'ludo' && Number.isInteger(t.hostColour) ? `${LUDO_COLOURS[t.hostColour][2]} ` : '';
+        const seats = t.players > 2 ? ` · ${t.seated}/${t.players} seated` : '';
+        return `<button class="item" data-near="${esc(t.code)}"><span class="grow" style="text-align:left">${who}<b>${esc(t.hostName)}</b>'s ${esc(g.title)} table${seats}</span><span class="val">Join ▶</span></button>`;
+      }).join('')}</div>`
+      : `<p class="muted small nearby-empty">📡 Looking for tables on your Wi-Fi… When a friend on the same Wi-Fi creates an online table, it shows up here.</p>`;
+    if (html !== shown) {
+      shown = html;
+      box.innerHTML = html;
+      for (const b of $$('[data-near]', box)) b.onclick = () => { sfx.tap(); closeModal('nearby:' + b.dataset.near); };
+    }
+    setTimeout(tick, 3000);
+  };
+  tick();
 }
 
 async function openOnline(code, justCreated) {
@@ -2888,11 +2928,11 @@ async function playVersus(id, sim, online, extra = {}) {
 
 function shareCode(code, id) {
   const g = ARCADE_BY_ID[id];
-  modal(`<h2>${g.icon} Match created!</h2><p>Send this code to a friend. They open Tidepop → ${esc(g.title)} → Play a friend → Join.</p>
+  modal(`<h2>${g.icon} Match created!</h2><p>Friends on the <b>same Wi-Fi</b> will see your table under ${esc(g.title)} → Play a friend → 📡 Nearby. Anyone else: send them the link or the code.</p>
     <div class="big-score" style="letter-spacing:8px">${code}</div>
     <p class="muted small">You can start ${id === 'chess' ? 'if you play White' : 'right away'} – their moves appear here as soon as they play.</p>`, {
     buttons: [{ label: '📤 Share code', value: 'share', cls: 'blue' }, { label: 'Got it', value: null, cls: 'ghost' }], row: true,
-  }).then((r) => { if (r === 'share') shareText(`Play ${g.title} with me on Tidepop! Join code: ${code}\n${location.origin}${location.pathname}?ref=code`); });
+  }).then((r) => { if (r === 'share') shareText(`Play ${g.title} with me on Tidepop! Tap to join: ${location.origin}${location.pathname}?join=${code}&ref=code\n(or join with code ${code})`); });
 }
 
 async function versusPause(run) {

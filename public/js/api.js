@@ -449,14 +449,21 @@ export const matches = {
     return checkServer();
   },
 
-  async create(code, game, seed, opts) {
+  /** Open tables created on the same Wi-Fi as this phone (server mode only). */
+  async nearby(game) {
+    if (inArtifact() || (await sharedDb())) return [];
+    const r = await req('/nearby?' + new URLSearchParams({ playerId: load().playerId || '' }).toString(), {}, 4000);
+    return (Array.isArray(r.tables) ? r.tables : []).filter((t) => !game || t.game === game);
+  },
+
+  async create(code, game, seed, opts, nearby = true) {
     const sh = await sharedDb();
     if (sh) {
       await writeMine(sh, (doc) => { doc.matches[code] = { role: 'host', code, game, seed, opts, moves: [], at: Date.now() }; });
       return { ok: true };
     }
     const p = await ensureRegistered();
-    return req('/match', { method: 'POST', body: JSON.stringify({ action: 'create', code, game, seed, opts, playerId: p.playerId, token: p.token }) });
+    return req('/match', { method: 'POST', body: JSON.stringify({ action: 'create', code, game, seed, opts, nearby, playerId: p.playerId, token: p.token }) });
   },
 
   async join(code) {

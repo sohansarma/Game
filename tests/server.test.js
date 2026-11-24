@@ -4,6 +4,7 @@ import { mkdtempSync, rmSync, readFileSync, existsSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { createServer } from '../server/server.js';
+import { networkOf, clientIp } from '../server/api.js';
 import { Game } from '../public/js/engine.js';
 import { BlockGame } from '../public/js/blocks.js';
 import { dailyConfig, deepConfig, dayKey, weekKey, ENGINE_VERSION } from '../public/js/modes.js';
@@ -172,6 +173,40 @@ test('bad input handling', async () => {
   const big = await fetch(base + '/api/scores', { method: 'POST', body: 'x'.repeat(70000) }).catch(() => ({ status: 413 }));
   assert.equal(big.status, 413);
   assert.equal((await post('/api/unknown', {})).status, 404);
+});
+
+test('nearby tables: open tables from the same network are listed, nothing else', async () => {
+  const host = await register('Brave Puffin 81'), friend = await register('Sunny Orca 82'), third = await register('Swift Crab 83');
+  const call = (who, body) => post('/api/match', { ...body, playerId: who.playerId, token: who.token });
+  const near = async (who) => (await get(`/api/nearby?playerId=${who.playerId}`)).body.tables.map((t) => t.code);
+  assert.equal((await call(host, { action: 'create', code: 'NEAR2', game: 'ludo', seed: 5, opts: { hostColour: 2, players: 2 } })).status, 200);
+  assert.equal((await call(host, { action: 'create', code: 'HQDE2', game: 'ludo', seed: 6, opts: { players: 2 }, nearby: false })).status, 200);
+  const list = (await get(`/api/nearby?playerId=${friend.playerId}`)).body.tables;
+  const t = list.find((x) => x.code === 'NEAR2');
+  assert.ok(t, 'a table on the same network is listed');
+  assert.deepEqual([t.game, t.hostName, t.seated, t.players, t.hostColour], ['ludo', 'Brave Puffin 81', 1, 2, 2]);
+  assert.ok(!(await near(friend)).includes('HQDE2'), 'opted-out tables stay hidden');
+  assert.ok(!(await near(host)).includes('NEAR2'), "your own table isn't offered to you");
+  assert.equal((await call(friend, { action: 'join', code: 'NEAR2' })).status, 200);
+  assert.ok(!(await near(third)).includes('NEAR2'), 'a full table drops off the list');
+  // behind an untrusted proxy every client shares one address: no nearby list at all
+  const viaProxy = await fetch(base + `/api/nearby?playerId=${third.playerId}`, { headers: { 'x-forwarded-for': '198.51.100.4' } }).then((r) => r.json());
+  assert.deepEqual(viaProxy.tables, []);
+});
+
+test('network grouping for nearby tables', () => {
+  assert.equal(networkOf('203.0.113.7'), '203.0.113.7');
+  assert.equal(networkOf('::ffff:203.0.113.7'), '203.0.113.7');
+  assert.equal(networkOf('2001:db8:aa:1:1111:2222:3333:4444'), '2001:db8:aa:1::/64');
+  assert.equal(networkOf('2001:0db8:00aa:0001::9'), '2001:db8:aa:1::/64', 'two phones on one Wi-Fi share the /64');
+  assert.equal(networkOf('2001:db8::1'), '2001:db8:0:0::/64');
+  assert.equal(networkOf('fe80::1%wlan0'), 'fe80:0:0:0::/64');
+  assert.equal(networkOf('not-an-ip'), '');
+  assert.equal(networkOf(''), '');
+  const req = (h, a = '10.0.0.1') => ({ headers: h, socket: { remoteAddress: a } });
+  assert.equal(clientIp(req({ 'x-forwarded-for': '198.51.100.4, 10.1.1.1' }), true), '198.51.100.4');
+  assert.equal(clientIp(req({ 'cf-connecting-ip': '198.51.100.9', 'x-forwarded-for': '1.2.3.4' }), true), '198.51.100.9');
+  assert.equal(clientIp(req({ 'x-forwarded-for': '198.51.100.4' }), false), '10.0.0.1', 'headers are ignored unless the proxy is trusted');
 });
 
 test('online matches: create, join, append-only moves, resign', async () => {

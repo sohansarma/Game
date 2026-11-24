@@ -77,9 +77,39 @@ function rateLimiter({ capacity = 40, refillPerSec = 0.5 } = {}) {
   };
 }
 
+// Behind a proxy (Render, Fly…) the socket address is the proxy's, so with
+// TRUST_PROXY=1 the client address comes from the proxy's headers instead.
+export function clientIp(req, trustProxy = process.env.TRUST_PROXY === '1') {
+  if (trustProxy) {
+    const cf = req.headers['cf-connecting-ip'];
+    if (typeof cf === 'string' && cf.trim()) return cf.trim();
+    const xff = req.headers['x-forwarded-for'];
+    if (typeof xff === 'string' && xff.trim()) return xff.split(',')[0].trim();
+  }
+  return req.socket.remoteAddress || '';
+}
+
+/** The network a client is on: its IPv4 address (home Wi-Fi shares one
+ *  public address behind the router) or its IPv6 /64 (one per Wi-Fi). */
+export function networkOf(ip) {
+  let a = String(ip || '').trim().toLowerCase().replace(/^::ffff:(?=\d+\.)/, '').replace(/%.*$/, '');
+  if (!a) return '';
+  if (!a.includes(':')) return /^\d{1,3}(\.\d{1,3}){3}$/.test(a) ? a : '';
+  const [head, tail] = a.split('::');
+  const h = head ? head.split(':') : [], t = tail !== undefined && tail ? tail.split(':') : [];
+  const groups = tail === undefined ? h : [...h, ...Array(Math.max(0, 8 - h.length - t.length)).fill('0'), ...t];
+  if (groups.length !== 8 || !groups.every((g) => /^[0-9a-f]{1,4}$/.test(g))) return '';
+  return groups.slice(0, 4).map((g) => g.replace(/^0+(?=.)/, '')).join(':') + '::/64';
+}
+
 export function createApi(store, { now = () => new Date(), origin = process.env.ALLOWED_ORIGIN || '*', rate = {} } = {}) {
   const { db } = store;
   const limit = rateLimiter(rate);
+  // 'Nearby tables': which network each open table was created on. Kept only
+  // in memory, as a salted hash – network addresses are never written to disk.
+  const NEARBY_SALT = randomBytes(16).toString('hex');
+  const nearbyNet = new Map(); // match code -> network hash
+  const netHash = (ip) => { const n = networkOf(ip); return n ? sha(NEARBY_SALT + n).slice(0, 24) : ''; };
   const fail = (status, error) => Object.assign(new Error(error), { status });
   const accounts = createAccounts({ store, now, fail, players: db.players });
 
@@ -311,7 +341,24 @@ export function createApi(store, { now = () => new Date(), origin = process.env.
       hostReact: m.host.react || null, guestReact: m.guest?.react || null,
     };
   }
-  function handleMatch(body) {
+  function nearbyTables(ip, me) {
+    const net = netHash(ip);
+    if (!net) return [];
+    const t = Date.now();
+    const out = [];
+    for (const [code, h] of nearbyNet) {
+      const m = db.matches?.[code];
+      if (!m || h !== net || m.resigned || t - (m.made || m.at) > 3 * 3600000) { if (!m || m.resigned) nearbyNet.delete(code); continue; }
+      if (me && sideOf(m, me)) continue; // your own table, or one you're already at
+      const cap = m.game === 'ludo' ? Math.max(2, Math.min(4, m.opts.players || 2)) : 2;
+      const seated = 1 + (m.guest ? 1 : 0) + (m.extra || []).length;
+      if (seated >= cap) continue;
+      out.push({ code, game: m.game, hostName: db.players[m.host.pid]?.name || 'Host', seated, players: cap, rules: m.game === 'ludo' ? m.opts.rules : undefined, hostColour: m.opts.hostColour, made: m.made || m.at });
+    }
+    return out.sort((a, b) => b.made - a.made).slice(0, 12);
+  }
+
+  function handleMatch(body, ip = '') {
     const p = auth(body);
     void p;
     db.matches ||= {};
@@ -332,7 +379,9 @@ export function createApi(store, { now = () => new Date(), origin = process.env.
         const players = Math.max(2, Math.min(4, Number(body.opts?.players) || 2));
         const opts = body.game === 'chess' ? { hostSide: body.opts?.hostSide === 'b' ? 'b' : 'w' } : { bots: !!body.opts?.bots, hostColour: Number.isInteger(hc) && hc >= 0 && hc < 4 ? hc : 0, rules, players };
         if (Object.keys(db.matches).length > 5000) throw fail(503, 'too many open matches');
-        db.matches[code] = { code, game: body.game, seed, opts, host: { pid: body.playerId, moves: [] }, guest: null, at: now };
+        db.matches[code] = { code, game: body.game, seed, opts, host: { pid: body.playerId, moves: [] }, guest: null, at: now, made: now };
+        // listed for people on the same Wi-Fi unless the host opted out
+        if (body.nearby !== false) { const h = netHash(ip); if (h) { nearbyNet.set(code, h); if (nearbyNet.size > 5000) nearbyNet.delete(nearbyNet.keys().next().value); } }
         store.dirty();
         return { ok: true };
       }
@@ -498,7 +547,12 @@ export function createApi(store, { now = () => new Date(), origin = process.env.
 
   async function handle(req, res, url) {
     if (req.method === 'OPTIONS') return send(res, 204, {}, origin);
-    const ip = req.socket.remoteAddress || 'x';
+    const ip = clientIp(req) || 'x';
+    // Nearby needs the phone's real address. Behind a proxy without
+    // TRUST_PROXY every request looks like it comes from the proxy – that
+    // would make every table 'nearby', so it's switched off instead.
+    const behindProxy = !!(req.headers['x-forwarded-for'] || req.headers['cf-connecting-ip']);
+    const nearIp = process.env.TRUST_PROXY === '1' || !behindProxy ? ip : '';
     try {
       if (req.method === 'GET' && url.pathname === '/api/health') {
         return send(res, 200, { ok: true, v: ENGINE_VERSION }, origin);
@@ -547,6 +601,10 @@ export function createApi(store, { now = () => new Date(), origin = process.env.
         }
         const games = Object.values(db.creations || {}).map((r) => ugcSummary(r, me)).filter((g) => !g.underReview || g.mine);
         return send(res, 200, { games }, origin);
+      }
+      if (req.method === 'GET' && url.pathname === '/api/nearby') {
+        // open tables created on the same network as this request
+        return send(res, 200, { tables: nearbyTables(nearIp, url.searchParams.get('playerId')) }, origin);
       }
       if (req.method === 'GET' && url.pathname === '/api/match') {
         const code = url.searchParams.get('code');
@@ -612,7 +670,7 @@ export function createApi(store, { now = () => new Date(), origin = process.env.
           return send(res, 200, { ok: true }, origin);
         }
         case '/api/match':
-          return send(res, 200, handleMatch(body), origin);
+          return send(res, 200, handleMatch(body, nearIp), origin);
         case '/api/ugc':
           return send(res, 200, handleUgc(body), origin);
         case '/api/scores':

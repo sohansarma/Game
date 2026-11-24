@@ -13,3 +13,7 @@ services:
     envVars:
       - key: DATA_DIR
         value: ./data
+      # behind Render's proxy: read the client address from its headers
+      # (per-IP rate limit, and 'Nearby tables' for phones on the same Wi-Fi)
+      - key: TRUST_PROXY
+        value: "1"
